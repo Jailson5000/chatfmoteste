@@ -1201,6 +1201,60 @@ export function useConversations() {
     },
   });
 
+  // Fetch a single conversation by ID directly from the database
+  // Used for deep-links when the conversation isn't in the local paginated state
+  const fetchSingleConversation = useCallback(async (conversationId: string) => {
+    if (!lawFirm?.id) return null;
+    
+    const { data, error: rpcError } = await supabase
+      .rpc('get_conversations_with_metadata', {
+        _law_firm_id: lawFirm.id,
+        _limit: 1,
+        _offset: 0,
+        _include_archived: true,
+      });
+
+    if (rpcError) {
+      console.error('[fetchSingleConversation] RPC error:', rpcError);
+      return null;
+    }
+
+    // The RPC doesn't support filtering by ID, so we query directly
+    // Use a direct query with the same joins pattern
+    const { data: directData, error: directError } = await supabase
+      .from('conversations')
+      .select(`
+        *,
+        last_message:messages(content, created_at, message_type, is_from_me),
+        whatsapp_instance:whatsapp_instances(instance_name, display_name, phone_number),
+        current_automation:automations!conversations_current_automation_id_fkey(id, name),
+        assigned_profile:profiles!conversations_assigned_to_fkey(full_name),
+        client:clients(id, custom_status_id, avatar_url, custom_status:custom_statuses(id, name, color)),
+        department:departments(id, name, color)
+      `)
+      .eq('id', conversationId)
+      .eq('law_firm_id', lawFirm.id)
+      .order('created_at', { referencedTable: 'messages', ascending: false })
+      .limit(1, { referencedTable: 'messages' })
+      .maybeSingle();
+
+    if (directError || !directData) {
+      console.error('[fetchSingleConversation] Direct query error:', directError);
+      return null;
+    }
+
+    // Map to the same structure as mapRpcRowToConversation
+    const conv: any = {
+      ...directData,
+      last_message: Array.isArray(directData.last_message) ? directData.last_message[0] || null : directData.last_message,
+      unread_count: 0,
+      client_tags: [],
+      archived_by_name: null,
+    };
+
+    return conv as ConversationWithLastMessage;
+  }, [lawFirm?.id]);
+
   return {
     conversations,
     isLoading,
@@ -1224,5 +1278,7 @@ export function useConversations() {
     setAllConversations,
     registerOptimisticUpdate,
     clearOptimisticUpdateAfterDelay,
+    // Deep-link support
+    fetchSingleConversation,
   };
 }
