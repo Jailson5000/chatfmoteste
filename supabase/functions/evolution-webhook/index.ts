@@ -1171,6 +1171,28 @@ async function queueMessageForAIProcessing(
       });
     }
   } else {
+    // Check if there's already a processing item for this conversation
+    // If so, extend the debounce to wait for it to finish
+    const { data: processingItem } = await supabaseClient
+      .from('ai_processing_queue')
+      .select('id')
+      .eq('conversation_id', context.conversationId)
+      .eq('status', 'processing')
+      .maybeSingle();
+
+    let effectiveProcessAfter = processAfter;
+    if (processingItem) {
+      // There's already an item being processed — extend debounce to at least 15s
+      // so the new item waits for the current one to finish
+      const extendedDebounce = Math.max(debounceSeconds, 15);
+      effectiveProcessAfter = new Date(Date.now() + extendedDebounce * 1000).toISOString();
+      logDebug('DEBOUNCE', `Found processing item, extending debounce to ${extendedDebounce}s`, {
+        requestId,
+        processingId: processingItem.id,
+        effectiveProcessAfter,
+      });
+    }
+
     // Create new queue item
     const { data: newQueue, error: insertError } = await supabaseClient
       .from('ai_processing_queue')
@@ -1179,7 +1201,7 @@ async function queueMessageForAIProcessing(
         law_firm_id: context.lawFirmId,
         messages: [messageData],
         message_count: 1,
-        process_after: processAfter,
+        process_after: effectiveProcessAfter,
         metadata: {
           contact_name: context.contactName,
           contact_phone: context.contactPhone,
@@ -1193,10 +1215,11 @@ async function queueMessageForAIProcessing(
       .single();
 
     if (insertError) {
-      // Could be a race condition - another request created the queue
+      // Could be a race condition - another request created the queue,
+      // OR the new unique index blocked because there's already an active item
       if (insertError.code === '23505') { // unique constraint violation
-        logDebug('DEBOUNCE', 'Race condition: queue already exists, retrying update', { requestId });
-        // Retry as update
+        logDebug('DEBOUNCE', 'Race condition or active item exists, retrying as update', { requestId });
+        // Retry as update — there might be a pending item now
         await queueMessageForAIProcessing(supabaseClient, context, debounceSeconds, requestId);
       } else {
         logDebug('DEBOUNCE', 'Failed to create queue', { requestId, error: insertError });
@@ -1207,7 +1230,8 @@ async function queueMessageForAIProcessing(
       logDebug('DEBOUNCE', `Created new queue item`, {
         requestId,
         queueId: newQueue?.id,
-        processAfter,
+        processAfter: effectiveProcessAfter,
+        waitingForProcessing: !!processingItem,
       });
     }
   }
@@ -1333,6 +1357,28 @@ async function processQueuedMessages(
 ): Promise<void> {
   const now = new Date().toISOString();
 
+  // SAFETY NET: Cleanup items stuck in 'processing' for more than 2 minutes
+  // This prevents permanent queue locks from crashed processes
+  const { data: stuckItems } = await supabaseClient
+    .from('ai_processing_queue')
+    .update({ 
+      status: 'failed', 
+      error_message: 'Timeout: stuck in processing for over 2 minutes',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('conversation_id', conversationId)
+    .eq('status', 'processing')
+    .lt('processing_started_at', new Date(Date.now() - 120000).toISOString())
+    .select('id');
+
+  if (stuckItems && stuckItems.length > 0) {
+    logDebug('DEBOUNCE', `Cleaned up ${stuckItems.length} stuck processing items`, {
+      requestId,
+      conversationId,
+      stuckIds: stuckItems.map((i: any) => i.id),
+    });
+  }
+
   // ATOMIC LOCK: Update status to 'processing' and return the item in a single operation
   // This prevents race conditions where multiple schedulers could process the same item
   // The .select() returns the updated row(s), so we know we got the lock if data is returned
@@ -1413,6 +1459,25 @@ async function processQueuedMessages(
       queueId: queueItem.id,
       messageCount: queueItem.message_count,
     });
+
+    // SEQUENTIAL PROCESSING: Check if a new pending item arrived during processing
+    // and process it immediately (not in parallel) to avoid duplicate responses
+    const { data: nextPending } = await supabaseClient
+      .from('ai_processing_queue')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('status', 'pending')
+      .lte('process_after', new Date().toISOString())
+      .maybeSingle();
+
+    if (nextPending) {
+      logDebug('DEBOUNCE', `Found next pending item after completion, processing sequentially`, {
+        requestId,
+        nextQueueId: nextPending.id,
+        conversationId,
+      });
+      await processQueuedMessages(supabaseClient, conversationId, requestId);
+    }
 
   } catch (error) {
     logDebug('DEBOUNCE', 'Error processing queued messages', {
