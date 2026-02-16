@@ -123,7 +123,7 @@ function mapRpcRowToConversation(row: any): ConversationWithLastMessage {
 export function useConversations() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const { lawFirm } = useLawFirm();
+  const { lawFirm, isLoading: isLawFirmLoading } = useLawFirm();
   const { hasFullAccess, departmentIds: userDeptIds, userId, isLoading: permissionsLoading } = useUserDepartments();
   
   // Pagination state
@@ -324,7 +324,7 @@ export function useConversations() {
     });
   }, [allConversations, hasFullAccess, userDeptIds, userId]);
 
-  const isLoading = dataLoading || permissionsLoading;
+  const isLoading = dataLoading || permissionsLoading || isLawFirmLoading;
 
   // ============================================================================
   // REALTIME: Handled by RealtimeSyncContext (centralized)
