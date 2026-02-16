@@ -668,12 +668,15 @@ export default function Conversations() {
 
   // Handle deep-link via query params (?id=conversationId or ?phone=number&name=name)
   useEffect(() => {
-    if (isLoading || !conversations.length) return;
+    if (isLoading) return;
     
     const idParam = searchParams.get("id");
     const phoneParam = searchParams.get("phone");
     const nameParam = searchParams.get("name");
     const connectionIdParam = searchParams.get("connectionId");
+    
+    // For phone/name lookups we need conversations loaded; for id deep-link we don't
+    if (!idParam && !conversations.length) return;
     
     // Clear params after processing to avoid re-triggering
     const clearParams = () => {
