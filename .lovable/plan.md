@@ -1,41 +1,71 @@
 
-# Correcao: "Expandir Conversa" do Kanban nao abre conversas antigas
+# Correcao: Deep-link do Kanban falha ao abrir conversas
 
-## Problema Identificado
+## Bugs Identificados
 
-Quando voce clica em "Expandir conversa" no Kanban, o sistema navega para `/conversations?id={conversationId}`. A pagina de Conversas carrega apenas as **primeiras 30 conversas** (batch de paginacao). O codigo que processa o deep-link faz:
+### Bug 1 (CRITICO): Chamada RPC desnecessaria aborta a funcao
+
+Em `fetchSingleConversation` (useConversations.tsx, linhas 1209-1220), existe uma chamada RPC **completamente inutil** que:
+
+1. Busca 1 conversa aleatoria do banco (sem filtrar pelo ID desejado)
+2. Ignora o resultado retornado
+3. **Se o RPC falhar por qualquer motivo, a funcao retorna `null` ANTES de tentar a busca direta real**
 
 ```text
-conversations.find(c => c.id === idParam)
+fetchSingleConversation(id)
+  |
+  v
+  RPC get_conversations_with_metadata (limit=1) -- INUTIL, resultado ignorado
+  |
+  +--> Se erro RPC --> return null  <-- ABORTA AQUI
+  |
+  v
+  Query direta com .eq('id', conversationId)  -- Nunca chega se RPC falhou
 ```
 
-Se a conversa nao esta nessas 30 primeiras (porque e antiga ou esta em outro status/filtro), ela **nao e encontrada**, a selecao falha silenciosamente, e o parametro `?id=` e removido da URL. Resultado: o usuario cai na pagina de Conversas sem nenhuma conversa aberta.
+Isso explica o toast "Conversa nao encontrada" - a funcao nem chega a buscar a conversa real.
 
-## Solucao
+### Bug 2: Guard condition impede execucao quando aba "Fila" esta vazia
 
-Quando o `?id=` nao e encontrado no array local de conversas, fazer uma **busca direta no banco** por aquele ID especifico e injetar a conversa no estado local antes de seleciona-la.
+Na linha 671 de Conversations.tsx:
+```text
+if (isLoading || !conversations.length) return;
+```
 
-## Mudancas Necessarias
+Se o usuario cai na aba "Fila" que tem 0 conversas (como mostrado no screenshot), e o array `conversations` (filtrado por departamento) estiver vazio naquele instante, o effect nunca roda. O `?id=` fica na URL mas nada acontece.
 
-### 1. `src/hooks/useConversations.tsx`
-- Adicionar uma funcao `fetchSingleConversation(id)` que busca uma conversa especifica do banco via RPC ou query direta, usando a mesma estrutura de dados do batch normal.
-- Exportar essa funcao para uso externo.
+---
 
-### 2. `src/pages/Conversations.tsx` (deep-link effect, ~linha 688)
-- Alterar a logica do `if (idParam)`:
-  - Se `conversations.find(...)` encontrar: comportamento atual (seleciona direto).
-  - Se **nao encontrar**: chamar `fetchSingleConversation(idParam)`.
-  - Se a busca retornar resultado: injetar no array de conversas via `setAllConversations`, selecionar e abrir.
-  - Se nao retornar: exibir toast informando que a conversa nao foi encontrada.
-  - Mover o `clearParams()` para **depois** da resolucao (dentro do `.then()`), nao antes.
+## Correcoes
 
-### 3. Mudanca na tab ativa
-- Ao encontrar a conversa via busca direta, definir `activeTab` para `"all"` (ou `"queue"`) para garantir que ela apareca na lista, independente do filtro ativo.
+### 1. `src/hooks/useConversations.tsx` - Remover RPC inutil
 
-## Detalhes Tecnicos
+Remover completamente as linhas 1209-1220 (a chamada RPC que busca 1 conversa aleatoria e pode abortar a funcao). Manter apenas a query direta que realmente busca pelo ID.
 
-A funcao `fetchSingleConversation` usara a mesma query do `fetchConversations` existente, mas com filtro `eq('id', conversationId)` em vez de paginacao. Isso garante que o objeto retornado tenha a mesma estrutura (joins com `last_message`, `assigned_profile`, `whatsapp_instance`, `client`, etc.).
+Antes:
+```text
+fetchSingleConversation(id)
+  -> RPC (pode falhar e abortar)
+  -> Query direta (pode nunca executar)
+```
+
+Depois:
+```text
+fetchSingleConversation(id)
+  -> Query direta com .eq('id', conversationId)
+```
+
+### 2. `src/pages/Conversations.tsx` - Corrigir guard do deep-link
+
+Mudar a guard condition para permitir que o deep-link rode mesmo quando nao ha conversas carregadas:
+
+```text
+Antes: if (isLoading || !conversations.length) return;
+Depois: Separar: se tem idParam, so precisamos que isLoading seja false (nao depende de conversations carregadas). Para phone/name, manter o guard original.
+```
+
+---
 
 ## Risco
 
-**Baixo**. A mudanca so afeta o fluxo de deep-link (`?id=`). O carregamento normal da lista nao e alterado. Nenhuma migration de banco necessaria.
+**Zero**. Estamos removendo codigo morto (RPC inutil) e relaxando uma guard condition para o caso especifico do deep-link. O fluxo normal de carregamento de conversas nao e afetado.
