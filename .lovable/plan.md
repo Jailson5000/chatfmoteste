@@ -1,51 +1,37 @@
 
-# Correção: Erro PGRST200 no fetchSingleConversation
+# Correção: Departamento não atualiza visualmente na sidebar
 
 ## Causa Raiz
 
-O log mostra um **novo erro** diferente do anterior:
+Bug na atualização otimista do `updateConversationDepartment` dentro de `useConversations.tsx`.
 
+O código busca departamentos do cache do React Query usando a chave **errada**:
+
+```text
+ERRADO:  queryClient.getQueryData(["departments"])       --> undefined
+CORRETO: queryClient.getQueryData(["departments", lawFirm?.id])
 ```
-PGRST200: Could not find a relationship between 'conversations' and 'profiles'
-```
 
-A FK `conversations_assigned_to_fkey` aponta para `auth.users(id)`, **NÃO** para `public.profiles`. O PostgREST não consegue fazer o join implícito `profiles!conversations_assigned_to_fkey` porque a FK não referencia essa tabela.
+O `useDepartments` armazena os dados com a chave `["departments", lawFirmId]`, mas a atualização otimista procura em `["departments"]` (sem o ID do tenant). Como o resultado é sempre `undefined`, o campo `department` (o objeto com nome e cor) fica `null` na atualização otimista.
 
-O RPC `get_conversations_with_metadata` funciona porque usa SQL direto (`LEFT JOIN profiles p ON p.id = c.assigned_to`), sem depender de FK.
+**Consequência**: O card na sidebar perde o badge de departamento imediatamente após a mudança. Após 3 segundos (quando expira o lock otimista), o refetch traz o dado correto, mas a experiência visual é ruim -- o badge desaparece e reaparece.
 
 ## Correção
 
-### Arquivo: `src/hooks/useConversations.tsx` (~linha 1210-1242)
+### Arquivo: `src/hooks/useConversations.tsx` (~linha 715)
 
-1. **Remover** o join `assigned_profile:profiles!conversations_assigned_to_fkey(full_name)` da query `.select()`
-2. **Após** obter o resultado, buscar o profile separadamente se `assigned_to` existir:
-
-```text
-// Pseudo-código:
-const directData = await supabase.from('conversations').select(`
-  *,
-  last_message:messages(...),
-  whatsapp_instance:whatsapp_instances!conversations_whatsapp_instance_id_fkey(...),
-  current_automation:automations!conversations_current_automation_id_fkey(...),
-  client:clients(...),
-  department:departments(...)
-`).eq('id', conversationId)...
-
-// Buscar profile separado se assigned_to existe
-let assignedProfile = null;
-if (directData.assigned_to) {
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('full_name')
-    .eq('id', directData.assigned_to)
-    .maybeSingle();
-  assignedProfile = profile;
-}
-
-// Montar resultado com assigned_profile
-return { ...directData, assigned_profile: assignedProfile };
+Trocar:
+```typescript
+const cachedDepartments = queryClient.getQueryData<any[]>(["departments"]);
 ```
+
+Por:
+```typescript
+const cachedDepartments = queryClient.getQueryData<any[]>(["departments", lawFirm?.id]);
+```
+
+Isso permite que a atualização otimista encontre o departamento no cache e construa o objeto `{ id, name, color }` corretamente, mantendo o badge visível durante toda a transição.
 
 ## Risco
 
-**Zero**. Removemos um join que nunca funcionou (FK aponta para auth.users, não profiles) e substituímos por uma busca direta que funciona. O fluxo principal via RPC não é afetado.
+**Zero**. Apenas corrige a chave de leitura do cache. Nenhuma outra lógica é afetada.
