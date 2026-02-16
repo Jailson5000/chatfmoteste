@@ -1,80 +1,125 @@
 
-# Correção: Áudios se sobrescrevendo na conversa
+# Análise: Extração de Imagem de Perfil dos Leads
 
-## Problemas identificados
+## Situação Atual (Dados Reais)
 
-### 1. `handleReply` invalida `memo(MessageBubble)` a cada mensagem
-Em `src/pages/Conversations.tsx` (linha 936-941), o callback `handleReply` depende de `[messages]`. Como `messages` muda a cada evento Realtime, **todos** os `MessageBubble` (e seus `AudioPlayer`) re-renderizam desnecessariamente, causando re-execução dos efeitos de descriptografia.
+| Métrica | Valor |
+|---------|-------|
+| Total de clientes | 1.045 |
+| Com avatar | 257 (24,6%) |
+| Sem avatar | 788 (75,4%) |
 
-### 2. Efeito de descriptografia sem cancelamento (AudioPlayer e KanbanAudioPlayer)
-Os `useEffect` de descriptografia em ambos os players não possuem flag de abort. Re-renders rápidos disparam múltiplas chamadas à API, e respostas fora de ordem podem sobrescrever o áudio correto com o de outra mensagem.
+Das 257 fotos existentes: 255 vêm do WhatsApp (pps.whatsapp.net), 1 do Instagram e 1 de outra fonte.
 
-## Correções
+## Como Funciona Hoje
 
-### Arquivo 1: `src/pages/Conversations.tsx` (linhas 936-941)
+### WhatsApp (Evolution API)
+- A foto de perfil **só é buscada quando um cliente NOVO é criado** (primeiro contato).
+- Se o cliente já existia (ex: conversa anterior) e não tinha foto, **nunca mais tenta buscar**.
+- Existe um botão manual "Atualizar Foto" no painel de detalhes do contato.
+- As URLs salvas apontam diretamente para `pps.whatsapp.net` -- URLs que **expiram** após alguns dias/semanas, quebrando a exibição.
 
-Estabilizar `handleReply` usando `useRef` para evitar re-renders em cascata:
+### Instagram / Facebook (Meta Webhook)
+- Busca nome + `profile_pic` via Graph API ao criar/atualizar o cliente.
+- Funciona, mas depende de **Advanced Access** e o campo `profile_pic` nem sempre retorna (fallback busca só `name`).
+- Resultado: apenas 1 avatar de Instagram no banco.
 
-```typescript
-// Adicionar ref antes do callback:
-const messagesRef = useRef(messages);
-messagesRef.current = messages;
+### WhatsApp Cloud API
+- **Não busca foto de perfil** atualmente. O meta-webhook trata como canal Meta genérico sem lógica específica de avatar WhatsApp Cloud.
 
-const handleReply = useCallback((messageId: string) => {
-  const message = messagesRef.current.find(m => m.id === messageId);
-  if (message) {
-    setReplyToMessage(message as any);
+## Problemas Identificados
+
+### 1. Foto só é buscada para clientes NOVOS
+Clientes que já existiam quando o recurso foi implementado (~75% do banco) nunca tiveram suas fotos buscadas. Mensagens subsequentes de clientes existentes não disparam nova busca.
+
+### 2. URLs do WhatsApp expiram
+As URLs `pps.whatsapp.net` expiram periodicamente. O sistema salva a URL direta sem persistir a imagem no Storage, resultando em avatares quebrados ao longo do tempo.
+
+### 3. Sem re-tentativa para clientes existentes sem avatar
+Quando um cliente existente (sem avatar) envia uma nova mensagem, o webhook encontra a conversa e o cliente já existentes e pula a lógica de busca de foto.
+
+## Plano de Correção
+
+### Etapa 1: Buscar avatar para clientes existentes sem foto (evolution-webhook)
+
+No fluxo do webhook, após encontrar uma conversa com cliente existente, adicionar uma verificação: se `client.avatar_url` é `null`, buscar a foto em background.
+
+**Arquivo**: `supabase/functions/evolution-webhook/index.ts`
+
+Na seção onde a conversa já existe e tem `client_id` (após linha ~4496), adicionar:
+
+```text
+// Se o cliente existe mas não tem avatar, tentar buscar em background
+if (conversation.client_id) {
+  const { data: clientData } = await supabaseClient
+    .from('clients')
+    .select('avatar_url')
+    .eq('id', conversation.client_id)
+    .maybeSingle();
+  
+  if (clientData && !clientData.avatar_url) {
+    fetchAndUpdateProfilePicture(
+      supabaseClient, instance, phoneNumber, conversation.client_id
+    ).catch(err => logDebug('AVATAR', 'Background retry failed', { error: String(err) }));
   }
-}, []); // Sem dependência em messages
+}
 ```
 
-### Arquivo 2: `src/components/conversations/MessageBubble.tsx` (linhas 127-183)
+Isso cobre a grande maioria dos 788 clientes sem foto -- assim que enviarem uma nova mensagem, o avatar será buscado automaticamente.
 
-Adicionar flag `cancelled` no useEffect de descriptografia:
+### Etapa 2: Persistir imagem no Storage (evitar URLs expiradas)
 
-```typescript
-useEffect(() => {
-  if (!needsDecryption) return;
-  let cancelled = false;
+Modificar a função `fetchAndUpdateProfilePicture` para:
+1. Baixar a imagem da URL do WhatsApp
+2. Salvar no bucket `chat-media` (já existe e é público)
+3. Salvar a URL pública do Storage no banco em vez da URL temporária
 
-  const loadAudio = async () => {
-    // ... cache checks (sem mudança) ...
-    const response = await supabase.functions.invoke(...);
-    if (cancelled) return; // Ignorar se efeito foi limpo
-    // ... resto da lógica ...
-  };
+**Arquivo**: `supabase/functions/evolution-webhook/index.ts` (função `fetchAndUpdateProfilePicture`)
 
-  loadAudio();
-  cleanupOldCache();
-  return () => { cancelled = true; };
-}, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
+```text
+// Após obter profilePicUrl do WhatsApp:
+// 1. Baixar a imagem
+const imageResponse = await fetch(profilePicUrl);
+const imageBuffer = await imageResponse.arrayBuffer();
+const contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
+
+// 2. Upload para o Storage
+const filePath = `${lawFirmId}/avatars/${clientId}.jpg`;
+const { error: uploadError } = await supabaseClient.storage
+  .from('chat-media')
+  .upload(filePath, imageBuffer, { contentType, upsert: true });
+
+// 3. Gerar URL pública permanente
+const { data: urlData } = supabaseClient.storage
+  .from('chat-media')
+  .getPublicUrl(filePath);
+
+// 4. Salvar URL permanente no banco
+await supabaseClient.from('clients')
+  .update({ avatar_url: urlData.publicUrl })
+  .eq('id', clientId);
 ```
 
-### Arquivo 3: `src/components/kanban/KanbanChatPanel.tsx` (linhas 180-231)
+Isso também precisa ser aplicado na action `fetch_profile_picture` do `evolution-api/index.ts` (botão manual).
 
-Mesma correção de abort no KanbanAudioPlayer:
+### Etapa 3: Aplicar a mesma lógica no evolution-api (action manual)
 
-```typescript
-useEffect(() => {
-  if (!needsDecryption) return;
-  let cancelled = false;
+**Arquivo**: `supabase/functions/evolution-api/index.ts` (case `fetch_profile_picture`)
 
-  const loadAudio = async () => {
-    // ... cache checks ...
-    const response = await supabase.functions.invoke(...);
-    if (cancelled) return;
-    // ... resto ...
-  };
+Mesma lógica: baixar imagem, salvar no Storage, retornar URL permanente.
 
-  loadAudio();
-  cleanupOldCache();
-  return () => { cancelled = true; };
-}, [needsDecryption, whatsappMessageId, conversationId, mimeType]);
-```
+## Escopo e Impacto
 
-## Risco
+- **Etapa 1**: Resolve o problema principal (75% dos leads sem foto). Sem risco -- fire-and-forget.
+- **Etapa 2**: Resolve a expiração de URLs. Risco baixo -- usa bucket existente (`chat-media`).
+- **Etapa 3**: Consistência entre busca automática e manual.
 
-**Zero**. As mudanças são aditivas e isoladas:
-- A ref é um padrão React comum para estabilizar callbacks
-- O abort apenas ignora resultados de chamadas já canceladas
-- Nenhuma lógica existente é alterada
+## Limitações Inerentes
+
+- ~15-20% dos usuários do WhatsApp bloqueiam foto de perfil por privacidade -- esses nunca terão avatar.
+- Instagram/Facebook dependem de Advanced Access para fotos.
+- WhatsApp Cloud API não expõe endpoint de foto de perfil facilmente.
+
+## Resultado Esperado
+
+Com as 3 etapas, a cobertura de avatares deve subir de **~25% para ~65-80%** (limitado apenas pela privacidade dos usuários), e as fotos não expirarão mais.
