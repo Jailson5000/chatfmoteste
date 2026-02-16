@@ -1215,12 +1215,38 @@ async function queueMessageForAIProcessing(
       .single();
 
     if (insertError) {
-      // Could be a race condition - another request created the queue,
-      // OR the new unique index blocked because there's already an active item
       if (insertError.code === '23505') { // unique constraint violation
-        logDebug('DEBOUNCE', 'Race condition or active item exists, retrying as update', { requestId });
-        // Retry as update — there might be a pending item now
-        await queueMessageForAIProcessing(supabaseClient, context, debounceSeconds, requestId);
+        // Already a pending item exists — append message to it instead of recursion
+        logDebug('DEBOUNCE', 'Duplicate key on insert, appending to existing pending item', { requestId });
+        const { data: existingPending } = await supabaseClient
+          .from('ai_processing_queue')
+          .select('id, messages, message_count')
+          .eq('conversation_id', context.conversationId)
+          .eq('status', 'pending')
+          .maybeSingle();
+        
+        if (existingPending) {
+          const existingMessages = Array.isArray(existingPending.messages) ? existingPending.messages : [];
+          const updatedMessages = [...existingMessages, messageData];
+          await supabaseClient
+            .from('ai_processing_queue')
+            .update({
+              messages: updatedMessages,
+              message_count: updatedMessages.length,
+              last_message_at: new Date().toISOString(),
+              process_after: effectiveProcessAfter, // reset debounce
+            })
+            .eq('id', existingPending.id);
+          logDebug('DEBOUNCE', 'Appended message to existing pending item', {
+            requestId,
+            queueId: existingPending.id,
+            newCount: updatedMessages.length,
+          });
+        } else {
+          // No pending found — there's a processing item active.
+          // The message will be covered by the nextPending check after processing completes.
+          logDebug('DEBOUNCE', 'No pending item found after 23505 — processing item active, message will be picked up after completion', { requestId });
+        }
       } else {
         logDebug('DEBOUNCE', 'Failed to create queue', { requestId, error: insertError });
         // Fallback: process immediately
@@ -1461,21 +1487,29 @@ async function processQueuedMessages(
     });
 
     // SEQUENTIAL PROCESSING: Check if a new pending item arrived during processing
-    // and process it immediately (not in parallel) to avoid duplicate responses
+    // Find ANY pending item (don't filter by process_after — we'll wait for the debounce)
     const { data: nextPending } = await supabaseClient
       .from('ai_processing_queue')
-      .select('id')
+      .select('id, process_after')
       .eq('conversation_id', conversationId)
       .eq('status', 'pending')
-      .lte('process_after', new Date().toISOString())
       .maybeSingle();
 
     if (nextPending) {
+      // Wait for the remaining debounce time before processing
+      const waitMs = Math.max(0, new Date(nextPending.process_after).getTime() - Date.now());
+      
       logDebug('DEBOUNCE', `Found next pending item after completion, processing sequentially`, {
         requestId,
         nextQueueId: nextPending.id,
         conversationId,
+        waitMs,
       });
+
+      if (waitMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitMs));
+      }
+
       await processQueuedMessages(supabaseClient, conversationId, requestId);
     }
 
