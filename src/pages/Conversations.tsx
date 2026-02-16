@@ -932,13 +932,16 @@ export default function Conversations() {
     }
   }, [isLoading, conversations, searchParams, setSearchParams, lawFirm?.id, connectedInstances, user?.id, queryClient, toast]);
 
-  // Handle reply
+  // Handle reply - use ref to avoid re-creating callback on every messages change
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
   const handleReply = useCallback((messageId: string) => {
-    const message = messages.find(m => m.id === messageId);
+    const message = messagesRef.current.find(m => m.id === messageId);
     if (message) {
       setReplyToMessage(message as any);
     }
-  }, [messages]);
+  }, []);
 
   // Clear state when no conversation selected
   useEffect(() => {
