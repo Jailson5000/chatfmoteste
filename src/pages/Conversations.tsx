@@ -197,6 +197,7 @@ export default function Conversations() {
     setAllConversations,
     registerOptimisticUpdate,
     clearOptimisticUpdateAfterDelay,
+    fetchSingleConversation,
   } = useConversations();
   const { counts: tabCounts } = useConversationCounts();
   const { members: teamMembers } = useTeamMembers();
@@ -690,9 +691,31 @@ export default function Conversations() {
       if (conv) {
         setSelectedConversationId(idParam);
         setShowMobileChat(true);
-        setActiveTab("queue"); // Show all to ensure it's visible
+        setActiveTab("all"); // Show all to ensure it's visible
+        clearParams();
+      } else {
+        // Conversation not in local state (older or filtered out) - fetch from DB
+        fetchSingleConversation(idParam).then((fetchedConv) => {
+          if (fetchedConv) {
+            // Inject into local state so it appears in the list
+            setAllConversations(prev => {
+              const exists = prev.some(c => c.id === fetchedConv.id);
+              if (exists) return prev;
+              return [fetchedConv, ...prev];
+            });
+            setSelectedConversationId(idParam);
+            setShowMobileChat(true);
+            setActiveTab("all");
+          } else {
+            toast({
+              title: "Conversa não encontrada",
+              description: "A conversa solicitada não foi encontrada ou foi removida.",
+              variant: "destructive",
+            });
+          }
+          clearParams();
+        });
       }
-      clearParams();
       return;
     }
     
