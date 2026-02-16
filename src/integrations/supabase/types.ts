@@ -3945,6 +3945,99 @@ export type Database = {
           },
         ]
       }
+      messages_archive: {
+        Row: {
+          ai_agent_id: string | null
+          ai_agent_name: string | null
+          ai_generated: boolean
+          archived_at: string
+          client_reaction: string | null
+          content: string | null
+          conversation_id: string
+          created_at: string
+          delivered_at: string | null
+          external_id: string | null
+          id: string
+          is_from_me: boolean
+          is_internal: boolean
+          is_pontual: boolean | null
+          is_revoked: boolean | null
+          is_starred: boolean | null
+          law_firm_id: string | null
+          media_mime_type: string | null
+          media_url: string | null
+          message_type: string
+          my_reaction: string | null
+          read_at: string | null
+          reply_to_message_id: string | null
+          revoked_at: string | null
+          sender_id: string | null
+          sender_type: string
+          status: string | null
+          whatsapp_message_id: string | null
+        }
+        Insert: {
+          ai_agent_id?: string | null
+          ai_agent_name?: string | null
+          ai_generated?: boolean
+          archived_at?: string
+          client_reaction?: string | null
+          content?: string | null
+          conversation_id: string
+          created_at?: string
+          delivered_at?: string | null
+          external_id?: string | null
+          id?: string
+          is_from_me?: boolean
+          is_internal?: boolean
+          is_pontual?: boolean | null
+          is_revoked?: boolean | null
+          is_starred?: boolean | null
+          law_firm_id?: string | null
+          media_mime_type?: string | null
+          media_url?: string | null
+          message_type?: string
+          my_reaction?: string | null
+          read_at?: string | null
+          reply_to_message_id?: string | null
+          revoked_at?: string | null
+          sender_id?: string | null
+          sender_type: string
+          status?: string | null
+          whatsapp_message_id?: string | null
+        }
+        Update: {
+          ai_agent_id?: string | null
+          ai_agent_name?: string | null
+          ai_generated?: boolean
+          archived_at?: string
+          client_reaction?: string | null
+          content?: string | null
+          conversation_id?: string
+          created_at?: string
+          delivered_at?: string | null
+          external_id?: string | null
+          id?: string
+          is_from_me?: boolean
+          is_internal?: boolean
+          is_pontual?: boolean | null
+          is_revoked?: boolean | null
+          is_starred?: boolean | null
+          law_firm_id?: string | null
+          media_mime_type?: string | null
+          media_url?: string | null
+          message_type?: string
+          my_reaction?: string | null
+          read_at?: string | null
+          reply_to_message_id?: string | null
+          revoked_at?: string | null
+          sender_id?: string | null
+          sender_type?: string
+          status?: string | null
+          whatsapp_message_id?: string | null
+        }
+        Relationships: []
+      }
       meta_connections: {
         Row: {
           access_token: string
@@ -6036,6 +6129,10 @@ export type Database = {
     }
     Functions: {
       approve_addon_request: { Args: { _request_id: string }; Returns: Json }
+      archive_old_messages: {
+        Args: { _batch_size?: number; _days_threshold?: number }
+        Returns: Json
+      }
       check_company_limit: {
         Args: { _increment?: number; _law_firm_id: string; _limit_type: string }
         Returns: Json
