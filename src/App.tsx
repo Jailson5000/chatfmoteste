@@ -1,3 +1,4 @@
+import React, { Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -11,6 +12,9 @@ import { AdminAuthProvider } from "@/hooks/useAdminAuth";
 import { TenantProvider } from "@/hooks/useTenant";
 import { RealtimeSyncProvider } from "@/contexts/RealtimeSyncContext";
 import { TabSessionProvider } from "@/contexts/TabSessionContext";
+import { Loader2 } from "lucide-react";
+
+// Synchronous imports — frequently used pages (instant load)
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import AuthCallback from "./pages/AuthCallback";
@@ -25,48 +29,63 @@ import Contacts from "./pages/Contacts";
 import Connections from "./pages/Connections";
 import AIAgents from "./pages/AIAgents";
 import AIAgentEdit from "./pages/AIAgentEdit";
-import KnowledgeBase from "./pages/KnowledgeBase";
-import AIVoice from "./pages/AIVoice";
-import Profile from "./pages/Profile";
-import Register from "./pages/Register";
-import PaymentSuccess from "./pages/PaymentSuccess";
-import NotFound from "./pages/NotFound";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
-import TermsOfService from "./pages/TermsOfService";
-import AgendaPro from "./pages/AgendaPro";
-import PublicBooking from "./pages/PublicBooking";
-import ConfirmAppointment from "./pages/ConfirmAppointment";
 import Tasks from "./pages/Tasks";
 import Onboarding from "./pages/Onboarding";
-// Admin pages removed - functionality moved to Settings
-import {
-  GlobalAdminAuth,
-  GlobalAdminDashboard,
-  GlobalAdminCompanies,
-  GlobalAdminConnections,
-  GlobalAdminPlans,
-  GlobalAdminPayments,
-  GlobalAdminUsers,
-  GlobalAdminMonitoring,
-  GlobalAdminSettings,
-  GlobalAdminN8NSettings,
-  GlobalAdminAIAPIs,
-  GlobalAdminAuditLogs,
-  GlobalAdminProvisioningDashboard,
-  GlobalAdminAlertHistory,
-  GlobalAdminTemplateBase,
-  GlobalAdminAgentTemplates,
-  GlobalAdminTickets,
-  GlobalAdminTutorials,
-  GlobalAdminOnboarding,
-} from "./pages/global-admin";
-import Support from "./pages/Support";
-import Tutorials from "./pages/Tutorials";
-import MetaTestPage from "./pages/admin/MetaTestPage";
+import NotFound from "./pages/NotFound";
+
+// Lazy imports — secondary pages (loaded on demand)
+const AgendaPro = React.lazy(() => import("./pages/AgendaPro"));
+const KnowledgeBase = React.lazy(() => import("./pages/KnowledgeBase"));
+const AIVoice = React.lazy(() => import("./pages/AIVoice"));
+const Profile = React.lazy(() => import("./pages/Profile"));
+const Register = React.lazy(() => import("./pages/Register"));
+const PaymentSuccess = React.lazy(() => import("./pages/PaymentSuccess"));
+const PrivacyPolicy = React.lazy(() => import("./pages/PrivacyPolicy"));
+const TermsOfService = React.lazy(() => import("./pages/TermsOfService"));
+const PublicBooking = React.lazy(() => import("./pages/PublicBooking"));
+const ConfirmAppointment = React.lazy(() => import("./pages/ConfirmAppointment"));
+const Support = React.lazy(() => import("./pages/Support"));
+const Tutorials = React.lazy(() => import("./pages/Tutorials"));
+const MetaTestPage = React.lazy(() => import("./pages/admin/MetaTestPage"));
+
+// Lazy imports — Global Admin pages (accessed by <0.1% of users)
+const GlobalAdminAuth = React.lazy(() => import("./pages/global-admin/GlobalAdminAuth"));
+const GlobalAdminDashboard = React.lazy(() => import("./pages/global-admin/GlobalAdminDashboard"));
+const GlobalAdminCompanies = React.lazy(() => import("./pages/global-admin/GlobalAdminCompanies"));
+const GlobalAdminConnections = React.lazy(() => import("./pages/global-admin/GlobalAdminConnections"));
+const GlobalAdminPlans = React.lazy(() => import("./pages/global-admin/GlobalAdminPlans"));
+const GlobalAdminPayments = React.lazy(() => import("./pages/global-admin/GlobalAdminPayments"));
+const GlobalAdminUsers = React.lazy(() => import("./pages/global-admin/GlobalAdminUsers"));
+const GlobalAdminMonitoring = React.lazy(() => import("./pages/global-admin/GlobalAdminMonitoring"));
+const GlobalAdminSettings = React.lazy(() => import("./pages/global-admin/GlobalAdminSettings"));
+const GlobalAdminN8NSettings = React.lazy(() => import("./pages/global-admin/GlobalAdminN8NSettings"));
+const GlobalAdminAIAPIs = React.lazy(() => import("./pages/global-admin/GlobalAdminAIAPIs"));
+const GlobalAdminAuditLogs = React.lazy(() => import("./pages/global-admin/GlobalAdminAuditLogs"));
+const GlobalAdminProvisioningDashboard = React.lazy(() => import("./pages/global-admin/GlobalAdminProvisioningDashboard"));
+const GlobalAdminAlertHistory = React.lazy(() => import("./pages/global-admin/GlobalAdminAlertHistory"));
+const GlobalAdminTemplateBase = React.lazy(() => import("./pages/global-admin/GlobalAdminTemplateBase"));
+const GlobalAdminAgentTemplates = React.lazy(() => import("./pages/global-admin/GlobalAdminAgentTemplates"));
+const GlobalAdminTickets = React.lazy(() => import("./pages/global-admin/GlobalAdminTickets"));
+const GlobalAdminTutorials = React.lazy(() => import("./pages/global-admin/GlobalAdminTutorials"));
+const GlobalAdminOnboarding = React.lazy(() => import("./pages/global-admin/GlobalAdminOnboarding"));
+
 import { APP_BUILD_ID } from "@/lib/buildInfo";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 2 * 60 * 1000,   // 2 min — dados ficam "frescos"
+      gcTime: 10 * 60 * 1000,     // 10 min — cache mantido em memória
+      retry: 1,                    // 1 retry em vez de 3
+    },
+  },
+});
 
+const LazyFallback = () => (
+  <div className="flex items-center justify-center min-h-screen">
+    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+  </div>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -77,6 +96,7 @@ const App = () => (
             <Toaster />
             <Sonner />
           <BrowserRouter>
+            <Suspense fallback={<LazyFallback />}>
             <Routes>
           {/* Public routes */}
           <Route path="/" element={<Index />} />
@@ -355,6 +375,7 @@ const App = () => (
               {/* Catch-all route */}
               <Route path="*" element={<NotFound />} />
             </Routes>
+            </Suspense>
           </BrowserRouter>
         </TooltipProvider>
       </RealtimeSyncProvider>
