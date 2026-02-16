@@ -88,9 +88,10 @@ export function useSystemMetrics() {
       activeConnections = instancesData?.filter(i => i.status === "connected").length || 0;
 
       // For messages and conversations, query directly
-      const [messagesResult, conversationsResult] = await Promise.all([
+      const [messagesResult, conversationsResult, archiveResult] = await Promise.all([
         supabase.from("messages").select("id", { count: "exact", head: true }),
         supabase.from("conversations").select("id", { count: "exact", head: true }),
+        supabase.from("messages_archive").select("id", { count: "exact", head: true }),
       ]);
 
       const activeCompanies = companiesResult.data?.filter(c => c.status === "active").length || 0;
@@ -143,7 +144,7 @@ export function useSystemMetrics() {
         totalUsers,
         totalConnections,
         activeConnections,
-        totalMessages: messagesResult.count || 0,
+        totalMessages: (messagesResult.count || 0) + ((archiveResult as any).count || 0),
         totalConversations: conversationsResult.count || 0,
         totalAIConversations,
         totalTTSMinutes: Math.round(totalTTSMinutes * 100) / 100,

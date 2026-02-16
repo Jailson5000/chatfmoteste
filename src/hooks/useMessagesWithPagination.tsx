@@ -211,7 +211,7 @@ export function useMessagesWithPagination({
 
   // Load more older messages
   const loadMore = useCallback(async () => {
-    // Guards: ref + state + cursor
+  // Guards: ref + state + cursor
     if (loadingMoreRef.current) return;
     if (!hasMoreMessages) return;
     if (!conversationId || !oldestTimestampRef.current) return;
@@ -219,12 +219,13 @@ export function useMessagesWithPagination({
     loadingMoreRef.current = true;
     setIsLoadingMore(true);
 
+    const messageFields = "id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal, is_pontual, is_revoked, is_starred, my_reaction, client_reaction";
+
     try {
+      // First try the main messages table
       const { data, error } = await supabase
         .from("messages")
-.select(
-          "id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal, is_pontual, is_revoked, is_starred, my_reaction, client_reaction"
-        )
+        .select(messageFields)
         .eq("conversation_id", conversationId)
         .lt("created_at", oldestTimestampRef.current)
         .order("created_at", { ascending: false })
@@ -256,13 +257,48 @@ export function useMessagesWithPagination({
 
         // Check if more exist
         if (data.length < loadMoreBatchSize) {
-          setHasMoreMessages(false);
+          // No more in messages table, but there might be archived messages
+          // Don't set hasMoreMessages to false yet — try archive on next call
         }
       } else {
-        pendingRestoreRef.current = null;
-        restoringScrollRef.current = false;
-        setHasMoreMessages(false);
-        loadingMoreRef.current = false;
+        // No more messages in main table — try the archive table
+        try {
+          const { data: archiveData, error: archiveError } = await supabase
+            .from("messages_archive")
+            .select(messageFields)
+            .eq("conversation_id", conversationId)
+            .lt("created_at", oldestTimestampRef.current!)
+            .order("created_at", { ascending: false })
+            .limit(loadMoreBatchSize);
+
+          if (!archiveError && archiveData && (archiveData as any[]).length > 0) {
+            const archiveArr = archiveData as any[];
+            const chronologicalArchive = [...archiveArr].reverse();
+            const archiveWithReplies = chronologicalArchive.map((msg: any) => ({
+              ...msg,
+              reply_to: null,
+            })) as PaginatedMessage[];
+
+            setMessages((prev) => [...archiveWithReplies, ...prev]);
+            oldestTimestampRef.current = archiveArr[archiveArr.length - 1].created_at;
+
+            if (archiveArr.length < loadMoreBatchSize) {
+              setHasMoreMessages(false);
+            }
+          } else {
+            // No messages in archive either — truly no more messages
+            pendingRestoreRef.current = null;
+            restoringScrollRef.current = false;
+            setHasMoreMessages(false);
+            loadingMoreRef.current = false;
+          }
+        } catch (archiveErr) {
+          console.error("Error loading archived messages:", archiveErr);
+          pendingRestoreRef.current = null;
+          restoringScrollRef.current = false;
+          setHasMoreMessages(false);
+          loadingMoreRef.current = false;
+        }
       }
     } catch (err) {
       console.error("Error loading more messages:", err);
@@ -396,6 +432,25 @@ export function useMessagesWithPagination({
               id: replyMsg.id,
               content: replyMsg.content,
               is_from_me: replyMsg.is_from_me,
+            }
+          };
+        }
+
+        // Fallback: check archived messages
+        const { data: archivedReply } = await supabase
+          .from("messages_archive")
+          .select("id, content, is_from_me")
+          .eq("id", msg.reply_to_message_id)
+          .single();
+
+        if (archivedReply) {
+          const archived = archivedReply as any;
+          return {
+            ...msg,
+            reply_to: {
+              id: archived.id,
+              content: archived.content,
+              is_from_me: archived.is_from_me,
             }
           };
         }
