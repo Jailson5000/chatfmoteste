@@ -334,8 +334,28 @@ async function processMessagingEntry(
       } else if (att.type === "file") {
         messageType = "document";
         mediaMimeType = "application/octet-stream";
+      } else if (att.type === "story_mention") {
+        messageType = "image";
+        mediaMimeType = "image/jpeg";
+        if (!content) content = "📢 Mencionou você em um story";
+      } else if (att.type === "story_reply") {
+        messageType = "image";
+        mediaMimeType = "image/jpeg";
+        if (!content) content = "💬 Respondeu ao seu story";
       }
       if (!content) content = `[${messageType}]`;
+    }
+
+    // Handle story reply metadata (reply_to.story)
+    if (message.reply_to?.story) {
+      const storyUrl = message.reply_to.story.url;
+      if (storyUrl && !mediaUrl) {
+        mediaUrl = storyUrl;
+        mediaMimeType = mediaMimeType || "image/jpeg";
+      }
+      if (!content || content === "[text]") {
+        content = message.text || "💬 Respondeu ao seu story";
+      }
     }
 
     // Find or create client by remote_jid (sender's scoped ID)
