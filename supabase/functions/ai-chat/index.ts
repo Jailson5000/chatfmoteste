@@ -153,6 +153,10 @@ interface ChatRequest {
     skipSaveUserMessage?: boolean;
     // Flag to skip saving AI response (when called from evolution-webhook which saves AFTER sending to WhatsApp)
     skipSaveAIResponse?: boolean;
+    // PDF document support - base64 content for multimodal AI processing
+    documentBase64?: string;
+    documentMimeType?: string;
+    documentFileName?: string;
   };
 }
 
@@ -3800,7 +3804,26 @@ INSTRUÇÃO CRÍTICA: Use esses service_ids DIRETAMENTE ao chamar book_appointme
     }
 
     // Add current message (wrapped for injection protection)
-    messages.push({ role: "user", content: wrapUserInput(message) });
+    // If a PDF document was provided, build multimodal message for Gemini
+    if (context?.documentBase64 && context?.documentMimeType) {
+      const docFileName = context.documentFileName || 'documento.pdf';
+      console.log(`[AI Chat] Building multimodal message with PDF: ${docFileName} (${(context.documentBase64.length / 1024).toFixed(0)}KB base64)`);
+      messages.push({
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: { url: `data:${context.documentMimeType};base64,${context.documentBase64}` },
+          },
+          {
+            type: "text",
+            text: wrapUserInput(`[Cliente enviou o documento: ${docFileName}]\nAnalise o conteúdo deste PDF e descreva brevemente o que você recebeu.`),
+          },
+        ] as any,
+      });
+    } else {
+      messages.push({ role: "user", content: wrapUserInput(message) });
+    }
 
     // Get available tools with tenant-specific context injected
     // This ensures the AI knows exactly which departments/statuses/tags are available
