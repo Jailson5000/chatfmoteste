@@ -1,61 +1,93 @@
 
-# Correcao: TTS Contabilizado em Dobro (Custo Inflado)
+# Extrair texto de PDFs recebidos para a IA analisar
 
-## Problema Identificado
+## Problema Atual
 
-Analisei os dados de uso de fevereiro e encontrei o seguinte:
+Quando um cliente envia um PDF pelo WhatsApp, a IA recebe apenas o nome do arquivo (ex: "extrato.pdf") como conteudo da mensagem. Ela nao consegue ver o que tem dentro do PDF, entao nao sabe se o documento correto foi enviado.
 
-### 1. TTS sendo contabilizado DUAS VEZES por audio
+## Solucao
 
-Cada audio gerado pelo agente de IA cria **2 registros** de uso na tabela `usage_records`:
+Usar a capacidade multimodal do Gemini (que suporta PDFs nativamente) para enviar o base64 do PDF junto com a mensagem. O Gemini consegue ler e interpretar PDFs diretamente.
+
+O fluxo sera:
 
 ```text
-19:21:09 -> source: "frontend_preview" (registrado por ai-text-to-speech)
-19:21:13 -> voice_source: "agente"       (registrado por evolution-webhook)
+Cliente envia PDF
+       |
+       v
+evolution-webhook detecta documentMessage
+       |
+       v
+Baixa base64 via Evolution API (getBase64FromMediaMessage)
+       |
+       v
+Envia base64 do PDF no contexto para ai-chat
+       |
+       v
+ai-chat monta mensagem multimodal para o Gemini
+       |
+       v
+IA le o conteudo do PDF e responde com contexto
 ```
 
-Isso acontece porque:
-- O `evolution-webhook` chama a funcao `ai-text-to-speech` para gerar o audio
-- A funcao `ai-text-to-speech` registra o uso internamente como `frontend_preview`
-- O `evolution-webhook` TAMBEM registra o uso como `agente`
+## Mudancas Tecnicas
 
-**Resultado**: 22 audios reais geraram 44 registros de uso -- **cobranca em dobro!**
+### 1. `supabase/functions/evolution-webhook/index.ts`
 
-### 2. Volume de IA realmente aumentou hoje (nao e duplicacao)
+**Onde**: Dentro das funcoes `processWithGemini` e `processWithGPT` (linhas ~3150-3170 e ~3312-3334), na chamada para `ai-chat`.
 
-| Dia | Mensagens IA | Mensagens Cliente |
-|-----|-------------|-------------------|
-| Feb 16 | 138 | 360 |
-| Feb 17 | 401 | 444 |
+**O que**: Quando `context.messageType === 'document'` e o mime type for PDF (`application/pdf`), baixar o base64 do documento via Evolution API (usando `getBase64FromMediaMessage`, o mesmo endpoint ja usado para audios) e incluir no contexto enviado para `ai-chat`.
 
-O aumento de ~3x nas respostas da IA e real (mais conversas ativas hoje). Os 2.625 requests na OpenAI no mes estao alinhados com os 2.811 mensagens de IA geradas -- nao ha duplicacao nas chamadas de IA em si.
+- Adicionar campo `documentBase64` e `documentMimeType` e `documentFileName` no `context` da chamada ao ai-chat
+- Limitar a 5MB para nao sobrecarregar
+- Suportar apenas PDFs inicialmente (DOCX e outros formatos podem ser adicionados depois)
 
-## Correcao
+### 2. `supabase/functions/ai-chat/index.ts`
 
-### Arquivo: `supabase/functions/ai-text-to-speech/index.ts`
+**Onde**: Na construcao das mensagens para o modelo (linhas ~3800-3803), onde a mensagem do usuario e adicionada.
 
-Remover o registro de uso de TTS quando a funcao e chamada pelo backend (service_role_key). A funcao `ai-text-to-speech` deve registrar uso **somente quando chamada diretamente pelo frontend** (preview de voz). Quando chamada pelo `evolution-webhook`, quem registra e o proprio webhook com metadados mais completos (conversation_id, voice_id, voice_source).
+**O que**: Quando `context.documentBase64` estiver presente, montar a mensagem do usuario como conteudo multimodal (array de content parts) em vez de texto simples:
 
-**Logica**: Detectar se a chamada vem do service_role (backend) verificando o header Authorization. Se vier com service_role_key, pular o registro de uso (o webhook ja faz isso). Se vier do frontend (anon key), registrar normalmente.
+```text
+// Em vez de:
+messages.push({ role: "user", content: "extrato.pdf" })
 
-Alternativa mais simples: adicionar um parametro `skipUsageTracking: true` no body da requisicao quando chamada pelo `evolution-webhook`, e verificar esse flag antes de registrar.
+// Enviar:
+messages.push({ 
+  role: "user", 
+  content: [
+    { 
+      type: "image_url", 
+      image_url: { url: "data:application/pdf;base64,BASE64_AQUI" } 
+    },
+    { 
+      type: "text", 
+      text: "[Cliente enviou o documento: extrato.pdf]\nAnalise o conteudo deste PDF."
+    }
+  ]
+})
+```
 
-**Mudanca no `ai-text-to-speech/index.ts`** (linhas 104-139):
-- Adicionar verificacao do parametro `skipUsageTracking` no body
-- Se `skipUsageTracking === true`, nao chamar `recordTTSUsage`
+- Adicionar instrucao no system prompt para que a IA descreva brevemente o que recebeu
+- Manter o texto original do usuario (nome do arquivo) como referencia
 
-**Mudanca no `evolution-webhook/index.ts`** (linhas 1986-1997):
-- Adicionar `skipUsageTracking: true` no body da chamada ao `ai-text-to-speech`
+### 3. Limites de Seguranca
+
+- Tamanho maximo do PDF: 5MB (ja limitado no webhook)
+- Apenas `application/pdf` sera processado (outros tipos de documento continuam como antes)
+- Se o download do base64 falhar, a IA continua recebendo apenas o nome do arquivo (fallback seguro)
+- Timeout de 10s para download do base64
 
 ## Resumo
 
-| Mudanca | Arquivo | Impacto |
-|---------|---------|---------|
-| Adicionar flag `skipUsageTracking` | ai-text-to-speech | Evita registro duplo de TTS |
-| Enviar flag na chamada TTS | evolution-webhook | Zero risco -- apenas adiciona campo |
+| Mudanca | Arquivo | Risco |
+|---------|---------|-------|
+| Baixar base64 de PDFs recebidos | evolution-webhook | Baixo -- usa endpoint existente (mesmo do audio) |
+| Enviar PDF como conteudo multimodal | ai-chat | Baixo -- formato suportado pelo Gemini |
+| Fallback se download falhar | ambos | Zero -- comportamento atual mantido |
 
 ## Resultado Esperado
 
-- Cada audio gerado pelo agente registra uso apenas 1 vez (pelo evolution-webhook com metadados completos)
-- Previews de voz no frontend continuam registrando uso normalmente
-- Custo de TTS reduzido pela metade imediatamente
+- Quando um cliente enviar um PDF, a IA vai ler o conteudo e responder com contexto (ex: "Recebi o Extrato de Informacoes do Beneficio em nome de Joao Silva...")
+- Se o PDF nao puder ser lido, o comportamento atual e mantido (IA recebe so o nome do arquivo)
+- Funciona imediatamente com o Gemini via Lovable AI Gateway
