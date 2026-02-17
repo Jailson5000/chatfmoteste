@@ -2663,8 +2663,9 @@ serve(async (req) => {
     let { conversationId, message, automationId, source, context }: ChatRequest = requestBody;
 
     // Validate required fields - conversationId can be widget ID or UUID
-    if (!conversationId || !message) {
-      console.error(`[${errorRef}] Missing required fields`);
+    // Allow empty message (but not null/undefined) when document/media context is present
+    if (!conversationId || (message === undefined || message === null)) {
+      console.error(`[${errorRef}] Missing required fields`, { conversationId: !!conversationId, message: message === undefined ? 'undefined' : message === null ? 'null' : 'present' });
       return new Response(
         JSON.stringify({ error: "conversationId and message are required", ref: errorRef }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
