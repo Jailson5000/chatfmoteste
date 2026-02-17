@@ -1993,6 +1993,7 @@ async function generateTTSAudio(text: string, voiceId: string, lawFirmId?: strin
         text: trimmedText,
         voiceId: voiceId,
         lawFirmId: lawFirmId,
+        skipUsageTracking: true,
       }),
     });
     

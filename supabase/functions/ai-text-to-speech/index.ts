@@ -318,7 +318,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    const { text, voiceId = 'el_laura', lawFirmId } = body;
+    const { text, voiceId = 'el_laura', lawFirmId, skipUsageTracking = false } = body;
     
     console.log('[TTS] Request params:', {
       textLength: text?.length || 0,
@@ -375,8 +375,8 @@ serve(async (req) => {
       const result = await generateOpenAIAudio(text, 'nova');
       
       if (result.success) {
-        // Record TTS usage for billing (non-blocking)
-        if (lawFirmId) {
+        // Record TTS usage for billing (non-blocking) - skip when called from backend (webhook already tracks)
+        if (lawFirmId && !skipUsageTracking) {
           recordTTSUsage(lawFirmId, text.length).catch(err => {
             console.error('[TTS] Usage recording failed:', err);
           });
@@ -409,8 +409,8 @@ serve(async (req) => {
       if (result.success) {
         console.log('[TTS] ElevenLabs SUCCESS with mimeType:', result.mimeType);
         
-        // Record TTS usage for billing (non-blocking)
-        if (lawFirmId) {
+        // Record TTS usage for billing (non-blocking) - skip when called from backend
+        if (lawFirmId && !skipUsageTracking) {
           recordTTSUsage(lawFirmId, text.length).catch(err => {
             console.error('[TTS] Usage recording failed:', err);
           });
@@ -433,8 +433,8 @@ serve(async (req) => {
       if (openaiResult.success) {
         console.log('[TTS] OpenAI fallback SUCCESS with mimeType:', openaiResult.mimeType);
         
-        // Record TTS usage for billing (non-blocking)
-        if (lawFirmId) {
+        // Record TTS usage for billing (non-blocking) - skip when called from backend
+        if (lawFirmId && !skipUsageTracking) {
           recordTTSUsage(lawFirmId, text.length).catch(err => {
             console.error('[TTS] Usage recording failed:', err);
           });
@@ -469,8 +469,8 @@ serve(async (req) => {
     const openaiResult = await generateOpenAIAudio(text, 'shimmer');
       
     if (openaiResult.success) {
-      // Record TTS usage for billing (non-blocking)
-      if (lawFirmId) {
+      // Record TTS usage for billing (non-blocking) - skip when called from backend
+      if (lawFirmId && !skipUsageTracking) {
         recordTTSUsage(lawFirmId, text.length).catch(err => {
           console.error('[TTS] Usage recording failed:', err);
         });
