@@ -1,99 +1,75 @@
 
 
-# Correção: PDFs Encaminhados Não Aparecem no Chat
+# Correção: PDFs Não Aparecendo + Download Base64 Bloqueando Processamento
 
-## Problema Identificado
+## Diagnóstico
 
-Quando um cliente **encaminha** (forward) um PDF pelo WhatsApp, o documento não é salvo no banco de dados e aparece como uma caixa vazia no chat. O PDF enviado diretamente funciona normalmente.
+Analisei o banco de dados e os logs detalhadamente:
 
-Evidência no banco de dados:
-- PDF direto (17:22) -- salvo corretamente com `message_type: document`, `media_mime_type: application/pdf`
-- PDF encaminhado (19:44) -- completamente ausente do banco de dados
+1. **PDFs diretos ESTÃO sendo salvos** no banco de dados (confirmei 10+ PDFs recentes com `message_type: document`)
+2. **O download do base64 do PDF para IA está BLOQUEANDO** o processamento da mensagem por até 10 segundos (timeout do fetch). Isso pode causar timeout do edge function quando vários clientes enviam mensagens simultaneamente
+3. **O base64 do PDF NUNCA chega na IA** -- todos os 10 itens recentes na fila de processamento têm `document_file_name: NULL`, indicando que o download falha ou o base64 muito grande causa erro ao salvar no JSONB
+4. **Mensagens de imagem sem legenda** causam erro na IA (`"conversationId and message are required"`) porque o campo `message` fica vazio
 
-## Causa Raiz
+## Correções
 
-Quando uma mensagem é encaminhada no WhatsApp, a Evolution API envia o payload com `messageType: "senderKeyDistributionMessage"` no nível superior, mas o conteúdo real (ex: `documentMessage`) continua dentro de `data.message`. O código atual detecta corretamente via `data.message.documentMessage`, porém há um problema: mensagens encaminhadas frequentemente incluem um campo `data.message.senderKeyDistributionMessage` que pode interferir, ou o payload chega em formato ligeiramente diferente.
+### 1. Mover download do PDF base64 PARA DEPOIS de salvar a mensagem
 
-Além disso, há outra estrutura possível para mensagens encaminhadas: `data.message.ephemeralMessage.message.documentMessage` -- onde o documento é encapsulado dentro de um wrapper efêmero.
+**Arquivo**: `supabase/functions/evolution-webhook/index.ts`
 
-## Correção
+**Problema**: O download do base64 (linhas 4994-5074) acontece DENTRO do bloco de deteccao de tipo, ANTES de salvar a mensagem no banco. Se o download travar por 10s ou falhar, atrasa ou impede o salvamento.
 
-### Arquivo: `supabase/functions/evolution-webhook/index.ts`
+**Solucao**: Remover o download do base64 do bloco de deteccao de tipo. Em vez disso, fazer o download DEPOIS que a mensagem ja foi salva, logo antes de enfileirar para processamento da IA. Assim:
+- A mensagem é SEMPRE salva primeiro (zero risco de perda)
+- O download do base64 só acontece se o handler é IA (sem desperdício)
+- Se o download falhar, a IA recebe apenas o nome do arquivo (fallback seguro)
 
-#### 1. Adicionar unwrapping de mensagens encaminhadas/efêmeras
+### 2. Não armazenar base64 na fila -- baixar sob demanda
 
-Antes do bloco de detecção de tipo (linha ~4820), adicionar lógica para "desempacotar" mensagens que vêm encapsuladas em containers de encaminhamento:
+**Arquivo**: `supabase/functions/evolution-webhook/index.ts`
 
+**Problema**: Armazenar 5MB de base64 no campo JSONB `metadata` da tabela `ai_processing_queue` pode falhar silenciosamente ou causar lentidao na query.
+
+**Solucao**: Em vez de armazenar o base64 na fila, armazenar apenas os metadados (`document_file_name`, `document_mime_type`, `whatsapp_message_id`). Quando a fila for processada, baixar o base64 naquele momento. Isso:
+- Elimina o problema de tamanho no JSONB
+- O download acontece no momento certo (quando a IA vai processar)
+- Se o download falhar, a IA processa normalmente sem o conteudo do PDF
+
+### 3. Permitir mensagem vazia no ai-chat quando tem documento
+
+**Arquivo**: `supabase/functions/ai-chat/index.ts`
+
+**Problema**: Linha 2666 rejeita mensagens quando `!message` é true. Imagens sem legenda (e futuramente, documentos sem nome) enviam `message: ""`.
+
+**Solucao**: Alterar a validacao para aceitar mensagem vazia quando `context.documentBase64` está presente, ou quando o `message` é uma string vazia (não null/undefined):
 ```text
-// ANTES do bloco if/else if de detecção de tipo:
-// Unwrap forwarded/ephemeral message containers
-// Forwarded docs may come wrapped in ephemeralMessage or 
-// senderKeyDistributionMessage containers
-let messageData = data.message;
-
-if (messageData && !messageData.conversation && !messageData.extendedTextMessage) {
-  // Check ephemeralMessage wrapper (common for forwarded messages)
-  if (messageData.ephemeralMessage?.message) {
-    messageData = messageData.ephemeralMessage.message;
-    logDebug('MESSAGE', 'Unwrapped ephemeralMessage container', { requestId });
-  }
-  // Check viewOnceMessage wrapper
-  if (messageData.viewOnceMessage?.message) {
-    messageData = messageData.viewOnceMessage.message;
-    logDebug('MESSAGE', 'Unwrapped viewOnceMessage container', { requestId });
-  }
-  // Check viewOnceMessageV2 wrapper
-  if (messageData.viewOnceMessageV2?.message) {
-    messageData = messageData.viewOnceMessageV2.message;
-    logDebug('MESSAGE', 'Unwrapped viewOnceMessageV2 container', { requestId });
-  }
-}
+if (!conversationId || (message === undefined || message === null)) {
 ```
 
-Depois, usar `messageData` em vez de `data.message` em todas as verificações de tipo.
+### 4. Baixar PDF base64 no processador da fila (debounce)
 
-#### 2. Melhorar o logging do fallback
+**Arquivo**: `supabase/functions/evolution-webhook/index.ts`
 
-No bloco de fallback (linha ~5233), adicionar log mais detalhado para capturar formatos desconhecidos futuros:
+Na funcao que processa a fila (`processQueueItem` ou equivalente), quando encontrar metadados de documento PDF:
+1. Verificar se `document_mime_type === 'application/pdf'`
+2. Usar o `whatsapp_message_id` para baixar o base64 via Evolution API
+3. Passar o base64 para o `ai-chat` no contexto
 
-```text
-logDebug('UNKNOWN_TYPE', 'Message type not recognized', {
-  requestId,
-  messageKeys: Object.keys(data.message).join(','),
-  evolutionMessageType: data.messageType,  // <-- ADICIONAR
-  rawPreview: rawMessage.slice(0, 800),     // <-- AUMENTAR de 500 para 800
-});
-```
+Isso garante que o download acontece no momento do processamento, não durante o recebimento da mensagem.
 
-#### 3. Adicionar tipos ao interface EvolutionMessage
+## Resumo das Mudanças
 
-Adicionar os wrappers na interface de tipos:
-
-```text
-ephemeralMessage?: {
-  message?: EvolutionMessage['message'];
-};
-viewOnceMessage?: {
-  message?: EvolutionMessage['message'];
-};
-viewOnceMessageV2?: {
-  message?: EvolutionMessage['message'];
-};
-senderKeyDistributionMessage?: Record<string, unknown>;
-```
-
-## Resumo
-
-| Mudança | Arquivo | Risco |
-|---------|---------|-------|
-| Unwrap mensagens encaminhadas/efêmeras | evolution-webhook | Baixo -- fallback seguro para formato atual |
-| Melhorar logging de formatos desconhecidos | evolution-webhook | Zero |
-| Adicionar tipos de wrapper | evolution-webhook | Zero |
+| Mudança | Arquivo | Impacto |
+|---------|---------|---------|
+| Remover download PDF do bloco de deteccao | evolution-webhook | Elimina bloqueio de 10s no processamento |
+| Não armazenar base64 no JSONB da fila | evolution-webhook | Resolve falha silenciosa de insert |
+| Baixar PDF no processador da fila | evolution-webhook | PDF chega na IA sob demanda |
+| Aceitar message vazia no ai-chat | ai-chat | Corrige erro 400 para imagens |
 
 ## Resultado Esperado
 
-- PDFs encaminhados serão corretamente detectados e salvos no banco
-- Mensagens "view once" (visualização única) também serão tratadas
-- Logging melhorado para capturar qualquer formato futuro não reconhecido
-- Nenhuma mudança no comportamento de mensagens que já funcionam
+- Mensagens de documento são SEMPRE salvas imediatamente (zero risco de perda)
+- A IA recebe o conteudo do PDF quando disponivel (download sob demanda)
+- Se o download falhar, a IA responde normalmente usando apenas o nome do arquivo
+- Imagens sem legenda não causam mais erro 400 na IA
 
