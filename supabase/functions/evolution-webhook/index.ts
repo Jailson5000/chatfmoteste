@@ -1100,10 +1100,12 @@ interface AutomationContext {
   clientId?: string; // Added for client memory support
   automationId?: string; // ID of the AI agent handling this conversation
   automationName?: string; // Name of the AI agent for display purposes
-  // PDF document support - base64 content for multimodal AI processing
+  // PDF document support - base64 downloaded on-demand in queue processor
   documentBase64?: string;
   documentMimeType?: string;
   documentFileName?: string;
+  // WhatsApp message key for on-demand base64 download (stored as JSON string)
+  whatsappMessageKey?: string;
 }
 
 // =============================================================================
@@ -1163,19 +1165,19 @@ async function queueMessageForAIProcessing(
         message_count: existingQueue.message_count + 1,
         last_message_at: new Date().toISOString(),
         process_after: processAfter, // Reset debounce timer
-        metadata: {
-          contact_name: context.contactName,
-          contact_phone: context.contactPhone,
-          remote_jid: context.remoteJid,
-          instance_id: context.instanceId,
-          instance_name: context.instanceName,
-          client_id: context.clientId,
-          document_base64: context.documentBase64,
-          document_mime_type: context.documentMimeType,
-          document_file_name: context.documentFileName,
-        },
-      })
-      .eq('id', existingQueue.id);
+          metadata: {
+            contact_name: context.contactName,
+            contact_phone: context.contactPhone,
+            remote_jid: context.remoteJid,
+            instance_id: context.instanceId,
+            instance_name: context.instanceName,
+            client_id: context.clientId,
+            document_mime_type: context.documentMimeType,
+            document_file_name: context.documentFileName,
+            whatsapp_message_key: context.whatsappMessageKey,
+          },
+        })
+        .eq('id', existingQueue.id);
 
     if (updateError) {
       logDebug('DEBOUNCE', 'Failed to update queue', { requestId, error: updateError });
@@ -1221,16 +1223,16 @@ async function queueMessageForAIProcessing(
         message_count: 1,
         process_after: effectiveProcessAfter,
         metadata: {
-          contact_name: context.contactName,
-          contact_phone: context.contactPhone,
-          remote_jid: context.remoteJid,
-          instance_id: context.instanceId,
-          instance_name: context.instanceName,
-          client_id: context.clientId,
-          document_base64: context.documentBase64,
-          document_mime_type: context.documentMimeType,
-          document_file_name: context.documentFileName,
-        },
+            contact_name: context.contactName,
+            contact_phone: context.contactPhone,
+            remote_jid: context.remoteJid,
+            instance_id: context.instanceId,
+            instance_name: context.instanceName,
+            client_id: context.clientId,
+            document_mime_type: context.documentMimeType,
+            document_file_name: context.documentFileName,
+            whatsapp_message_key: context.whatsappMessageKey,
+          },
       })
       .select('id')
       .single();
@@ -1476,6 +1478,83 @@ async function processQueuedMessages(
     const primaryType = messages.some(m => m.type === 'text') ? 'text' : messages[0]?.type || 'text';
 
     const metadata = queueItem.metadata as Record<string, any>;
+    
+    // On-demand PDF base64 download: fetch only when AI is ready to process
+    let documentBase64: string | undefined;
+    const documentMimeType = metadata.document_mime_type;
+    const documentFileName = metadata.document_file_name;
+    const whatsappMessageKey = metadata.whatsapp_message_key;
+    
+    if (documentMimeType === 'application/pdf' && whatsappMessageKey) {
+      try {
+        const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
+        const evolutionBaseUrl = evolutionBaseUrlRaw.replace(/\/+$/, '');
+        const evolutionApiKey = Deno.env.get('EVOLUTION_GLOBAL_API_KEY') ?? '';
+        const instanceName = metadata.instance_name;
+        
+        if (evolutionBaseUrl && evolutionApiKey && instanceName) {
+          logDebug('PDF', 'On-demand PDF download for AI processing', { 
+            requestId, 
+            fileName: documentFileName,
+            instanceName 
+          });
+          
+          const pdfMediaUrl = `${evolutionBaseUrl}/chat/getBase64FromMediaMessage/${instanceName}`;
+          const pdfController = new AbortController();
+          const pdfTimeout = setTimeout(() => pdfController.abort(), 15000); // 15s timeout
+          
+          const msgKey = JSON.parse(whatsappMessageKey);
+          const pdfMediaResponse = await fetch(pdfMediaUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': evolutionApiKey,
+            },
+            body: JSON.stringify({
+              message: msgKey,
+              convertToMp4: false,
+            }),
+            signal: pdfController.signal,
+          });
+          clearTimeout(pdfTimeout);
+          
+          if (pdfMediaResponse.ok) {
+            const pdfMediaData = await pdfMediaResponse.json();
+            const pdfBase64 = pdfMediaData.base64;
+            
+            if (pdfBase64) {
+              const base64SizeBytes = pdfBase64.length * 0.75;
+              const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB
+              
+              if (base64SizeBytes <= MAX_PDF_SIZE) {
+                documentBase64 = pdfBase64;
+                logDebug('PDF', 'PDF base64 downloaded on-demand successfully', { 
+                  requestId, 
+                  base64Length: pdfBase64.length,
+                  estimatedSizeMB: (base64SizeBytes / 1024 / 1024).toFixed(2)
+                });
+              } else {
+                logDebug('PDF', 'PDF too large for AI processing', { 
+                  requestId, 
+                  sizeMB: (base64SizeBytes / 1024 / 1024).toFixed(2)
+                });
+              }
+            }
+          } else {
+            logDebug('PDF', 'Failed to download PDF on-demand', { 
+              requestId, 
+              status: pdfMediaResponse.status 
+            });
+          }
+        }
+      } catch (pdfError) {
+        logDebug('PDF', 'Error/timeout in on-demand PDF download (AI will process without PDF content)', { 
+          requestId, 
+          error: pdfError instanceof Error ? pdfError.message : String(pdfError)
+        });
+      }
+    }
+    
     const context: AutomationContext = {
       lawFirmId: queueItem.law_firm_id,
       conversationId: queueItem.conversation_id,
@@ -1487,10 +1566,10 @@ async function processQueuedMessages(
       instanceId: metadata.instance_id || '',
       instanceName: metadata.instance_name || '',
       clientId: metadata.client_id,
-      // PDF document data for multimodal AI processing
-      documentBase64: metadata.document_base64,
-      documentMimeType: metadata.document_mime_type,
-      documentFileName: metadata.document_file_name,
+      // PDF document data - downloaded on-demand above
+      documentBase64,
+      documentMimeType,
+      documentFileName,
     };
 
     // Process the combined messages
@@ -4991,87 +5070,9 @@ serve(async (req) => {
           mediaUrl = messageData.documentMessage.url || '';
           mediaMimeType = messageData.documentMessage.mimetype || 'application/octet-stream';
           
-          // PDF extraction: download base64 for AI multimodal processing
-          if (mediaMimeType === 'application/pdf' && currentHandler === 'ai') {
-            try {
-              const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
-              const evolutionBaseUrl = evolutionBaseUrlRaw.replace(/\/+$/, '');
-              const evolutionApiKey = Deno.env.get('EVOLUTION_GLOBAL_API_KEY') ?? '';
-              
-              if (evolutionBaseUrl && evolutionApiKey && instance.instance_name) {
-                logDebug('PDF', 'Downloading PDF base64 for AI processing', { 
-                  requestId, 
-                  fileName: messageContent,
-                  mimeType: mediaMimeType
-                });
-                
-                const pdfMediaUrl = `${evolutionBaseUrl}/chat/getBase64FromMediaMessage/${instance.instance_name}`;
-                const pdfController = new AbortController();
-                const pdfTimeout = setTimeout(() => pdfController.abort(), 10000); // 10s timeout
-                
-                try {
-                  const pdfMediaResponse = await fetch(pdfMediaUrl, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'apikey': evolutionApiKey,
-                    },
-                    body: JSON.stringify({
-                      message: { key: data.key, message: data.message },
-                      convertToMp4: false,
-                    }),
-                    signal: pdfController.signal,
-                  });
-                  clearTimeout(pdfTimeout);
-                  
-                  if (pdfMediaResponse.ok) {
-                    const pdfMediaData = await pdfMediaResponse.json();
-                    const pdfBase64 = pdfMediaData.base64;
-                    
-                    if (pdfBase64) {
-                      // Check size limit: 5MB = ~6.67MB in base64
-                      const base64SizeBytes = pdfBase64.length * 0.75;
-                      const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB
-                      
-                      if (base64SizeBytes <= MAX_PDF_SIZE) {
-                        // Store in a temporary variable to pass through queue metadata
-                        (data as any).__pdfBase64 = pdfBase64;
-                        (data as any).__pdfMimeType = mediaMimeType;
-                        (data as any).__pdfFileName = messageContent;
-                        logDebug('PDF', 'PDF base64 downloaded successfully', { 
-                          requestId, 
-                          base64Length: pdfBase64.length,
-                          estimatedSizeMB: (base64SizeBytes / 1024 / 1024).toFixed(2)
-                        });
-                      } else {
-                        logDebug('PDF', 'PDF too large for AI processing, skipping', { 
-                          requestId, 
-                          sizeMB: (base64SizeBytes / 1024 / 1024).toFixed(2),
-                          maxMB: 5
-                        });
-                      }
-                    }
-                  } else {
-                    logDebug('PDF', 'Failed to download PDF base64', { 
-                      requestId, 
-                      status: pdfMediaResponse.status 
-                    });
-                  }
-                } catch (pdfFetchError) {
-                  clearTimeout(pdfTimeout);
-                  logDebug('PDF', 'Error/timeout downloading PDF base64', { 
-                    requestId, 
-                    error: pdfFetchError instanceof Error ? pdfFetchError.message : pdfFetchError 
-                  });
-                }
-              }
-            } catch (pdfError) {
-              logDebug('PDF', 'Error in PDF extraction setup', { 
-                requestId, 
-                error: pdfError instanceof Error ? pdfError.message : pdfError 
-              });
-            }
-          }
+          // PDF base64 download moved to queue processor (on-demand)
+          // We only store metadata here; the actual download happens when AI processes the queue item
+          // This prevents blocking message save with a 10s fetch timeout
         } else if (messageData?.stickerMessage) {
           // Sticker support: treat as image with webp mime type
           messageType = 'sticker';
@@ -5622,10 +5623,11 @@ serve(async (req) => {
               instanceId: instance.id,
               instanceName: instance.instance_name,
               clientId: conversation.client_id || undefined,
-              // Pass PDF data if available
-              documentBase64: (data as any).__pdfBase64,
-              documentMimeType: (data as any).__pdfMimeType,
-              documentFileName: (data as any).__pdfFileName,
+              // Pass PDF metadata (base64 downloaded on-demand in queue processor)
+              documentMimeType: mediaMimeType,
+              documentFileName: messageType === 'document' ? messageContent : undefined,
+              // Store whatsapp message key for on-demand base64 download
+              whatsappMessageKey: messageType === 'document' && mediaMimeType === 'application/pdf' ? JSON.stringify({ key: data.key, message: data.message }) : undefined,
             }, DEBOUNCE_SECONDS, requestId);
           } else {
             logDebug('AUTOMATION', `Skipping automation - handler is human`, { requestId, handler: currentHandler });
