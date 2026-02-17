@@ -1131,6 +1131,9 @@ async function queueMessageForAIProcessing(
     content: context.messageContent,
     type: context.messageType,
     timestamp: new Date().toISOString(),
+    mimeType: context.documentMimeType || undefined,
+    fileName: context.documentFileName || undefined,
+    messageKey: context.whatsappMessageKey || undefined,
   };
 
   logDebug('DEBOUNCE', `Queueing message for debounced processing`, {
@@ -1144,7 +1147,7 @@ async function queueMessageForAIProcessing(
   // Try to update existing pending queue item (extend debounce, add message)
   const { data: existingQueue, error: fetchError } = await supabaseClient
     .from('ai_processing_queue')
-    .select('id, messages, message_count')
+    .select('id, messages, message_count, metadata')
     .eq('conversation_id', context.conversationId)
     .eq('status', 'pending')
     .maybeSingle();
@@ -1166,15 +1169,16 @@ async function queueMessageForAIProcessing(
         last_message_at: new Date().toISOString(),
         process_after: processAfter, // Reset debounce timer
           metadata: {
+            ...(existingQueue.metadata as Record<string, any> || {}),
             contact_name: context.contactName,
             contact_phone: context.contactPhone,
             remote_jid: context.remoteJid,
             instance_id: context.instanceId,
             instance_name: context.instanceName,
             client_id: context.clientId,
-            document_mime_type: context.documentMimeType,
-            document_file_name: context.documentFileName,
-            whatsapp_message_key: context.whatsappMessageKey,
+            document_mime_type: context.documentMimeType || (existingQueue.metadata as any)?.document_mime_type || '',
+            document_file_name: context.documentFileName || (existingQueue.metadata as any)?.document_file_name || '',
+            whatsapp_message_key: context.whatsappMessageKey || (existingQueue.metadata as any)?.whatsapp_message_key || null,
           },
         })
         .eq('id', existingQueue.id);
@@ -1481,9 +1485,20 @@ async function processQueuedMessages(
     
     // On-demand PDF base64 download: fetch only when AI is ready to process
     let documentBase64: string | undefined;
-    const documentMimeType = metadata.document_mime_type;
-    const documentFileName = metadata.document_file_name;
-    const whatsappMessageKey = metadata.whatsapp_message_key;
+    let documentMimeType = metadata.document_mime_type;
+    let documentFileName = metadata.document_file_name;
+    let whatsappMessageKey = metadata.whatsapp_message_key;
+    
+    // Fallback: if top-level metadata lost media info (due to debounce overwrite), recover from individual messages
+    if (!documentMimeType && messages.length > 0) {
+      const mediaMessage = (messages as any[]).find(m => m.mimeType);
+      if (mediaMessage) {
+        documentMimeType = mediaMessage.mimeType;
+        documentFileName = mediaMessage.fileName;
+        whatsappMessageKey = mediaMessage.messageKey;
+        logDebug('QUEUE_PROCESSOR', `Recovered media metadata from individual message`, { requestId, mimeType: documentMimeType });
+      }
+    }
     
     if (documentMimeType?.startsWith('image/') && whatsappMessageKey) {
       const mediaLabel = 'IMAGE';
