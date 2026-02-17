@@ -1,93 +1,99 @@
 
-# Extrair texto de PDFs recebidos para a IA analisar
 
-## Problema Atual
+# Correção: PDFs Encaminhados Não Aparecem no Chat
 
-Quando um cliente envia um PDF pelo WhatsApp, a IA recebe apenas o nome do arquivo (ex: "extrato.pdf") como conteudo da mensagem. Ela nao consegue ver o que tem dentro do PDF, entao nao sabe se o documento correto foi enviado.
+## Problema Identificado
 
-## Solucao
+Quando um cliente **encaminha** (forward) um PDF pelo WhatsApp, o documento não é salvo no banco de dados e aparece como uma caixa vazia no chat. O PDF enviado diretamente funciona normalmente.
 
-Usar a capacidade multimodal do Gemini (que suporta PDFs nativamente) para enviar o base64 do PDF junto com a mensagem. O Gemini consegue ler e interpretar PDFs diretamente.
+Evidência no banco de dados:
+- PDF direto (17:22) -- salvo corretamente com `message_type: document`, `media_mime_type: application/pdf`
+- PDF encaminhado (19:44) -- completamente ausente do banco de dados
 
-O fluxo sera:
+## Causa Raiz
 
-```text
-Cliente envia PDF
-       |
-       v
-evolution-webhook detecta documentMessage
-       |
-       v
-Baixa base64 via Evolution API (getBase64FromMediaMessage)
-       |
-       v
-Envia base64 do PDF no contexto para ai-chat
-       |
-       v
-ai-chat monta mensagem multimodal para o Gemini
-       |
-       v
-IA le o conteudo do PDF e responde com contexto
-```
+Quando uma mensagem é encaminhada no WhatsApp, a Evolution API envia o payload com `messageType: "senderKeyDistributionMessage"` no nível superior, mas o conteúdo real (ex: `documentMessage`) continua dentro de `data.message`. O código atual detecta corretamente via `data.message.documentMessage`, porém há um problema: mensagens encaminhadas frequentemente incluem um campo `data.message.senderKeyDistributionMessage` que pode interferir, ou o payload chega em formato ligeiramente diferente.
 
-## Mudancas Tecnicas
+Além disso, há outra estrutura possível para mensagens encaminhadas: `data.message.ephemeralMessage.message.documentMessage` -- onde o documento é encapsulado dentro de um wrapper efêmero.
 
-### 1. `supabase/functions/evolution-webhook/index.ts`
+## Correção
 
-**Onde**: Dentro das funcoes `processWithGemini` e `processWithGPT` (linhas ~3150-3170 e ~3312-3334), na chamada para `ai-chat`.
+### Arquivo: `supabase/functions/evolution-webhook/index.ts`
 
-**O que**: Quando `context.messageType === 'document'` e o mime type for PDF (`application/pdf`), baixar o base64 do documento via Evolution API (usando `getBase64FromMediaMessage`, o mesmo endpoint ja usado para audios) e incluir no contexto enviado para `ai-chat`.
+#### 1. Adicionar unwrapping de mensagens encaminhadas/efêmeras
 
-- Adicionar campo `documentBase64` e `documentMimeType` e `documentFileName` no `context` da chamada ao ai-chat
-- Limitar a 5MB para nao sobrecarregar
-- Suportar apenas PDFs inicialmente (DOCX e outros formatos podem ser adicionados depois)
-
-### 2. `supabase/functions/ai-chat/index.ts`
-
-**Onde**: Na construcao das mensagens para o modelo (linhas ~3800-3803), onde a mensagem do usuario e adicionada.
-
-**O que**: Quando `context.documentBase64` estiver presente, montar a mensagem do usuario como conteudo multimodal (array de content parts) em vez de texto simples:
+Antes do bloco de detecção de tipo (linha ~4820), adicionar lógica para "desempacotar" mensagens que vêm encapsuladas em containers de encaminhamento:
 
 ```text
-// Em vez de:
-messages.push({ role: "user", content: "extrato.pdf" })
+// ANTES do bloco if/else if de detecção de tipo:
+// Unwrap forwarded/ephemeral message containers
+// Forwarded docs may come wrapped in ephemeralMessage or 
+// senderKeyDistributionMessage containers
+let messageData = data.message;
 
-// Enviar:
-messages.push({ 
-  role: "user", 
-  content: [
-    { 
-      type: "image_url", 
-      image_url: { url: "data:application/pdf;base64,BASE64_AQUI" } 
-    },
-    { 
-      type: "text", 
-      text: "[Cliente enviou o documento: extrato.pdf]\nAnalise o conteudo deste PDF."
-    }
-  ]
-})
+if (messageData && !messageData.conversation && !messageData.extendedTextMessage) {
+  // Check ephemeralMessage wrapper (common for forwarded messages)
+  if (messageData.ephemeralMessage?.message) {
+    messageData = messageData.ephemeralMessage.message;
+    logDebug('MESSAGE', 'Unwrapped ephemeralMessage container', { requestId });
+  }
+  // Check viewOnceMessage wrapper
+  if (messageData.viewOnceMessage?.message) {
+    messageData = messageData.viewOnceMessage.message;
+    logDebug('MESSAGE', 'Unwrapped viewOnceMessage container', { requestId });
+  }
+  // Check viewOnceMessageV2 wrapper
+  if (messageData.viewOnceMessageV2?.message) {
+    messageData = messageData.viewOnceMessageV2.message;
+    logDebug('MESSAGE', 'Unwrapped viewOnceMessageV2 container', { requestId });
+  }
+}
 ```
 
-- Adicionar instrucao no system prompt para que a IA descreva brevemente o que recebeu
-- Manter o texto original do usuario (nome do arquivo) como referencia
+Depois, usar `messageData` em vez de `data.message` em todas as verificações de tipo.
 
-### 3. Limites de Seguranca
+#### 2. Melhorar o logging do fallback
 
-- Tamanho maximo do PDF: 5MB (ja limitado no webhook)
-- Apenas `application/pdf` sera processado (outros tipos de documento continuam como antes)
-- Se o download do base64 falhar, a IA continua recebendo apenas o nome do arquivo (fallback seguro)
-- Timeout de 10s para download do base64
+No bloco de fallback (linha ~5233), adicionar log mais detalhado para capturar formatos desconhecidos futuros:
+
+```text
+logDebug('UNKNOWN_TYPE', 'Message type not recognized', {
+  requestId,
+  messageKeys: Object.keys(data.message).join(','),
+  evolutionMessageType: data.messageType,  // <-- ADICIONAR
+  rawPreview: rawMessage.slice(0, 800),     // <-- AUMENTAR de 500 para 800
+});
+```
+
+#### 3. Adicionar tipos ao interface EvolutionMessage
+
+Adicionar os wrappers na interface de tipos:
+
+```text
+ephemeralMessage?: {
+  message?: EvolutionMessage['message'];
+};
+viewOnceMessage?: {
+  message?: EvolutionMessage['message'];
+};
+viewOnceMessageV2?: {
+  message?: EvolutionMessage['message'];
+};
+senderKeyDistributionMessage?: Record<string, unknown>;
+```
 
 ## Resumo
 
-| Mudanca | Arquivo | Risco |
+| Mudança | Arquivo | Risco |
 |---------|---------|-------|
-| Baixar base64 de PDFs recebidos | evolution-webhook | Baixo -- usa endpoint existente (mesmo do audio) |
-| Enviar PDF como conteudo multimodal | ai-chat | Baixo -- formato suportado pelo Gemini |
-| Fallback se download falhar | ambos | Zero -- comportamento atual mantido |
+| Unwrap mensagens encaminhadas/efêmeras | evolution-webhook | Baixo -- fallback seguro para formato atual |
+| Melhorar logging de formatos desconhecidos | evolution-webhook | Zero |
+| Adicionar tipos de wrapper | evolution-webhook | Zero |
 
 ## Resultado Esperado
 
-- Quando um cliente enviar um PDF, a IA vai ler o conteudo e responder com contexto (ex: "Recebi o Extrato de Informacoes do Beneficio em nome de Joao Silva...")
-- Se o PDF nao puder ser lido, o comportamento atual e mantido (IA recebe so o nome do arquivo)
-- Funciona imediatamente com o Gemini via Lovable AI Gateway
+- PDFs encaminhados serão corretamente detectados e salvos no banco
+- Mensagens "view once" (visualização única) também serão tratadas
+- Logging melhorado para capturar qualquer formato futuro não reconhecido
+- Nenhuma mudança no comportamento de mensagens que já funcionam
+
