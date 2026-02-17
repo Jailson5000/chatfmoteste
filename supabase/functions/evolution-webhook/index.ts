@@ -4549,10 +4549,38 @@ serve(async (req) => {
             .single();
 
           if (createError) {
-            logDebug('ERROR', `Failed to create conversation`, { requestId, error: createError });
-            break;
+            if (createError.code === '23505') {
+              // Unique constraint - another webhook already created this conversation
+              // Re-fetch the existing conversation and continue processing
+              logDebug('DB', `Conversation already created by concurrent webhook, re-fetching`, { 
+                requestId, error: createError.code 
+              });
+              
+              const { data: existingConv } = await supabaseClient
+                .from('conversations')
+                .select('*')
+                .eq('remote_jid', remoteJid)
+                .eq('law_firm_id', lawFirmId)
+                .eq('whatsapp_instance_id', instance.id)
+                .is('archived_at', null)
+                .maybeSingle();
+              
+              if (existingConv) {
+                conversation = existingConv;
+                logDebug('DB', `Re-fetched conversation after concurrent creation`, { 
+                  requestId, conversationId: conversation.id 
+                });
+              } else {
+                logDebug('ERROR', `Could not re-fetch conversation after 23505`, { requestId });
+                break;
+              }
+            } else {
+              logDebug('ERROR', `Failed to create conversation`, { requestId, error: createError });
+              break;
+            }
+          } else {
+            conversation = newConv;
           }
-          conversation = newConv;
           logDebug('DB', `Created new conversation with defaults`, { 
             requestId, 
             conversationId: conversation.id,
