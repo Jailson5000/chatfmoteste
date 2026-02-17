@@ -971,6 +971,17 @@ interface MessageData {
         remoteJid?: string;
       };
     };
+    // Forwarded/ephemeral message wrappers
+    ephemeralMessage?: {
+      message?: EvolutionMessageData['message'];
+    };
+    viewOnceMessage?: {
+      message?: EvolutionMessageData['message'];
+    };
+    viewOnceMessageV2?: {
+      message?: EvolutionMessageData['message'];
+    };
+    senderKeyDistributionMessage?: Record<string, unknown>;
   };
   messageType?: string;
   messageTimestamp?: number;
@@ -4817,19 +4828,37 @@ serve(async (req) => {
           });
         }
 
-        if (data.message?.conversation) {
-          messageContent = data.message.conversation;
-        } else if (data.message?.extendedTextMessage?.text) {
-          messageContent = data.message.extendedTextMessage.text;
-        } else if (data.message?.imageMessage) {
+        // Unwrap forwarded/ephemeral message containers
+        // Forwarded docs may come wrapped in ephemeralMessage, viewOnceMessage, etc.
+        let messageData = data.message;
+        if (messageData && !messageData.conversation && !messageData.extendedTextMessage) {
+          if (messageData.ephemeralMessage?.message) {
+            messageData = messageData.ephemeralMessage.message as typeof messageData;
+            logDebug('MESSAGE', 'Unwrapped ephemeralMessage container', { requestId });
+          }
+          if (messageData?.viewOnceMessage?.message) {
+            messageData = messageData.viewOnceMessage.message as typeof messageData;
+            logDebug('MESSAGE', 'Unwrapped viewOnceMessage container', { requestId });
+          }
+          if (messageData?.viewOnceMessageV2?.message) {
+            messageData = messageData.viewOnceMessageV2.message as typeof messageData;
+            logDebug('MESSAGE', 'Unwrapped viewOnceMessageV2 container', { requestId });
+          }
+        }
+
+        if (messageData?.conversation) {
+          messageContent = messageData.conversation;
+        } else if (messageData?.extendedTextMessage?.text) {
+          messageContent = messageData.extendedTextMessage.text;
+        } else if (messageData?.imageMessage) {
           messageType = 'image';
-          messageContent = data.message.imageMessage.caption || '';
-          mediaUrl = data.message.imageMessage.url || '';
-          mediaMimeType = data.message.imageMessage.mimetype || 'image/jpeg';
-        } else if (data.message?.audioMessage) {
+          messageContent = messageData.imageMessage.caption || '';
+          mediaUrl = messageData.imageMessage.url || '';
+          mediaMimeType = messageData.imageMessage.mimetype || 'image/jpeg';
+        } else if (messageData?.audioMessage) {
           messageType = 'audio';
-          mediaUrl = data.message.audioMessage.url || '';
-          mediaMimeType = data.message.audioMessage.mimetype || 'audio/ogg';
+          mediaUrl = messageData.audioMessage.url || '';
+          mediaMimeType = messageData.audioMessage.mimetype || 'audio/ogg';
           
           // Transcribe audio for AI processing ONLY if handler is AI
           // If human handler, user can manually transcribe via button in chat
@@ -4951,16 +4980,16 @@ serve(async (req) => {
               });
             }
           }
-        } else if (data.message?.videoMessage) {
+        } else if (messageData?.videoMessage) {
           messageType = 'video';
-          messageContent = data.message.videoMessage.caption || '';
-          mediaUrl = data.message.videoMessage.url || '';
-          mediaMimeType = data.message.videoMessage.mimetype || 'video/mp4';
-        } else if (data.message?.documentMessage) {
+          messageContent = messageData.videoMessage.caption || '';
+          mediaUrl = messageData.videoMessage.url || '';
+          mediaMimeType = messageData.videoMessage.mimetype || 'video/mp4';
+        } else if (messageData?.documentMessage) {
           messageType = 'document';
-          messageContent = data.message.documentMessage.fileName || '';
-          mediaUrl = data.message.documentMessage.url || '';
-          mediaMimeType = data.message.documentMessage.mimetype || 'application/octet-stream';
+          messageContent = messageData.documentMessage.fileName || '';
+          mediaUrl = messageData.documentMessage.url || '';
+          mediaMimeType = messageData.documentMessage.mimetype || 'application/octet-stream';
           
           // PDF extraction: download base64 for AI multimodal processing
           if (mediaMimeType === 'application/pdf' && currentHandler === 'ai') {
@@ -5043,41 +5072,41 @@ serve(async (req) => {
               });
             }
           }
-        } else if (data.message?.stickerMessage) {
+        } else if (messageData?.stickerMessage) {
           // Sticker support: treat as image with webp mime type
           messageType = 'sticker';
           messageContent = ''; // Stickers don't have text content
-          mediaUrl = data.message.stickerMessage.url || '';
-          mediaMimeType = data.message.stickerMessage.mimetype || 'image/webp';
+          mediaUrl = messageData.stickerMessage.url || '';
+          mediaMimeType = messageData.stickerMessage.mimetype || 'image/webp';
           logDebug('STICKER', 'Sticker message detected', { requestId, hasUrl: !!mediaUrl, mimeType: mediaMimeType });
-        } else if (data.message?.buttonsResponseMessage) {
+        } else if (messageData?.buttonsResponseMessage) {
           // WABA: User clicked a quick reply button
           messageType = 'text';
-          messageContent = data.message.buttonsResponseMessage.selectedDisplayText || 
-                           data.message.buttonsResponseMessage.selectedButtonId ||
+          messageContent = messageData.buttonsResponseMessage.selectedDisplayText || 
+                           messageData.buttonsResponseMessage.selectedButtonId ||
                            '[Resposta de botão]';
           logDebug('WABA_INTERACTIVE', 'Button response received', { requestId, content: messageContent });
-        } else if (data.message?.listResponseMessage) {
+        } else if (messageData?.listResponseMessage) {
           // WABA: User selected an item from a list menu
           messageType = 'text';
-          messageContent = data.message.listResponseMessage.title ||
-                           data.message.listResponseMessage.description ||
-                           data.message.listResponseMessage.rowId ||
-                           data.message.listResponseMessage.singleSelectReply?.selectedRowId ||
+          messageContent = messageData.listResponseMessage.title ||
+                           messageData.listResponseMessage.description ||
+                           messageData.listResponseMessage.rowId ||
+                           messageData.listResponseMessage.singleSelectReply?.selectedRowId ||
                            '[Seleção de lista]';
           logDebug('WABA_INTERACTIVE', 'List response received', { requestId, content: messageContent });
-        } else if (data.message?.templateButtonReplyMessage) {
+        } else if (messageData?.templateButtonReplyMessage) {
           // WABA: User clicked a template button (marketing messages)
           messageType = 'text';
-          messageContent = data.message.templateButtonReplyMessage.selectedDisplayText ||
-                           data.message.templateButtonReplyMessage.selectedId ||
+          messageContent = messageData.templateButtonReplyMessage.selectedDisplayText ||
+                           messageData.templateButtonReplyMessage.selectedId ||
                            '[Resposta de template]';
           logDebug('WABA_INTERACTIVE', 'Template button response received', { requestId, content: messageContent });
-        } else if (data.message?.interactiveResponseMessage) {
+        } else if (messageData?.interactiveResponseMessage) {
           // WABA: Generic interactive response (newer format)
           messageType = 'text';
-          const interactiveBody = data.message.interactiveResponseMessage.body;
-          const nativeFlow = data.message.interactiveResponseMessage.nativeFlowResponseMessage;
+          const interactiveBody = messageData.interactiveResponseMessage.body;
+          const nativeFlow = messageData.interactiveResponseMessage.nativeFlowResponseMessage;
           if (interactiveBody?.text) {
             messageContent = interactiveBody.text;
           } else if (nativeFlow?.paramsJson) {
@@ -5092,9 +5121,9 @@ serve(async (req) => {
             messageContent = '[Resposta interativa]';
           }
           logDebug('WABA_INTERACTIVE', 'Interactive response received', { requestId, content: messageContent });
-        } else if (data.message?.templateMessage) {
+        } else if (messageData?.templateMessage) {
           // WABA: Template message (marketing/utility templates sent via official API)
-          const template = data.message.templateMessage;
+          const template = messageData.templateMessage;
           const hydrated = template.hydratedTemplate;
           
           if (hydrated) {
@@ -5179,10 +5208,10 @@ serve(async (req) => {
             contentLength: messageContent.length,
             buttonCount: hydrated?.hydratedButtons?.length || 0
           });
-        } else if (data.message?.contactMessage) {
+        } else if (messageData?.contactMessage) {
           // Shared contact (vCard) - single contact
           messageType = 'contact';
-          const contact = data.message.contactMessage;
+          const contact = messageData.contactMessage;
           const displayName = contact.displayName || '';
           
           // Extract phone number from vCard (TEL field)
@@ -5200,10 +5229,10 @@ serve(async (req) => {
             hasVcard: !!contact.vcard,
             phone 
           });
-        } else if (data.message?.contactsArrayMessage) {
+        } else if (messageData?.contactsArrayMessage) {
           // Shared contacts (multiple vCards)
           messageType = 'contact';
-          const contactsArray = data.message.contactsArrayMessage;
+          const contactsArray = messageData.contactsArrayMessage;
           const contacts = contactsArray.contacts || [];
           
           if (contacts.length === 1) {
@@ -5237,7 +5266,8 @@ serve(async (req) => {
           logDebug('UNKNOWN_TYPE', 'Message type not recognized - raw payload', {
             requestId,
             messageKeys: Object.keys(data.message).join(','),
-            rawPreview: rawMessage.slice(0, 500),
+            evolutionMessageType: data.messageType,
+            rawPreview: rawMessage.slice(0, 800),
           });
           
           // Try to find any text content in the raw payload
