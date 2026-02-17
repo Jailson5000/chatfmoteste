@@ -1,137 +1,94 @@
 
 
-# Correção: Risco de Mensagem Sem Resposta (e Duplicata Residual)
+# Correcao: Mensagens perdidas quando duas chegam simultaneamente para contato novo
 
-## Problema Encontrado
+## Problema Identificado
 
-O índice único criado bloqueia a combinacao "1 pending + 1 processing" para a mesma conversa, mas o fluxo correto PRECISA permitir isso:
+Analisei os logs do webhook e confirmei que **ambas as mensagens foram recebidas** pelo sistema:
+- "Bom dia" (ID: `AC75B1890F13F3CBE08EE992EB18D653`) chegou as `09:55:39.159`
+- "Oi" (ID: `ACBD6693E68C836B390718D268C79E06`) chegou as `09:55:40.561`
 
-```text
-Timeline do problema:
-1. Item A: pending -> processing (OK)
-2. Mensagem nova chega -> tenta criar Item B: pending 
-3. UNIQUE INDEX bloqueia! (pending + processing = 2 ativos)
-4. Fallback: processa direto -> RESPOSTA DUPLICADA
-   OU: mensagem perdida sem resposta
-```
+Porem, apenas "Oi" foi salva no banco de dados.
 
-## Correção
+## Causa Raiz: Race Condition na criacao de conversa
 
-### 1. Migração SQL: Trocar o indice
-
-Remover o indice que bloqueia `pending + processing` juntos e criar **dois indices separados**:
-
-```sql
--- Remover indice restritivo demais
-DROP INDEX IF EXISTS idx_ai_queue_active_conversation;
-
--- Manter apenas: no maximo 1 pending por conversa
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_queue_pending_conversation 
-  ON public.ai_processing_queue(conversation_id) 
-  WHERE status = 'pending';
-
--- Novo: no maximo 1 processing por conversa
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_queue_processing_conversation 
-  ON public.ai_processing_queue(conversation_id) 
-  WHERE status = 'processing';
-```
-
-Isso permite ter 1 pending E 1 processing simultaneamente, mas nunca 2 pendings ou 2 processings.
-
-### 2. Simplificar o tratamento de erro no evolution-webhook
-
-No bloco `insertError` (linhas 1217-1228), remover a recursao e tratar de forma mais segura:
+Quando duas mensagens chegam quase simultaneamente para um **contato novo** (sem conversa existente):
 
 ```text
-if (insertError) {
-  if (insertError.code === '23505') {
-    // Ja existe um pending -- buscar e adicionar mensagem a ele
-    const { data: existingPending } = await supabaseClient
-      .from('ai_processing_queue')
-      .select('id, messages, message_count')
-      .eq('conversation_id', context.conversationId)
-      .eq('status', 'pending')
-      .maybeSingle();
-    
-    if (existingPending) {
-      // Append message to existing pending item
-      const updatedMessages = [...(existingPending.messages || []), messageData];
-      await supabaseClient
-        .from('ai_processing_queue')
-        .update({
-          messages: updatedMessages,
-          message_count: updatedMessages.length,
-          process_after: effectiveProcessAfter, // reset debounce
-        })
-        .eq('id', existingPending.id);
+Webhook 1 ("Bom dia")          Webhook 2 ("Oi")
+    |                               |
+    v                               v
+Busca conversa -> NAO EXISTE   Busca conversa -> NAO EXISTE
+    |                               |
+    v                               v
+INSERT conversa -> SUCESSO     INSERT conversa -> ERRO 23505 (unique constraint)
+    |                               |
+    v                               v
+Salva mensagem -> OK           break; -> MENSAGEM PERDIDA!
+```
+
+A tabela `conversations` tem um indice unico: `idx_conversations_unique_active_remote_jid(remote_jid, whatsapp_instance_id, law_firm_id)`.
+
+Quando o Webhook 2 tenta criar a conversa e recebe erro de constraint unica (codigo `23505`), o codigo atual faz `break` (linha 4553), **abandonando o processamento sem salvar a mensagem**.
+
+## Correcao
+
+### Arquivo: `supabase/functions/evolution-webhook/index.ts`
+
+**Mudanca nas linhas 4551-4554**: Em vez de `break` quando a criacao falhar com unique constraint, re-buscar a conversa existente e continuar o processamento normalmente.
+
+Codigo atual:
+```text
+if (createError) {
+    logDebug('ERROR', `Failed to create conversation`, { requestId, error: createError });
+    break;
+}
+```
+
+Codigo corrigido:
+```text
+if (createError) {
+    if (createError.code === '23505') {
+        // Unique constraint - another webhook already created this conversation
+        // Re-fetch the existing conversation and continue processing
+        logDebug('DB', `Conversation already created by concurrent webhook, re-fetching`, { 
+            requestId, error: createError.code 
+        });
+        
+        const { data: existingConv } = await supabaseClient
+            .from('conversations')
+            .select('*')
+            .eq('remote_jid', remoteJid)
+            .eq('law_firm_id', lawFirmId)
+            .eq('whatsapp_instance_id', instance.id)
+            .is('archived_at', null)
+            .maybeSingle();
+        
+        if (existingConv) {
+            conversation = existingConv;
+            logDebug('DB', `Re-fetched conversation after concurrent creation`, { 
+                requestId, conversationId: conversation.id 
+            });
+        } else {
+            logDebug('ERROR', `Could not re-fetch conversation after 23505`, { requestId });
+            break;
+        }
+    } else {
+        logDebug('ERROR', `Failed to create conversation`, { requestId, error: createError });
+        break;
     }
-    // Se nao encontrou pending, significa que tem processing -- a mensagem
-    // sera coberta pelo proximo processamento (ver nextPending check)
-  } else {
-    // Erro desconhecido -- fallback para processamento direto
-    await processAutomations(supabaseClient, context as AutomationContext);
-  }
 }
 ```
 
-### 3. Garantir que mensagens durante processing nao se percam
+## Resumo
 
-Ajustar a logica: quando ha um `processingItem` ativo, o INSERT de um novo `pending` DEVE funcionar (com os 2 indices separados). Se ainda assim falhar, fazer append ao pending existente em vez de recursao.
-
-Tambem adicionar o `process_after` com verificacao mais robusta no `nextPending` check (linhas 1465-1471):
-
-```text
-// Apos completar o processing, esperar 2s e verificar pending
-// (para dar tempo de mensagens em transito serem enfileiradas)
-const { data: nextPending } = await supabaseClient
-  .from('ai_processing_queue')
-  .select('id')
-  .eq('conversation_id', conversationId)
-  .eq('status', 'pending')
-  .maybeSingle(); // Remover filtro de process_after para pegar QUALQUER pending
-
-if (nextPending) {
-  // Aguardar o debounce restante antes de processar
-  const { data: nextDetails } = await supabaseClient
-    .from('ai_processing_queue')
-    .select('process_after')
-    .eq('id', nextPending.id)
-    .single();
-  
-  const waitMs = Math.max(0, 
-    new Date(nextDetails.process_after).getTime() - Date.now()
-  );
-  
-  if (waitMs > 0) {
-    await new Promise(resolve => setTimeout(resolve, waitMs));
-  }
-  
-  await processQueuedMessages(supabaseClient, conversationId, requestId);
-}
-```
-
-## Fluxo Corrigido
-
-```text
-1. Mensagem 1 chega -> Cria pending (idx_pending OK)
-2. Mensagem 2 chega -> Append ao pending (idx_pending bloqueia duplicata)
-3. Debounce expira -> pending vira processing (idx_processing OK, idx_pending liberado)
-4. Mensagem 3 chega -> Cria novo pending (idx_pending OK, idx_processing ja existe = permitido)
-5. Processing completa -> Verifica pending -> Processa sequencialmente
-6. Resultado: 1 resposta para msgs 1+2, 1 resposta para msg 3 (correto!)
-```
-
-## Resumo das Mudancas
-
-| Arquivo | Mudanca | Risco |
-|---------|---------|-------|
-| Migracao SQL | Trocar 1 indice por 2 separados | Zero -- mais permissivo |
-| evolution-webhook | Remover recursao, usar append | Baixo -- simplifica logica |
-| evolution-webhook | Melhorar nextPending check | Zero -- espera debounce |
+| Mudanca | Risco | Impacto |
+|---------|-------|---------|
+| Tratar erro 23505 na criacao de conversa com re-fetch | Zero - apenas adiciona fallback | Elimina perda de mensagens em contatos novos |
 
 ## Resultado Esperado
 
-- Nenhuma mensagem fica sem resposta
-- Nenhuma resposta duplicada
-- Mensagens que chegam durante processing sao agrupadas no proximo batch
-- Processamento sequencial garantido pelos indices + check pos-completion
+- Quando duas mensagens chegam simultaneamente para um contato novo, ambas serao salvas corretamente
+- O primeiro webhook cria a conversa, o segundo detecta o conflito, re-busca a conversa existente e salva a mensagem normalmente
+- Nenhuma mensagem sera perdida
+
