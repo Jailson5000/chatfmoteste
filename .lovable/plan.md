@@ -1,94 +1,88 @@
 
+# Corrigir exibição de Story Mentions do Instagram
 
-# Correcao: Mensagens perdidas quando duas chegam simultaneamente para contato novo
+## Problema
 
-## Problema Identificado
+Quando alguém menciona sua página em um Story do Instagram, o webhook recebe a mensagem com `attachments[0].type = "story_mention"` e uma URL da imagem/vídeo do story. O código atual só trata os tipos `image`, `video`, `audio` e `file` -- o tipo `story_mention` não é reconhecido, então o conteúdo fica como `[text]` (vazio com tipo "text").
 
-Analisei os logs do webhook e confirmei que **ambas as mensagens foram recebidas** pelo sistema:
-- "Bom dia" (ID: `AC75B1890F13F3CBE08EE992EB18D653`) chegou as `09:55:39.159`
-- "Oi" (ID: `ACBD6693E68C836B390718D268C79E06`) chegou as `09:55:40.561`
-
-Porem, apenas "Oi" foi salva no banco de dados.
-
-## Causa Raiz: Race Condition na criacao de conversa
-
-Quando duas mensagens chegam quase simultaneamente para um **contato novo** (sem conversa existente):
-
+Payload recebido (confirmado nos logs):
 ```text
-Webhook 1 ("Bom dia")          Webhook 2 ("Oi")
-    |                               |
-    v                               v
-Busca conversa -> NAO EXISTE   Busca conversa -> NAO EXISTE
-    |                               |
-    v                               v
-INSERT conversa -> SUCESSO     INSERT conversa -> ERRO 23505 (unique constraint)
-    |                               |
-    v                               v
-Salva mensagem -> OK           break; -> MENSAGEM PERDIDA!
+attachments: [{
+  type: "story_mention",
+  payload: { url: "https://lookaside.fbsbx.com/ig_messaging_cdn/..." }
+}]
 ```
 
-A tabela `conversations` tem um indice unico: `idx_conversations_unique_active_remote_jid(remote_jid, whatsapp_instance_id, law_firm_id)`.
+## Correção
 
-Quando o Webhook 2 tenta criar a conversa e recebe erro de constraint unica (codigo `23505`), o codigo atual faz `break` (linha 4553), **abandonando o processamento sem salvar a mensagem**.
+### Arquivo: `supabase/functions/meta-webhook/index.ts`
 
-## Correcao
+Adicionar tratamento para dois tipos de interação com Stories do Instagram no bloco de attachments (linhas 322-339):
 
-### Arquivo: `supabase/functions/evolution-webhook/index.ts`
+1. **`story_mention`** -- quando alguém menciona a página em um story
+2. **`story_reply`** -- quando alguém responde ao story da página (caso futuro, tratamento preventivo)
 
-**Mudanca nas linhas 4551-4554**: Em vez de `break` quando a criacao falhar com unique constraint, re-buscar a conversa existente e continuar o processamento normalmente.
-
-Codigo atual:
+Código atual (linhas 322-339):
 ```text
-if (createError) {
-    logDebug('ERROR', `Failed to create conversation`, { requestId, error: createError });
-    break;
+if (message.attachments?.length > 0) {
+  const att = message.attachments[0];
+  mediaUrl = att.payload?.url || null;
+  if (att.type === "image") { ... }
+  else if (att.type === "video") { ... }
+  else if (att.type === "audio") { ... }
+  else if (att.type === "file") { ... }
+  if (!content) content = `[${messageType}]`;
 }
 ```
 
-Codigo corrigido:
+Adicionar após o `else if (att.type === "file")`:
+
 ```text
-if (createError) {
-    if (createError.code === '23505') {
-        // Unique constraint - another webhook already created this conversation
-        // Re-fetch the existing conversation and continue processing
-        logDebug('DB', `Conversation already created by concurrent webhook, re-fetching`, { 
-            requestId, error: createError.code 
-        });
-        
-        const { data: existingConv } = await supabaseClient
-            .from('conversations')
-            .select('*')
-            .eq('remote_jid', remoteJid)
-            .eq('law_firm_id', lawFirmId)
-            .eq('whatsapp_instance_id', instance.id)
-            .is('archived_at', null)
-            .maybeSingle();
-        
-        if (existingConv) {
-            conversation = existingConv;
-            logDebug('DB', `Re-fetched conversation after concurrent creation`, { 
-                requestId, conversationId: conversation.id 
-            });
-        } else {
-            logDebug('ERROR', `Could not re-fetch conversation after 23505`, { requestId });
-            break;
-        }
-    } else {
-        logDebug('ERROR', `Failed to create conversation`, { requestId, error: createError });
-        break;
-    }
+} else if (att.type === "story_mention") {
+  messageType = "image"; // story has a visual (image or video)
+  mediaMimeType = "image/jpeg";
+  if (!content) content = "📢 Mencionou você em um story";
+} else if (att.type === "story_reply") {
+  messageType = "image";
+  mediaMimeType = "image/jpeg";
+  if (!content) content = "💬 Respondeu ao seu story";
 }
 ```
+
+Tambem tratar o campo `message.reply_to?.story` que pode vir em respostas a stories:
+
+```text
+// After attachments block, check for story reply metadata
+if (message.reply_to?.story) {
+  const storyUrl = message.reply_to.story.url;
+  if (storyUrl && !mediaUrl) {
+    mediaUrl = storyUrl;
+    mediaMimeType = mediaMimeType || "image/jpeg";
+  }
+  if (!content || content === "[text]") {
+    content = message.text || "💬 Respondeu ao seu story";
+  }
+}
+```
+
+O `mediaUrl` sera armazenado e a imagem/video do story sera baixada e salva no storage (o fluxo existente de download de midia ja faz isso).
+
+## Nota sobre o App em Análise
+
+Como o app da Meta ainda está em análise ("Advanced Access" pendente), a URL do story CDN pode expirar rapidamente ou ter restrições de acesso. A correção garante que:
+- O conteúdo textual sempre exiba algo legível ("Mencionou você em um story")
+- A mídia seja tentada para download, mas se falhar, o texto descritivo permanece
 
 ## Resumo
 
-| Mudanca | Risco | Impacto |
-|---------|-------|---------|
-| Tratar erro 23505 na criacao de conversa com re-fetch | Zero - apenas adiciona fallback | Elimina perda de mensagens em contatos novos |
+| Mudança | Arquivo | Risco |
+|---------|---------|-------|
+| Tratar `story_mention` no bloco de attachments | meta-webhook | Zero -- apenas adiciona novo tipo |
+| Tratar `story_reply` no bloco de attachments | meta-webhook | Zero -- preventivo |
+| Tratar `reply_to.story` metadata | meta-webhook | Zero -- fallback seguro |
 
 ## Resultado Esperado
 
-- Quando duas mensagens chegam simultaneamente para um contato novo, ambas serao salvas corretamente
-- O primeiro webhook cria a conversa, o segundo detecta o conflito, re-busca a conversa existente e salva a mensagem normalmente
-- Nenhuma mensagem sera perdida
-
+- Story mentions aparecem como mensagem com texto "Mencionou você em um story" + imagem do story
+- Story replies aparecem com o texto da resposta + referência ao story
+- Nenhuma mensagem aparece mais como `[text]` genérico
