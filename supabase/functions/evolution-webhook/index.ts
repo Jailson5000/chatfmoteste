@@ -1089,6 +1089,10 @@ interface AutomationContext {
   clientId?: string; // Added for client memory support
   automationId?: string; // ID of the AI agent handling this conversation
   automationName?: string; // Name of the AI agent for display purposes
+  // PDF document support - base64 content for multimodal AI processing
+  documentBase64?: string;
+  documentMimeType?: string;
+  documentFileName?: string;
 }
 
 // =============================================================================
@@ -1155,6 +1159,9 @@ async function queueMessageForAIProcessing(
           instance_id: context.instanceId,
           instance_name: context.instanceName,
           client_id: context.clientId,
+          document_base64: context.documentBase64,
+          document_mime_type: context.documentMimeType,
+          document_file_name: context.documentFileName,
         },
       })
       .eq('id', existingQueue.id);
@@ -1209,6 +1216,9 @@ async function queueMessageForAIProcessing(
           instance_id: context.instanceId,
           instance_name: context.instanceName,
           client_id: context.clientId,
+          document_base64: context.documentBase64,
+          document_mime_type: context.documentMimeType,
+          document_file_name: context.documentFileName,
         },
       })
       .select('id')
@@ -1466,6 +1476,10 @@ async function processQueuedMessages(
       instanceId: metadata.instance_id || '',
       instanceName: metadata.instance_name || '',
       clientId: metadata.client_id,
+      // PDF document data for multimodal AI processing
+      documentBase64: metadata.document_base64,
+      documentMimeType: metadata.document_mime_type,
+      documentFileName: metadata.document_file_name,
     };
 
     // Process the combined messages
@@ -3168,6 +3182,10 @@ async function processWithGemini(
           audioRequested: audioRequestedForThisMessage,
           skipSaveUserMessage: true, // Message already saved by evolution-webhook
           skipSaveAIResponse: true, // evolution-webhook saves AFTER sending to WhatsApp for proper sync
+          // PDF document data for multimodal AI processing
+          documentBase64: context.documentBase64,
+          documentMimeType: context.documentMimeType,
+          documentFileName: context.documentFileName,
         },
       }),
     });
@@ -3330,6 +3348,10 @@ async function processWithGPT(
           audioRequested: audioRequestedForThisMessage,
           skipSaveUserMessage: true, // Message already saved by evolution-webhook
           skipSaveAIResponse: true, // evolution-webhook saves AFTER sending to WhatsApp for proper sync
+          // PDF document data for multimodal AI processing
+          documentBase64: context.documentBase64,
+          documentMimeType: context.documentMimeType,
+          documentFileName: context.documentFileName,
         },
       }),
     });
@@ -4939,6 +4961,88 @@ serve(async (req) => {
           messageContent = data.message.documentMessage.fileName || '';
           mediaUrl = data.message.documentMessage.url || '';
           mediaMimeType = data.message.documentMessage.mimetype || 'application/octet-stream';
+          
+          // PDF extraction: download base64 for AI multimodal processing
+          if (mediaMimeType === 'application/pdf' && currentHandler === 'ai') {
+            try {
+              const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
+              const evolutionBaseUrl = evolutionBaseUrlRaw.replace(/\/+$/, '');
+              const evolutionApiKey = Deno.env.get('EVOLUTION_GLOBAL_API_KEY') ?? '';
+              
+              if (evolutionBaseUrl && evolutionApiKey && instance.instance_name) {
+                logDebug('PDF', 'Downloading PDF base64 for AI processing', { 
+                  requestId, 
+                  fileName: messageContent,
+                  mimeType: mediaMimeType
+                });
+                
+                const pdfMediaUrl = `${evolutionBaseUrl}/chat/getBase64FromMediaMessage/${instance.instance_name}`;
+                const pdfController = new AbortController();
+                const pdfTimeout = setTimeout(() => pdfController.abort(), 10000); // 10s timeout
+                
+                try {
+                  const pdfMediaResponse = await fetch(pdfMediaUrl, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'apikey': evolutionApiKey,
+                    },
+                    body: JSON.stringify({
+                      message: { key: data.key, message: data.message },
+                      convertToMp4: false,
+                    }),
+                    signal: pdfController.signal,
+                  });
+                  clearTimeout(pdfTimeout);
+                  
+                  if (pdfMediaResponse.ok) {
+                    const pdfMediaData = await pdfMediaResponse.json();
+                    const pdfBase64 = pdfMediaData.base64;
+                    
+                    if (pdfBase64) {
+                      // Check size limit: 5MB = ~6.67MB in base64
+                      const base64SizeBytes = pdfBase64.length * 0.75;
+                      const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB
+                      
+                      if (base64SizeBytes <= MAX_PDF_SIZE) {
+                        // Store in a temporary variable to pass through queue metadata
+                        (data as any).__pdfBase64 = pdfBase64;
+                        (data as any).__pdfMimeType = mediaMimeType;
+                        (data as any).__pdfFileName = messageContent;
+                        logDebug('PDF', 'PDF base64 downloaded successfully', { 
+                          requestId, 
+                          base64Length: pdfBase64.length,
+                          estimatedSizeMB: (base64SizeBytes / 1024 / 1024).toFixed(2)
+                        });
+                      } else {
+                        logDebug('PDF', 'PDF too large for AI processing, skipping', { 
+                          requestId, 
+                          sizeMB: (base64SizeBytes / 1024 / 1024).toFixed(2),
+                          maxMB: 5
+                        });
+                      }
+                    }
+                  } else {
+                    logDebug('PDF', 'Failed to download PDF base64', { 
+                      requestId, 
+                      status: pdfMediaResponse.status 
+                    });
+                  }
+                } catch (pdfFetchError) {
+                  clearTimeout(pdfTimeout);
+                  logDebug('PDF', 'Error/timeout downloading PDF base64', { 
+                    requestId, 
+                    error: pdfFetchError instanceof Error ? pdfFetchError.message : pdfFetchError 
+                  });
+                }
+              }
+            } catch (pdfError) {
+              logDebug('PDF', 'Error in PDF extraction setup', { 
+                requestId, 
+                error: pdfError instanceof Error ? pdfError.message : pdfError 
+              });
+            }
+          }
         } else if (data.message?.stickerMessage) {
           // Sticker support: treat as image with webp mime type
           messageType = 'sticker';
@@ -5488,6 +5592,10 @@ serve(async (req) => {
               instanceId: instance.id,
               instanceName: instance.instance_name,
               clientId: conversation.client_id || undefined,
+              // Pass PDF data if available
+              documentBase64: (data as any).__pdfBase64,
+              documentMimeType: (data as any).__pdfMimeType,
+              documentFileName: (data as any).__pdfFileName,
             }, DEBOUNCE_SECONDS, requestId);
           } else {
             logDebug('AUTOMATION', `Skipping automation - handler is human`, { requestId, handler: currentHandler });
