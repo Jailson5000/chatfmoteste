@@ -1485,8 +1485,8 @@ async function processQueuedMessages(
     const documentFileName = metadata.document_file_name;
     const whatsappMessageKey = metadata.whatsapp_message_key;
     
-    if ((documentMimeType === 'application/pdf' || documentMimeType?.startsWith('image/')) && whatsappMessageKey) {
-      const mediaLabel = documentMimeType === 'application/pdf' ? 'PDF' : 'IMAGE';
+    if (documentMimeType?.startsWith('image/') && whatsappMessageKey) {
+      const mediaLabel = 'IMAGE';
       try {
         const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
         const evolutionBaseUrl = evolutionBaseUrlRaw.replace(/\/+$/, '');

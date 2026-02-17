@@ -12,38 +12,7 @@ const MAX_CONTEXT_STRING_LENGTH = 255;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_SOURCES = ['web', 'whatsapp', 'TRAY', 'api', 'WIDGET', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
 
-/**
- * Extract readable text from a PDF base64 string using regex on raw PDF streams.
- * Works for text-based PDFs (not scanned/image-only PDFs).
- */
-function extractTextFromPdfBase64(base64: string): string {
-  try {
-    const binaryStr = atob(base64);
-    const textMatches: string[] = [];
-    
-    // Extract text from PDF text objects: strings between parentheses inside BT..ET blocks
-    const regex = /\(([^)]+)\)/g;
-    let match;
-    while ((match = regex.exec(binaryStr)) !== null) {
-      const text = match[1];
-      // Filter only readable text (ignore binary garbage)
-      if (text.length > 1 && /[a-zA-Z0-9À-ú]/.test(text)) {
-        textMatches.push(text);
-      }
-    }
-    
-    const extractedText = textMatches.join(' ').trim();
-    
-    if (extractedText.length < 10) {
-      return '[Nao foi possivel extrair texto do PDF - pode ser um documento escaneado/imagem]';
-    }
-    
-    // Limit to 3000 chars to avoid overloading the prompt
-    return extractedText.substring(0, 3000);
-  } catch {
-    return '[Erro ao processar conteudo do PDF]';
-  }
-}
+// PDF text extraction removed - regex approach produces garbled text from binary PDF data
 const WIDGET_ID_REGEX = /^widget_[a-zA-Z0-9_-]{10,100}$/;
 
 // Prompt injection detection patterns
@@ -3839,19 +3808,18 @@ INSTRUÇÃO CRÍTICA: Use esses service_ids DIRETAMENTE ao chamar book_appointme
 
     // Add current message (wrapped for injection protection)
     // Handle documents and images differently:
-    // - PDFs: extract text and send as text (gateway doesn't support PDF in image_url)
+    // - PDFs: inform AI about the document (text extraction not supported)
     // - Images: use image_url multimodal (gateway supports image MIME types)
-    if (context?.documentBase64 && context?.documentMimeType?.includes('pdf')) {
-      // PDF: extract text and send as text context
+    if (context?.documentMimeType?.includes('pdf')) {
+      // PDF: we cannot read PDF content, just inform the AI about the document
       const docFileName = context.documentFileName || 'documento.pdf';
-      const pdfText = extractTextFromPdfBase64(context.documentBase64);
-      console.log(`[AI Chat] PDF text extraction for: ${docFileName} (extracted ${pdfText.length} chars)`);
+      console.log(`[AI Chat] PDF received: ${docFileName} (text extraction not supported)`);
       messages.push({
         role: "user",
         content: wrapUserInput(
-          `[Cliente enviou o documento: ${docFileName}]\n` +
-          `Conteudo extraido do PDF:\n---\n${pdfText}\n---\n` +
-          (message ? message : `Analise o conteudo deste documento.`)
+          `[Cliente enviou um documento PDF: ${docFileName}]\n` +
+          `Voce nao tem capacidade de ler o conteudo deste PDF diretamente.\n` +
+          (message ? message : 'Confirme o recebimento do documento ao cliente e continue o atendimento normalmente.')
         ),
       });
     } else if (context?.documentBase64 && context?.documentMimeType?.startsWith('image/')) {
