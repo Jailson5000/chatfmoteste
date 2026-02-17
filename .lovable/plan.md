@@ -1,86 +1,103 @@
 
+# Correcao: Imagens e PDFs Perdem Metadados no Debounce
 
-# Correcao: IA Nao Le PDFs - Remover Extracao Falha e Usar Abordagem Pratica
+## Problema Encontrado
 
-## Problema
+Confirmei nos dados do banco: quando o cliente envia imagem + texto rapidamente (dentro de 10 segundos), o sistema de debounce agrupa as mensagens mas **sobrescreve os metadados da imagem** com os da mensagem de texto (que nao tem mime type nem message key).
 
-A extracao de texto de PDFs via regex NAO funciona para PDFs reais. O log mostra "extracted 3000 chars" mas esses 3000 caracteres sao lixo binario (nomes de fontes, metadados PDF, strings de encoding) que a IA nao consegue interpretar. Por isso ela ignora o documento e repete a resposta anterior.
+Exemplo real do banco:
+- Queue `54693ee9`: 2 mensagens `[image, text("e agora?")]` --> `document_mime_type: ""`, `whatsapp_message_key: null`
+- O texto "e agora?" chegou depois e apagou o mime type `image/jpeg` e a key da imagem
 
-A abordagem de regex `\(([^)]+)\)` captura QUALQUER string entre parenteses no binario do PDF, incluindo:
-- Nomes de fontes: `(TrueType)`, `(Arial-BoldMT)`
-- Metadados: `(D:20260217)`, `(Adobe PDF Library)`
-- Encoding tables: `(A)`, `(B)`, `(space)`
-- Texto real misturado com lixo
+O processador da fila verifica `if (documentMimeType?.startsWith('image/'))` mas encontra string vazia, entao nao baixa a imagem. A IA nao recebe nada visual.
 
-## Solucao: Duas mudancas simples
+## Solucao: Preservar metadados de midia no debounce
 
-### 1. Remover a extracao de texto por regex (nao funciona)
+### Mudanca 1: `supabase/functions/evolution-webhook/index.ts` - Funcao `queueMessageForAIProcessing`
 
-Eliminar a funcao `extractTextFromPdfBase64()` do `ai-chat/index.ts`. Ela da falsa impressao de funcionar (logs mostram "extracted 3000 chars") mas o texto extraido e ilegivel.
-
-### 2. Quando receber PDF, informar a IA sobre o documento sem tentar le-lo
-
-Em vez de enviar texto garbled, enviar uma mensagem clara para a IA:
+No bloco de **update** do queue existente (linha ~1168), em vez de sempre sobrescrever `document_mime_type`, `document_file_name` e `whatsapp_message_key`, preservar os valores anteriores se os novos estiverem vazios:
 
 ```text
-[Cliente enviou um documento PDF: 122.pdf]
-Voce nao tem capacidade de ler o conteudo deste PDF diretamente.
-Confirme o recebimento do documento ao cliente e continue o atendimento normalmente.
-```
+// ANTES (sobrescreve sempre):
+metadata: {
+  document_mime_type: context.documentMimeType,
+  document_file_name: context.documentFileName,
+  whatsapp_message_key: context.whatsappMessageKey,
+}
 
-Isso permite que a IA:
-- Confirme que recebeu o documento
-- Continue o fluxo de atendimento (ex: "Recebi o documento 122.pdf! Vou encaminhar para analise")
-- NAO fique silenciosa como esta acontecendo agora
-
-### Arquivo: `supabase/functions/ai-chat/index.ts`
-
-**Mudanca 1** - Remover a funcao `extractTextFromPdfBase64` (linhas 15-46)
-
-**Mudanca 2** - Simplificar o bloco de PDF (linhas 3844-3856):
-
-```text
-if (context?.documentBase64 && context?.documentMimeType?.includes('pdf')) {
-  const docFileName = context.documentFileName || 'documento.pdf';
-  console.log(`[AI Chat] PDF received: ${docFileName} (text extraction not supported)`);
-  messages.push({
-    role: "user",
-    content: wrapUserInput(
-      `[Cliente enviou um documento PDF: ${docFileName}]\n` +
-      (message ? message : 'Confirme o recebimento do documento e continue o atendimento.')
-    ),
-  });
+// DEPOIS (preserva se novo valor vazio):
+metadata: {
+  ...existingMetadata,  // preservar valores anteriores
+  contact_name: context.contactName,
+  contact_phone: context.contactPhone,
+  remote_jid: context.remoteJid,
+  instance_id: context.instanceId,
+  instance_name: context.instanceName,
+  client_id: context.clientId,
+  // Preservar metadados de midia: so sobrescrever se nova mensagem tem midia
+  document_mime_type: context.documentMimeType || existingMetadata?.document_mime_type,
+  document_file_name: context.documentFileName || existingMetadata?.document_file_name,
+  whatsapp_message_key: context.whatsappMessageKey || existingMetadata?.whatsapp_message_key,
 }
 ```
 
-Nao precisamos mais baixar o base64 do PDF para a IA, entao tambem podemos simplificar o queue processor para nao baixar PDF base64 (apenas imagens). Porem isso e opcional -- o download simplesmente nao sera usado.
+Para isso, precisamos buscar o `metadata` existente no SELECT inicial. Alterar a linha 1147:
 
-### Arquivo: `supabase/functions/evolution-webhook/index.ts`
-
-**Mudanca 3** - No processador da fila, nao baixar base64 de PDFs (so imagens):
-
-Alterar a condicao na linha ~1488 de:
 ```text
-if ((documentMimeType === 'application/pdf' || documentMimeType?.startsWith('image/')) && whatsappMessageKey)
-```
-Para:
-```text
-if (documentMimeType?.startsWith('image/') && whatsappMessageKey)
+// ANTES:
+.select('id, messages, message_count')
+
+// DEPOIS:
+.select('id, messages, message_count, metadata')
 ```
 
-Isso evita download desnecessario de PDFs que a IA nao consegue processar.
+E usar `existingQueue.metadata` ao montar o update.
+
+### Mudanca 2: Tambem armazenar info de midia POR MENSAGEM no array `messages`
+
+Alem de preservar os metadados no nivel do queue item, armazenar o mime type e key diretamente em cada mensagem individual. Isso permite ao processador identificar QUAL mensagem tem midia:
+
+```text
+// No messageData (linha ~1130):
+const messageData = {
+  content: context.messageContent,
+  type: context.messageType,
+  timestamp: new Date().toISOString(),
+  // Adicionar info de midia por mensagem
+  mimeType: context.documentMimeType || undefined,
+  fileName: context.documentFileName || undefined,
+  messageKey: context.whatsappMessageKey || undefined,
+};
+```
+
+### Mudanca 3: Processador da fila - buscar midia da mensagem correta
+
+No processador (linha ~1480), alem de verificar os metadados do nivel do queue item, tambem verificar se alguma mensagem individual tem info de midia:
+
+```text
+// Se metadata de nivel superior nao tem, buscar nas mensagens individuais
+if (!documentMimeType && messages.length > 0) {
+  const mediaMessage = messages.find(m => m.mimeType);
+  if (mediaMessage) {
+    documentMimeType = mediaMessage.mimeType;
+    documentFileName = mediaMessage.fileName;
+    whatsappMessageKey = mediaMessage.messageKey;
+  }
+}
+```
 
 ## Resumo
 
-| Mudanca | Arquivo | Impacto |
-|---------|---------|---------|
-| Remover extractTextFromPdfBase64 | ai-chat | Remove texto garbled |
-| Informar IA sobre PDF sem tentar ler | ai-chat | IA confirma recebimento |
-| Nao baixar base64 de PDFs | evolution-webhook | Evita download inutl |
+| Mudanca | Local | Impacto |
+|---------|-------|---------|
+| Preservar metadados no debounce update | queueMessageForAIProcessing | Mime type nao se perde |
+| Armazenar midia por mensagem | messageData | Cada mensagem carrega sua info |
+| Fallback no processador | processQueueItem | Busca midia de qualquer mensagem |
 
 ## Resultado Esperado
 
-- Cliente envia PDF -> IA responde "Recebi o documento 122.pdf, vou encaminhar para analise"
-- IA NAO fica silenciosa
-- Imagens continuam funcionando com multimodal (image_url)
-- Fluxo de atendimento continua normalmente
+- Cliente envia imagem + texto --> ambos ficam na fila, mime type preservado
+- Processador baixa base64 da imagem e envia para IA via multimodal
+- IA descreve a imagem e responde ao texto
+- PDFs tambem preservam seus metadados no debounce
+- Nenhuma funcionalidade existente e quebrada
