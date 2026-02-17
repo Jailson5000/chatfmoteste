@@ -11,6 +11,39 @@ const MAX_MESSAGE_LENGTH = 10000;
 const MAX_CONTEXT_STRING_LENGTH = 255;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_SOURCES = ['web', 'whatsapp', 'TRAY', 'api', 'WIDGET', 'INSTAGRAM', 'FACEBOOK', 'WHATSAPP_CLOUD'];
+
+/**
+ * Extract readable text from a PDF base64 string using regex on raw PDF streams.
+ * Works for text-based PDFs (not scanned/image-only PDFs).
+ */
+function extractTextFromPdfBase64(base64: string): string {
+  try {
+    const binaryStr = atob(base64);
+    const textMatches: string[] = [];
+    
+    // Extract text from PDF text objects: strings between parentheses inside BT..ET blocks
+    const regex = /\(([^)]+)\)/g;
+    let match;
+    while ((match = regex.exec(binaryStr)) !== null) {
+      const text = match[1];
+      // Filter only readable text (ignore binary garbage)
+      if (text.length > 1 && /[a-zA-Z0-9À-ú]/.test(text)) {
+        textMatches.push(text);
+      }
+    }
+    
+    const extractedText = textMatches.join(' ').trim();
+    
+    if (extractedText.length < 10) {
+      return '[Nao foi possivel extrair texto do PDF - pode ser um documento escaneado/imagem]';
+    }
+    
+    // Limit to 3000 chars to avoid overloading the prompt
+    return extractedText.substring(0, 3000);
+  } catch {
+    return '[Erro ao processar conteudo do PDF]';
+  }
+}
 const WIDGET_ID_REGEX = /^widget_[a-zA-Z0-9_-]{10,100}$/;
 
 // Prompt injection detection patterns
@@ -3805,21 +3838,31 @@ INSTRUÇÃO CRÍTICA: Use esses service_ids DIRETAMENTE ao chamar book_appointme
     }
 
     // Add current message (wrapped for injection protection)
-    // If a PDF document was provided, build multimodal message for Gemini
-    if (context?.documentBase64 && context?.documentMimeType) {
+    // Handle documents and images differently:
+    // - PDFs: extract text and send as text (gateway doesn't support PDF in image_url)
+    // - Images: use image_url multimodal (gateway supports image MIME types)
+    if (context?.documentBase64 && context?.documentMimeType?.includes('pdf')) {
+      // PDF: extract text and send as text context
       const docFileName = context.documentFileName || 'documento.pdf';
-      console.log(`[AI Chat] Building multimodal message with PDF: ${docFileName} (${(context.documentBase64.length / 1024).toFixed(0)}KB base64)`);
+      const pdfText = extractTextFromPdfBase64(context.documentBase64);
+      console.log(`[AI Chat] PDF text extraction for: ${docFileName} (extracted ${pdfText.length} chars)`);
+      messages.push({
+        role: "user",
+        content: wrapUserInput(
+          `[Cliente enviou o documento: ${docFileName}]\n` +
+          `Conteudo extraido do PDF:\n---\n${pdfText}\n---\n` +
+          (message ? message : `Analise o conteudo deste documento.`)
+        ),
+      });
+    } else if (context?.documentBase64 && context?.documentMimeType?.startsWith('image/')) {
+      // Image: use multimodal image_url (supported by gateway)
+      const imgMsg = message || '[Cliente enviou uma imagem]';
+      console.log(`[AI Chat] Building multimodal image message (${context.documentMimeType}, ${(context.documentBase64.length / 1024).toFixed(0)}KB)`);
       messages.push({
         role: "user",
         content: [
-          {
-            type: "image_url",
-            image_url: { url: `data:${context.documentMimeType};base64,${context.documentBase64}` },
-          },
-          {
-            type: "text",
-            text: wrapUserInput(`[Cliente enviou o documento: ${docFileName}]\nAnalise o conteúdo deste PDF e descreva brevemente o que você recebeu.`),
-          },
+          { type: "image_url", image_url: { url: `data:${context.documentMimeType};base64,${context.documentBase64}` } },
+          { type: "text", text: wrapUserInput(imgMsg) },
         ] as any,
       });
     } else {
@@ -3924,6 +3967,32 @@ INSTRUÇÃO CRÍTICA: Use esses service_ids DIRETAMENTE ao chamar book_appointme
             response = await callLovableAI(aiRequestBody);
             usedProvider = "lovable-fallback";
           }
+        }
+      }
+
+      // 400 error with multimodal content: retry with text-only (strip image_url)
+      if (!response.ok && response.status === 400) {
+        const lastMsg = aiRequestBody.messages && Array.isArray(aiRequestBody.messages) 
+          ? (aiRequestBody.messages as any[])[(aiRequestBody.messages as any[]).length - 1] 
+          : null;
+        if (lastMsg && Array.isArray(lastMsg.content)) {
+          const errorText = await response.text();
+          console.log(`[AI Chat] 400 error with multimodal content, retrying text-only. Error: ${errorText.substring(0, 200)}`);
+          
+          // Extract text parts only, discard image_url parts
+          const textParts = lastMsg.content.filter((p: any) => p.type === 'text').map((p: any) => p.text);
+          const textOnly = textParts.join('\n') || wrapUserInput(message || '[Cliente enviou uma mídia]');
+          lastMsg.content = textOnly;
+          
+          // Retry with text-only
+          if (useOpenAI) {
+            response = await callOpenAI(aiRequestBody);
+          } else if (usedProvider.includes("gemini")) {
+            response = await callGeminiDirect(globalGeminiApiKey!, globalGeminiModel, aiRequestBody);
+          } else {
+            response = await callLovableAI(aiRequestBody);
+          }
+          usedProvider += "-text-fallback";
         }
       }
     } catch (networkError) {

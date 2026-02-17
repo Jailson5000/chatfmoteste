@@ -1485,7 +1485,8 @@ async function processQueuedMessages(
     const documentFileName = metadata.document_file_name;
     const whatsappMessageKey = metadata.whatsapp_message_key;
     
-    if (documentMimeType === 'application/pdf' && whatsappMessageKey) {
+    if ((documentMimeType === 'application/pdf' || documentMimeType?.startsWith('image/')) && whatsappMessageKey) {
+      const mediaLabel = documentMimeType === 'application/pdf' ? 'PDF' : 'IMAGE';
       try {
         const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
         const evolutionBaseUrl = evolutionBaseUrlRaw.replace(/\/+$/, '');
@@ -1493,18 +1494,18 @@ async function processQueuedMessages(
         const instanceName = metadata.instance_name;
         
         if (evolutionBaseUrl && evolutionApiKey && instanceName) {
-          logDebug('PDF', 'On-demand PDF download for AI processing', { 
+          logDebug(mediaLabel, `On-demand ${mediaLabel} download for AI processing`, { 
             requestId, 
             fileName: documentFileName,
             instanceName 
           });
           
-          const pdfMediaUrl = `${evolutionBaseUrl}/chat/getBase64FromMediaMessage/${instanceName}`;
-          const pdfController = new AbortController();
-          const pdfTimeout = setTimeout(() => pdfController.abort(), 15000); // 15s timeout
+          const mediaUrl = `${evolutionBaseUrl}/chat/getBase64FromMediaMessage/${instanceName}`;
+          const mediaController = new AbortController();
+          const mediaTimeout = setTimeout(() => mediaController.abort(), 15000); // 15s timeout
           
           const msgKey = JSON.parse(whatsappMessageKey);
-          const pdfMediaResponse = await fetch(pdfMediaUrl, {
+          const mediaResponse = await fetch(mediaUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1514,43 +1515,43 @@ async function processQueuedMessages(
               message: msgKey,
               convertToMp4: false,
             }),
-            signal: pdfController.signal,
+            signal: mediaController.signal,
           });
-          clearTimeout(pdfTimeout);
+          clearTimeout(mediaTimeout);
           
-          if (pdfMediaResponse.ok) {
-            const pdfMediaData = await pdfMediaResponse.json();
-            const pdfBase64 = pdfMediaData.base64;
+          if (mediaResponse.ok) {
+            const mediaData = await mediaResponse.json();
+            const base64 = mediaData.base64;
             
-            if (pdfBase64) {
-              const base64SizeBytes = pdfBase64.length * 0.75;
-              const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5MB
+            if (base64) {
+              const base64SizeBytes = base64.length * 0.75;
+              const MAX_MEDIA_SIZE = 5 * 1024 * 1024; // 5MB
               
-              if (base64SizeBytes <= MAX_PDF_SIZE) {
-                documentBase64 = pdfBase64;
-                logDebug('PDF', 'PDF base64 downloaded on-demand successfully', { 
+              if (base64SizeBytes <= MAX_MEDIA_SIZE) {
+                documentBase64 = base64;
+                logDebug(mediaLabel, `${mediaLabel} base64 downloaded on-demand successfully`, { 
                   requestId, 
-                  base64Length: pdfBase64.length,
+                  base64Length: base64.length,
                   estimatedSizeMB: (base64SizeBytes / 1024 / 1024).toFixed(2)
                 });
               } else {
-                logDebug('PDF', 'PDF too large for AI processing', { 
+                logDebug(mediaLabel, `${mediaLabel} too large for AI processing`, { 
                   requestId, 
                   sizeMB: (base64SizeBytes / 1024 / 1024).toFixed(2)
                 });
               }
             }
           } else {
-            logDebug('PDF', 'Failed to download PDF on-demand', { 
+            logDebug(mediaLabel, `Failed to download ${mediaLabel} on-demand`, { 
               requestId, 
-              status: pdfMediaResponse.status 
+              status: mediaResponse.status 
             });
           }
         }
-      } catch (pdfError) {
-        logDebug('PDF', 'Error/timeout in on-demand PDF download (AI will process without PDF content)', { 
+      } catch (mediaError) {
+        logDebug(mediaLabel, `Error/timeout in on-demand ${mediaLabel} download (AI will process without content)`, { 
           requestId, 
-          error: pdfError instanceof Error ? pdfError.message : String(pdfError)
+          error: mediaError instanceof Error ? mediaError.message : String(mediaError)
         });
       }
     }
@@ -5623,11 +5624,13 @@ serve(async (req) => {
               instanceId: instance.id,
               instanceName: instance.instance_name,
               clientId: conversation.client_id || undefined,
-              // Pass PDF metadata (base64 downloaded on-demand in queue processor)
+              // Pass document/image metadata (base64 downloaded on-demand in queue processor)
               documentMimeType: mediaMimeType,
               documentFileName: messageType === 'document' ? messageContent : undefined,
-              // Store whatsapp message key for on-demand base64 download
-              whatsappMessageKey: messageType === 'document' && mediaMimeType === 'application/pdf' ? JSON.stringify({ key: data.key, message: data.message }) : undefined,
+              // Store whatsapp message key for on-demand base64 download (PDFs AND images)
+              whatsappMessageKey: (messageType === 'document' && mediaMimeType === 'application/pdf') || messageType === 'image'
+                ? JSON.stringify({ key: data.key, message: data.message }) 
+                : undefined,
             }, DEBOUNCE_SECONDS, requestId);
           } else {
             logDebug('AUTOMATION', `Skipping automation - handler is human`, { requestId, handler: currentHandler });
