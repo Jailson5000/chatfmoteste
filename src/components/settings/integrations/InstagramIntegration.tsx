@@ -144,7 +144,6 @@ export function InstagramIntegration() {
         const redirectUri = getFixedRedirectUri("instagram");
         toast.loading("Conectando Instagram...", { id: "ig-connect" });
         try {
-          // Use the new instagram_login flow (direct token exchange via api.instagram.com)
           const response = await supabase.functions.invoke("meta-oauth-callback", {
             body: { code, redirectUri, type: "instagram", flow: "instagram_login" },
           });
@@ -161,19 +160,6 @@ export function InstagramIntegration() {
           console.error("Instagram OAuth error:", err);
           toast.error(err instanceof Error ? err.message : "Erro ao conectar Instagram", { id: "ig-connect" });
         }
-        return;
-      }
-      // Legacy handlers
-      if (event.data?.type === "meta-oauth-success") {
-        window.removeEventListener("message", handleMessage);
-        listenerRef.current = null;
-        queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
-        toast.success("Instagram conectado com sucesso!");
-      }
-      if (event.data?.type === "meta-oauth-error") {
-        window.removeEventListener("message", handleMessage);
-        listenerRef.current = null;
-        toast.error(event.data.message || "Erro ao conectar Instagram");
       }
     };
 
