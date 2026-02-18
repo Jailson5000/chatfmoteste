@@ -31,6 +31,8 @@ import {
   Link2,
   Palette,
   PlayCircle,
+  Instagram,
+  Facebook,
 } from "lucide-react";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 import { supabase } from "@/integrations/supabase/client";
@@ -504,7 +506,7 @@ export function LandingPage() {
             <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold leading-tight">
               Atenda onde seus clientes estão:
               <br />
-              <span className="text-red-500">WhatsApp e Site</span>
+              <span className="text-red-500">WhatsApp, Instagram, Facebook e Site</span>
             </h2>
             <p className="mt-5 text-base md:text-lg text-white/50 max-w-2xl mx-auto leading-relaxed">
               Unifique todos os seus canais de atendimento em uma única plataforma inteligente.
@@ -520,18 +522,70 @@ export function LandingPage() {
               <Phone className="h-10 w-10 text-green-500 mb-4" strokeWidth={1.5} />
               <h3 className="text-xl font-bold mb-3">WhatsApp Integrado</h3>
               <p className="text-sm text-white/50 leading-relaxed mb-4">
-                Conecte múltiplos números de WhatsApp e gerencie todas as conversas em um só lugar. A IA responde automaticamente, qualifica leads e direciona para o atendente certo.
+                Compatível com a API Oficial do WhatsApp Business e conexão direta. Gerencie múltiplos números e deixe a IA atender automaticamente.
               </p>
               <ul className="space-y-2">
                 {[
+                  "API Oficial do WhatsApp",
                   "Múltiplos números conectados",
                   "IA respondendo 24/7",
                   "Transcrição de áudios",
                   "Leitura de imagens",
-                  "Mensagens agendadas",
                 ].map((item) => (
                   <li key={item} className="flex items-center gap-2 text-sm text-white/60">
                     <Check className="h-4 w-4 text-green-500 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Instagram DM Card */}
+            <div className="relative p-6 md:p-8 rounded-2xl border border-white/[0.06] bg-gradient-to-br from-purple-500/5 to-pink-500/5 hover:border-purple-500/20 transition-all duration-300">
+              <div className="absolute top-4 right-4 w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center">
+                <Instagram className="h-6 w-6 text-purple-500" strokeWidth={1.5} />
+              </div>
+              <Instagram className="h-10 w-10 text-purple-500 mb-4" strokeWidth={1.5} />
+              <h3 className="text-xl font-bold mb-3">Instagram Direct</h3>
+              <p className="text-sm text-white/50 leading-relaxed mb-4">
+                Receba e responda mensagens do Instagram Direct na mesma plataforma. IA ou atendente humano, você escolhe.
+              </p>
+              <ul className="space-y-2">
+                {[
+                  "Respostas automáticas com IA",
+                  "Nome e foto do perfil",
+                  "Histórico unificado",
+                  "Story mentions e replies",
+                  "Transferência para humano",
+                ].map((item) => (
+                  <li key={item} className="flex items-center gap-2 text-sm text-white/60">
+                    <Check className="h-4 w-4 text-purple-500 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Facebook Messenger Card */}
+            <div className="relative p-6 md:p-8 rounded-2xl border border-white/[0.06] bg-gradient-to-br from-blue-600/5 to-transparent hover:border-blue-600/20 transition-all duration-300">
+              <div className="absolute top-4 right-4 w-12 h-12 rounded-xl bg-blue-600/10 border border-blue-600/20 flex items-center justify-center">
+                <Facebook className="h-6 w-6 text-blue-500" strokeWidth={1.5} />
+              </div>
+              <Facebook className="h-10 w-10 text-blue-500 mb-4" strokeWidth={1.5} />
+              <h3 className="text-xl font-bold mb-3">Facebook Messenger</h3>
+              <p className="text-sm text-white/50 leading-relaxed mb-4">
+                Atenda mensagens do Messenger da sua página com IA ou atendente humano, tudo no mesmo painel.
+              </p>
+              <ul className="space-y-2">
+                {[
+                  "Integração direta com sua página",
+                  "IA respondendo automaticamente",
+                  "Histórico completo",
+                  "Transferência para humano",
+                  "Qualificação automática",
+                ].map((item) => (
+                  <li key={item} className="flex items-center gap-2 text-sm text-white/60">
+                    <Check className="h-4 w-4 text-blue-500 shrink-0" />
                     <span>{item}</span>
                   </li>
                 ))}
@@ -568,7 +622,7 @@ export function LandingPage() {
           {/* Highlight */}
           <div className="mt-8 p-5 rounded-xl border border-red-500/20 bg-red-500/5 text-center">
             <p className="text-sm text-white/70">
-              <span className="text-red-500 font-semibold">Tudo integrado:</span> Conversas do WhatsApp e do Chat Web aparecem no mesmo painel, com histórico unificado e IA compartilhada.
+              <span className="text-red-500 font-semibold">Tudo integrado:</span> Conversas do WhatsApp, Instagram, Facebook e Chat Web aparecem no mesmo painel, com histórico unificado e IA compartilhada.
             </p>
           </div>
         </div>
