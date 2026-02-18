@@ -21,7 +21,7 @@ export const META_GRAPH_API_VERSION = "v22.0";
 
 // OAuth scopes per channel
 export const META_SCOPES = {
-  instagram: "pages_show_list,instagram_basic,instagram_manage_messages,instagram_business_basic,instagram_business_manage_messages",
+  instagram: "pages_show_list,instagram_basic,instagram_manage_messages",
   facebook: "pages_messaging,pages_manage_metadata,pages_show_list,pages_read_engagement,business_management",
 } as const;
 
