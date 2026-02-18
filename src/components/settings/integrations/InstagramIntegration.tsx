@@ -128,6 +128,12 @@ export function InstagramIntegration() {
       return;
     }
 
+    // Show warning about which account will be connected
+    toast.info(
+      "Importante: O Instagram conectará a conta que está logada no seu navegador. Certifique-se de estar logado na conta correta antes de prosseguir.",
+      { duration: 6000 }
+    );
+
     // Use Instagram Business Login (native Instagram OAuth)
     const authUrl = buildInstagramBusinessLoginUrl();
     window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");

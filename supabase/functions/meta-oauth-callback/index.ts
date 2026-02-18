@@ -1,3 +1,4 @@
+// meta-oauth-callback v2.1 - IGID fix: use me.user_id instead of tokenData.user_id (2026-02-18)
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { encryptToken } from "../_shared/encryption.ts";
 import { corsHeaders } from "../_shared/cors.ts";
