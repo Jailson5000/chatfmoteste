@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
       if (resubConn.ig_account_id) {
         try {
           const igSubRes = await fetch(
-            `https://graph.instagram.com/${GRAPH_API_VERSION}/${resubConn.ig_account_id}/subscribed_apps`,
+            `${GRAPH_API_BASE}/${resubConn.ig_account_id}/subscribed_apps`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },

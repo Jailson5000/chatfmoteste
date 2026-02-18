@@ -252,6 +252,9 @@ export function InstagramIntegration() {
         isLoading={isLoading}
         onToggle={(checked) => toggleMutation.mutate(checked)}
         toggleDisabled={toggleMutation.isPending}
+        onSettings={() => {
+          toast.info(`Página: ${connection.page_name || "N/A"}\nIG Account: ${(connection as any).ig_account_id || "N/A"}`);
+        }}
         onDisconnect={() => {
           if (window.confirm("Deseja desconectar o Instagram? Você poderá reconectar depois.")) {
             deleteMutation.mutate();
