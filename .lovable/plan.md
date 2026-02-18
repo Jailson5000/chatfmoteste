@@ -1,52 +1,42 @@
 
 
-# Corrigir Nome e Foto de Contatos do Instagram
+# Corrigir "Total de Conversas" no Dashboard
 
 ## Problema
 
-Quando um contato novo envia mensagem pelo Instagram, o sistema nao consegue buscar o nome real nem a foto de perfil. O contato aparece como "INSTAGRAM 5644" com o ID numerico em vez do nome e avatar.
+O campo "Total de Conversas" mostra 83, mas deveria mostrar o numero real de conversas. O valor atual e calculado contando apenas conversas que tiveram mensagens no periodo selecionado (`uniqueConversations` derivado da tabela `messages`). Isso exclui conversas que existem mas nao tiveram mensagens no periodo.
 
-Os logs do backend mostram o erro:
-
-```
-Profile fetch failed with fields: name,profile_pic - retrying with name only
-Profile fallback also failed: 400 "Any of the pages_read_engagement, pages_manage_metadata,
-pages_read_user_content, pages_manage_ads, pages_show_list or
-pages_messaging permission(s) must be granted"
-```
+Enquanto isso, "Conversas Ativas" mostra 382 corretamente (todas as conversas nao arquivadas).
 
 ## Causa
 
-Os escopos OAuth do Instagram nao incluem `pages_messaging`, que e uma das permissoes exigidas pela Graph API da Meta para buscar perfis de usuarios via Instagram Messaging API. O escopo atual `pages_show_list` nao e suficiente para esse tipo de chamada.
+No arquivo `src/hooks/useDashboardMetrics.tsx`, o campo `totalConversations` e calculado assim:
+
+```typescript
+const uniqueConversations = new Set(messages?.map(m => m.conversation_id) || []).size;
+```
+
+Isso conta apenas conversas com mensagens no periodo, nao o total real.
 
 ## Solucao
 
-### 1. Adicionar `pages_messaging` aos escopos do Instagram
+Alterar o calculo de `totalConversations` para contar conversas diretamente da tabela `conversations`, usando a data de criacao ou ultima mensagem como filtro de periodo.
 
-**Arquivo:** `src/lib/meta-config.ts`
+### Arquivo: `src/hooks/useDashboardMetrics.tsx`
 
-Alterar os escopos de Instagram de:
-```
-pages_show_list,instagram_basic,instagram_manage_messages
-```
-Para:
-```
-pages_show_list,pages_messaging,instagram_basic,instagram_manage_messages
-```
+1. Adicionar uma query direta a tabela `conversations` com filtro de data no campo `created_at` (conversas criadas no periodo) ou `last_message_at` (conversas com atividade no periodo)
+2. Usar `count: "exact"` para eficiencia
+3. Aplicar os mesmos filtros de atendente, departamento e conexao
 
-O escopo `pages_messaging` permite ao token de pagina buscar perfis de usuarios que interagem via mensagens, incluindo nome e foto.
+O campo "Total de Conversas" passara a mostrar o total de conversas que tiveram atividade (last_message_at) no periodo, incluindo aquelas cujas mensagens individuais podem nao ter sido carregadas.
 
-### 2. Reconectar o Instagram
+### Detalhes tecnicos
 
-Apos a alteracao de escopo, sera necessario **desconectar e reconectar** o Instagram na aba de Integracoes (Configuracoes). Isso e necessario porque o token existente foi obtido sem o escopo `pages_messaging` e nao pode ser atualizado retroativamente.
+Na funcao `queryFn` do `dashboard-message-metrics`:
 
-## Impacto
+- Antes de buscar mensagens, fazer um `SELECT count(*)` em `conversations` com filtro `last_message_at` dentro do range de datas
+- Substituir `uniqueConversations` pelo resultado dessa contagem
+- Manter os demais calculos (received, sent, avgResponseTime) inalterados
 
-- 1 linha alterada em 1 arquivo (`meta-config.ts`)
-- O backend (webhook) ja tem a logica correta para buscar nome e foto -- so precisa de um token com as permissoes certas
-- Apos reconectar, novos contatos terao nome e foto preenchidos automaticamente
-
-## Risco
-
-Baixo. Apenas adiciona um escopo extra ao fluxo OAuth. Nao altera nenhuma logica de backend.
+Isso resolve o problema do limite de 1000 linhas do Supabase que pode estar truncando a contagem de mensagens, e mostra o numero real de conversas com atividade no periodo.
 
