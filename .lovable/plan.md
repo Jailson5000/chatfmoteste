@@ -1,61 +1,49 @@
 
 
-# Corrigir Instagram - ID Errado na Inscricao de Webhook
+# Corrigir Instagram - Redeploy e Orientacoes
 
-## Problema
+## Problemas Identificados
 
-Os logs mostram dois IDs diferentes retornados pela API do Instagram:
+### 1. Edge function nao foi redeployada
+O codigo no repositorio tem a correcao do IGID (usar `me.user_id` em vez de `tokenData.user_id`), mas a versao deployada ainda e antiga. Prova nos logs:
 
-```text
-Token exchange -> user_id: 25982752248032036  (app-scoped user ID)
-/me endpoint   -> user_id: 17841479677897649  (IGID - Instagram Graph API ID)
+- Webhook tentou com ID `25982752248032036` (app-scoped) - ERRADO
+- O `/me` retornou `17841479677897649` (IGID) - CORRETO mas nao foi usado
+- DB salvou `page_id: 25982752248032036` - ERRADO
+
+### 2. Conta errada conectada
+Os logs mostram `username: "miau.chat"` conectada. O Instagram da FMO mostra "Nenhum app ativo" porque a autorizacao foi feita na conta do MiauChat, nao na FMO.
+
+### 3. Comportamento do Instagram Business Login
+Com Instagram Business Login (nativo), **nao existe seletor de pagina/conta**. Ele conecta automaticamente a conta Instagram que esta logada no navegador. Isso e comportamento correto da API da Meta.
+
+## Correcoes
+
+### Acao 1: Redesenhar o meta-oauth-callback (sem alteracao de codigo)
+O codigo no repositorio JA esta correto. So precisa ser redeployado. A edge function sera forçada a redesenhar para garantir que a versao mais recente esteja rodando.
+
+### Acao 2: Adicionar instrucoes no frontend
+Atualizar o componente `InstagramIntegration.tsx` para mostrar uma instrucao ao usuario antes de abrir o popup OAuth, explicando que ele deve estar logado na conta Instagram correta no navegador.
+
+Adicionar um toast informativo ou texto descritivo:
+```
+"Importante: Antes de conectar, certifique-se de estar logado na conta Instagram correta no seu navegador."
 ```
 
-O codigo usa `tokenData.user_id` (app-scoped ID) para:
-1. Inscrever webhooks em `graph.instagram.com/{id}/subscribed_apps`
-2. Salvar como `page_id` e `ig_account_id` no banco
+### Acao 3: Forcionar o redeploy da edge function
+Adicionar um comentario ou pequena alteracao no `meta-oauth-callback/index.ts` para forcar o rebuild e deploy da versao correta que ja tem a correcao do IGID.
 
-Porem, a API do Instagram requer o **IGID** (retornado por `/me`) para operacoes como webhook subscription e envio de mensagens. O app-scoped ID nao e reconhecido como um objeto valido na Graph API, gerando o erro:
+## Passos apos deploy
 
-```
-"Object with ID '25982752248032036' does not exist, cannot be loaded due to missing permissions"
-```
+1. **Desconectar** a conexao atual (miau.chat) no sistema
+2. **Fazer logout** do Instagram no navegador
+3. **Fazer login** na conta Instagram da FMO no navegador
+4. **Clicar "Conectar"** no painel - agora vai conectar a conta da FMO com o IGID correto
+5. No app do Instagram da FMO, verificar em Configuracoes > Privacidade > Apps e sites que o MiauChat-IG aparece como ativo
+6. Ativar "Permitir acesso a mensagens" em Configuracoes > Mensagens > Ferramentas conectadas
 
-## Correcao
+## Arquivos Alterados
 
-### Arquivo: `supabase/functions/meta-oauth-callback/index.ts`
-
-Alterar a logica para usar `me.user_id` (IGID) em vez de `tokenData.user_id` (app-scoped ID) em todos os lugares:
-
-**Linha 125** - Manter `tokenData.user_id` apenas como fallback inicial
-
-**Apos buscar `/me` (linha 143)** - Reatribuir `igUserId` para `me.user_id || me.id`:
-
-```typescript
-// ANTES (errado):
-const igUserId = String(tokenData.user_id);
-// ... usado em tudo depois
-
-// DEPOIS (correto):
-const appScopedId = String(tokenData.user_id); // apenas para log
-// ... apos /me:
-const igUserId = String(me.user_id || me.id || appScopedId);
-```
-
-Isso corrige automaticamente:
-- Webhook subscription (linha 155): usara o IGID correto
-- `page_id` salvo no banco (linha 183): usara o IGID correto
-- `ig_account_id` salvo no banco (linha 185): usara o IGID correto
-
-### Impacto
-
-Apos o deploy, o usuario deve **desconectar e reconectar** o Instagram para que a nova conexao seja salva com o IGID correto e a inscricao de webhook funcione.
-
-## Detalhes Tecnicos
-
-A API do Instagram retorna dois tipos de ID:
-- **App-scoped ID** (`tokenData.user_id`): Unico por app, usado internamente pelo Instagram para identificar o usuario no contexto do app. NAO pode ser usado em chamadas da Graph API.
-- **IGID** (`me.user_id` ou `me.id`): O ID real do usuario no Instagram Graph, usado para todas as operacoes da API (webhook, mensagens, etc).
-
-A correcao e de uma linha: usar o ID correto retornado pelo `/me` em vez do ID retornado pela troca de token.
+1. `supabase/functions/meta-oauth-callback/index.ts` - Forcar redeploy (comentario de versao)
+2. `src/components/settings/integrations/InstagramIntegration.tsx` - Adicionar instrucao sobre conta logada
 
