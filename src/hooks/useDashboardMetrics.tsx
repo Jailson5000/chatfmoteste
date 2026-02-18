@@ -142,7 +142,26 @@ export function useDashboardMetrics(filters: DashboardFilters) {
       // is_from_me: true = sent, false = received
       const received = messages?.filter(m => m.is_from_me === false).length || 0;
       const sent = messages?.filter(m => m.is_from_me === true).length || 0;
-      const uniqueConversations = new Set(messages?.map(m => m.conversation_id) || []).size;
+
+      // Count total conversations with activity in the period directly from conversations table
+      let totalConvQuery = supabase
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("law_firm_id", lawFirm.id)
+        .gte("last_message_at", startDate.toISOString())
+        .lte("last_message_at", endDate.toISOString());
+
+      if (filters.attendantIds.length > 0) {
+        totalConvQuery = totalConvQuery.in("assigned_to", filters.attendantIds);
+      }
+      if (filters.departmentIds.length > 0) {
+        totalConvQuery = totalConvQuery.in("department_id", filters.departmentIds);
+      }
+      if (filters.connectionIds.length > 0) {
+        totalConvQuery = totalConvQuery.in("whatsapp_instance_id", filters.connectionIds);
+      }
+
+      const { count: totalConversationsCount } = await totalConvQuery;
 
       // Calculate average response time
       let totalResponseTime = 0;
@@ -202,7 +221,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
       return {
         totalReceived: received,
         totalSent: sent,
-        totalConversations: uniqueConversations,
+        totalConversations: totalConversationsCount || 0,
         activeConversations: activeCount || 0,
         avgResponseTime,
       };
