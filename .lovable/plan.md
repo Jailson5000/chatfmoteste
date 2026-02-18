@@ -1,103 +1,100 @@
 
-# Correcao: Imagens e PDFs Perdem Metadados no Debounce
+# Analise Completa: Captura de Eventos - WhatsApp, Instagram e Facebook
 
-## Problema Encontrado
+## Status Atual: Permissoes Aprovadas vs Codigo
 
-Confirmei nos dados do banco: quando o cliente envia imagem + texto rapidamente (dentro de 10 segundos), o sistema de debounce agrupa as mensagens mas **sobrescreve os metadados da imagem** com os da mensagem de texto (que nao tem mime type nem message key).
+Todas as permissoes do App Meta foram aprovadas. Vamos comparar com o que o codigo solicita e processa.
 
-Exemplo real do banco:
-- Queue `54693ee9`: 2 mensagens `[image, text("e agora?")]` --> `document_mime_type: ""`, `whatsapp_message_key: null`
-- O texto "e agora?" chegou depois e apagou o mime type `image/jpeg` e a key da imagem
+## 1. WhatsApp Cloud (API Oficial)
 
-O processador da fila verifica `if (documentMimeType?.startsWith('image/'))` mas encontra string vazia, entao nao baixa a imagem. A IA nao recebe nada visual.
+**Status: OK - Funcionando**
 
-## Solucao: Preservar metadados de midia no debounce
+- Conexao via Embedded Signup - nao depende de escopos OAuth
+- Webhook processa: `text`, `image`, `audio`, `video`, `document`, `sticker`, `button`, `interactive` (list_reply, button_reply)
+- Delivery statuses (`delivered`, `read`, `failed`) sao rastreados
+- Media e baixada e armazenada no Storage
+- Permissoes `whatsapp_business_messaging` e `whatsapp_business_management` sao concedidas automaticamente pelo Embedded Signup
 
-### Mudanca 1: `supabase/functions/evolution-webhook/index.ts` - Funcao `queueMessageForAIProcessing`
+**Nenhuma mudanca necessaria.**
 
-No bloco de **update** do queue existente (linha ~1168), em vez de sempre sobrescrever `document_mime_type`, `document_file_name` e `whatsapp_message_key`, preservar os valores anteriores se os novos estiverem vazios:
+## 2. Instagram
 
-```text
-// ANTES (sobrescreve sempre):
-metadata: {
-  document_mime_type: context.documentMimeType,
-  document_file_name: context.documentFileName,
-  whatsapp_message_key: context.whatsappMessageKey,
-}
+**Status: Funcional, mas com melhoria possivel nos escopos OAuth**
 
-// DEPOIS (preserva se novo valor vazio):
-metadata: {
-  ...existingMetadata,  // preservar valores anteriores
-  contact_name: context.contactName,
-  contact_phone: context.contactPhone,
-  remote_jid: context.remoteJid,
-  instance_id: context.instanceId,
-  instance_name: context.instanceName,
-  client_id: context.clientId,
-  // Preservar metadados de midia: so sobrescrever se nova mensagem tem midia
-  document_mime_type: context.documentMimeType || existingMetadata?.document_mime_type,
-  document_file_name: context.documentFileName || existingMetadata?.document_file_name,
-  whatsapp_message_key: context.whatsappMessageKey || existingMetadata?.whatsapp_message_key,
-}
+Escopos atuais solicitados no OAuth:
+```
+pages_show_list, instagram_basic, instagram_manage_messages
 ```
 
-Para isso, precisamos buscar o `metadata` existente no SELECT inicial. Alterar a linha 1147:
-
-```text
-// ANTES:
-.select('id, messages, message_count')
-
-// DEPOIS:
-.select('id, messages, message_count, metadata')
+A Meta aprovou tambem os NOVOS escopos:
+```
+instagram_business_basic, instagram_business_manage_messages
 ```
 
-E usar `existingQueue.metadata` ao montar o update.
+Os escopos novos (`instagram_business_*`) sao a versao atualizada dos antigos. Adiciona-los garante compatibilidade futura, pois a Meta pode deprecar os antigos.
 
-### Mudanca 2: Tambem armazenar info de midia POR MENSAGEM no array `messages`
+**Webhook subscription** atual: `messages, messaging_postbacks, messaging_optins` -- correto para Instagram DM.
 
-Alem de preservar os metadados no nivel do queue item, armazenar o mime type e key diretamente em cada mensagem individual. Isso permite ao processador identificar QUAL mensagem tem midia:
+**Mudanca necessaria:**
+- Adicionar `instagram_business_basic,instagram_business_manage_messages` aos escopos OAuth do Instagram
 
-```text
-// No messageData (linha ~1130):
-const messageData = {
-  content: context.messageContent,
-  type: context.messageType,
-  timestamp: new Date().toISOString(),
-  // Adicionar info de midia por mensagem
-  mimeType: context.documentMimeType || undefined,
-  fileName: context.documentFileName || undefined,
-  messageKey: context.whatsappMessageKey || undefined,
-};
+## 3. Facebook Messenger
+
+**Status: Funcional, com uma melhoria util**
+
+Escopos atuais:
+```
+pages_messaging, pages_manage_metadata, pages_show_list
 ```
 
-### Mudanca 3: Processador da fila - buscar midia da mensagem correta
+Permissao aprovada mas NAO solicitada:
+- `pages_read_engagement` -- permite ler comentarios e engajamento da pagina
+- `business_management` -- util para fluxos que acessam WABA via OAuth legado
 
-No processador (linha ~1480), alem de verificar os metadados do nivel do queue item, tambem verificar se alguma mensagem individual tem info de midia:
+**Webhook subscription** atual: `messages, messaging_postbacks, messaging_optins` -- correto para Messenger.
 
-```text
-// Se metadata de nivel superior nao tem, buscar nas mensagens individuais
-if (!documentMimeType && messages.length > 0) {
-  const mediaMessage = messages.find(m => m.mimeType);
-  if (mediaMessage) {
-    documentMimeType = mediaMessage.mimeType;
-    documentFileName = mediaMessage.fileName;
-    whatsappMessageKey = mediaMessage.messageKey;
-  }
+**Mudanca necessaria:**
+- Adicionar `pages_read_engagement` aos escopos OAuth do Facebook (permite futuras funcionalidades de engajamento)
+- Adicionar `business_management` aos escopos do Facebook (util para descoberta de WABA no fluxo legado)
+
+## Resumo das Mudancas
+
+Apenas **1 arquivo** precisa ser alterado:
+
+### Arquivo: `src/lib/meta-config.ts`
+
+Atualizar os escopos OAuth para incluir todas as permissoes aprovadas:
+
+```
+META_SCOPES = {
+  instagram: "pages_show_list,instagram_basic,instagram_manage_messages,instagram_business_basic,instagram_business_manage_messages",
+  facebook: "pages_messaging,pages_manage_metadata,pages_show_list,pages_read_engagement,business_management",
 }
 ```
 
-## Resumo
+Isso garante que:
+- Tokens gerados pelo OAuth tenham TODAS as permissoes aprovadas
+- Compatibilidade futura com deprecacao dos escopos antigos do Instagram
+- Acesso a dados de engajamento do Facebook quando necessario
 
-| Mudanca | Local | Impacto |
-|---------|-------|---------|
-| Preservar metadados no debounce update | queueMessageForAIProcessing | Mime type nao se perde |
-| Armazenar midia por mensagem | messageData | Cada mensagem carrega sua info |
-| Fallback no processador | processQueueItem | Busca midia de qualquer mensagem |
+## O Que JA Esta Correto (nao mexer)
 
-## Resultado Esperado
+| Componente | Status |
+|---|---|
+| Webhook verificacao (GET) | OK |
+| Webhook Instagram DM | OK |
+| Webhook Facebook Messenger | OK |
+| Webhook WhatsApp Cloud | OK |
+| Delivery statuses (WABA) | OK |
+| Download de midia (WABA) | OK |
+| Attachments Instagram/Facebook | OK |
+| Story mentions e replies | OK |
+| Button e interactive messages | OK |
+| Criacao de clientes e conversas | OK |
+| Resolucao de nomes via Graph API | OK |
+| Subscription de paginas no OAuth | OK |
+| Embedded Signup (WhatsApp) | OK |
 
-- Cliente envia imagem + texto --> ambos ficam na fila, mime type preservado
-- Processador baixa base64 da imagem e envia para IA via multimodal
-- IA descreve a imagem e responde ao texto
-- PDFs tambem preservam seus metadados no debounce
-- Nenhuma funcionalidade existente e quebrada
+## Risco
+
+Risco ZERO. Adicionar escopos extras no OAuth nao quebra nada -- o usuario simplesmente vera mais permissoes na tela de autorizacao. Conexoes existentes continuam funcionando com os tokens atuais. Apenas NOVAS conexoes usarao os escopos ampliados.
