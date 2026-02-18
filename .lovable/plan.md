@@ -1,57 +1,107 @@
 
-
-# Corrigir Recebimento de Mensagens do Instagram
+# Corrigir Recebimento de Mensagens do Instagram - FMO
 
 ## Problema
 
-Mensagens enviadas para o Instagram da FMO (@fmoadvbr) nao chegam ao sistema, apesar da conexao mostrar "Conectado". O webhook funciona corretamente para outras contas (MiauChat), mas zero eventos chegam para a conta da FMO.
+O Instagram da FMO esta "Conectado" no sistema e o `subscribed_apps` retornou sucesso, mas a conta Instagram da FMO nao aparece nos "Limites de volume do Instagram" no painel da Meta. Isso significa que a Meta nao esta enviando eventos de webhook para essa conta.
 
-## Causa Raiz
+## Analise
 
-Bug no arquivo `supabase/functions/meta-oauth-callback/index.ts`, linha 150:
+Dados do banco de dados:
+- FMO tem Facebook e Instagram conectados usando a **mesma pagina** (`119080757952130`)
+- Facebook conectado as 18:55:39, Instagram as 18:56:40 (apenas 1 minuto depois)
+- MiauChat (funciona) teve Facebook conectado 1.5 horas antes do Instagram
 
-A variavel `GRAPH_API_BASE_LOCAL` e definida dentro do bloco `if (!igBizId)` (linha 92), mas e usada fora dele na linha 150 para fazer a inscricao no webhook (`subscribed_apps`). Quando o frontend envia o `igAccountId` (que e o caso no fluxo do page picker), o bloco condicional e pulado, `GRAPH_API_BASE_LOCAL` fica `undefined`, e a chamada `subscribed_apps` falha silenciosamente dentro do `try/catch` vazio.
-
-Resultado: a pagina nunca e inscrita para receber eventos de webhook, e mensagens do Instagram nunca chegam.
+O `POST /{page_id}/subscribed_apps` retornou sucesso, mas isso apenas inscreve a Pagina para webhooks. Para Instagram, a Meta tambem precisa reconhecer a conta IG Business como conectada ao app para mensagens.
 
 ## Solucao
 
-### Arquivo: `supabase/functions/meta-oauth-callback/index.ts`
+### 1. Adicionar acao `resubscribe` na Edge Function `meta-api`
 
-1. **Usar a constante global `GRAPH_API_BASE`** (ja definida na linha 6) em vez de `GRAPH_API_BASE_LOCAL` na chamada do `subscribed_apps` (linha 150)
+Nova acao que:
+- Busca a conexao Instagram do tenant
+- Decripta o token salvo
+- Faz `GET /{page_id}/subscribed_apps` para verificar o status atual da inscricao
+- Faz `POST /{page_id}/subscribed_apps` para re-inscrever
+- Retorna o resultado detalhado para o frontend
 
-2. **Adicionar log do resultado** da inscricao para diagnostico futuro, removendo o `catch {}` vazio
+### 2. Adicionar acao `diagnose` na Edge Function `meta-api`
 
-### Codigo corrigido (linhas 148-158):
+Nova acao que:
+- Verifica se a inscricao esta ativa via `GET /{page_id}/subscribed_apps`
+- Testa acesso ao IG account via Graph API
+- Verifica validade do token
+- Retorna relatorio completo
+
+### 3. Atualizar Frontend do Instagram
+
+No `InstagramIntegration.tsx`:
+- Ao ativar o toggle (toggle ON), automaticamente chamar `resubscribe` para garantir inscricao
+- Alterar botao de configuracoes para mostrar diagnostico real
+- Adicionar botao "Reinscrever" no painel de configuracoes
+
+### 4. Melhorar a inscricao no OAuth Callback
+
+No `meta-oauth-callback/index.ts`:
+- Apos o `POST subscribed_apps`, fazer um `GET subscribed_apps` para VERIFICAR se a inscricao realmente esta ativa
+- Logar o resultado da verificacao
+- Se a verificacao falhar, tentar novamente apos 2 segundos (retry)
+
+## Detalhes Tecnicos
+
+### Nova acao `resubscribe` (meta-api):
 
 ```typescript
-// Subscribe page to webhooks for Instagram messaging
-try {
-  const subRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      subscribed_fields: "messages,messaging_postbacks,messaging_optins",
-      access_token: pageAccessToken,
-    }),
-  });
-  const subData = await subRes.json();
-  console.log("[meta-oauth] Instagram webhook subscription result:", JSON.stringify(subData));
-} catch (subErr) {
-  console.error("[meta-oauth] Instagram webhook subscription error:", subErr);
+if (action === "resubscribe") {
+  // 1. Buscar conexao pelo connectionId ou pelo tenant
+  // 2. Decriptar token
+  // 3. GET /{page_id}/subscribed_apps para ver status atual
+  // 4. POST /{page_id}/subscribed_apps com messages,messaging_postbacks,messaging_optins
+  // 5. GET /{page_id}/subscribed_apps novamente para confirmar
+  // 6. Retornar resultado detalhado
 }
 ```
 
-### Acao adicional apos deploy
+### Toggle ON com resubscribe (InstagramIntegration.tsx):
 
-Apos o deploy, sera necessario **reconectar o Instagram da FMO** (desconectar e conectar novamente) para que a inscricao do webhook seja executada com a correcao. Alternativamente, podemos adicionar uma acao "resubscribe" para evitar a reconexao.
+```typescript
+const toggleMutation = useMutation({
+  mutationFn: async (isActive: boolean) => {
+    // Atualizar status no banco
+    await supabase.from("meta_connections").update({ is_active: isActive }).eq("id", connection.id);
+    // Se ativando, re-inscrever automaticamente
+    if (isActive) {
+      await supabase.functions.invoke("meta-api", {
+        body: { action: "resubscribe", connectionId: connection.id }
+      });
+    }
+  }
+});
+```
+
+### Verificacao pos-inscricao (meta-oauth-callback):
+
+```typescript
+// Apos POST subscribed_apps, verificar:
+const verifyRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${pageAccessToken}`);
+const verifyData = await verifyRes.json();
+console.log("[meta-oauth] Subscription verification:", JSON.stringify(verifyData));
+```
 
 ## Arquivos Alterados
 
-1. `supabase/functions/meta-oauth-callback/index.ts` - corrigir referencia a variavel e adicionar logs
+1. `supabase/functions/meta-api/index.ts` - adicionar acoes `resubscribe` e `diagnose`
+2. `supabase/functions/meta-oauth-callback/index.ts` - adicionar verificacao pos-inscricao com retry
+3. `src/components/settings/integrations/InstagramIntegration.tsx` - resubscribe automatico ao ativar + botao de diagnostico
+
+## Acao Imediata Apos Deploy
+
+Depois que o codigo for implementado, voce podera:
+1. Desativar e reativar o Instagram da FMO no sistema (isso disparara o resubscribe automatico)
+2. Ou usar o botao de diagnostico para verificar o status da inscricao
 
 ## Impacto
 
-- Corrige o bug que impede a inscricao de webhook para novas conexoes Instagram
-- Nao afeta conexoes existentes que ja funcionam
-- Baixo risco: apenas corrige uma referencia de variavel incorreta
+- Baixo risco: adiciona funcionalidade sem alterar fluxos existentes de envio/recebimento
+- Resolve o problema caso a inscricao tenha falhado silenciosamente
+- Previne problemas futuros com verificacao pos-inscricao
