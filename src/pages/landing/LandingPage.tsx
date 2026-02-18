@@ -519,7 +519,7 @@ export function LandingPage() {
               <div className="absolute top-4 right-4 w-12 h-12 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center">
                 <MessageCircle className="h-6 w-6 text-green-500" strokeWidth={1.5} />
               </div>
-              <Phone className="h-10 w-10 text-green-500 mb-4" strokeWidth={1.5} />
+              <MessageCircle className="h-10 w-10 text-green-500 mb-4" strokeWidth={1.5} />
               <h3 className="text-xl font-bold mb-3">WhatsApp Integrado</h3>
               <p className="text-sm text-white/50 leading-relaxed mb-4">
                 Compatível com a API Oficial do WhatsApp Business e conexão direta. Gerencie múltiplos números e deixe a IA atender automaticamente.
@@ -546,14 +546,13 @@ export function LandingPage() {
                 <Instagram className="h-6 w-6 text-purple-500" strokeWidth={1.5} />
               </div>
               <Instagram className="h-10 w-10 text-purple-500 mb-4" strokeWidth={1.5} />
-              <h3 className="text-xl font-bold mb-3">Instagram Direct</h3>
+              <h3 className="text-xl font-bold mb-3">Instagram</h3>
               <p className="text-sm text-white/50 leading-relaxed mb-4">
                 Receba e responda mensagens do Instagram Direct na mesma plataforma. IA ou atendente humano, você escolhe.
               </p>
               <ul className="space-y-2">
                 {[
                   "Respostas automáticas com IA",
-                  "Nome e foto do perfil",
                   "Histórico unificado",
                   "Story mentions e replies",
                   "Transferência para humano",
