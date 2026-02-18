@@ -19,6 +19,9 @@ export const META_CONFIG_ID = import.meta.env.VITE_META_CONFIG_ID || "1461954655
 // Graph API version used across all Meta integrations
 export const META_GRAPH_API_VERSION = "v22.0";
 
+// Scopes for Instagram Business Login (mandatory since Jan 2025)
+export const INSTAGRAM_BUSINESS_SCOPES = "instagram_business_basic,instagram_business_manage_messages";
+
 // OAuth scopes per channel
 export const META_SCOPES = {
   instagram: "pages_show_list,pages_messaging,pages_manage_metadata,instagram_basic,instagram_manage_messages",
@@ -59,4 +62,15 @@ export function buildMetaOAuthUrl(type: "instagram" | "facebook"): string {
   // Both Instagram and Facebook now use the Facebook OAuth dialog
   // Instagram uses Facebook OAuth to access me/accounts and list linked IG business accounts
   return `https://www.facebook.com/${META_GRAPH_API_VERSION}/dialog/oauth?client_id=${META_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&state=${encodeURIComponent(state)}&response_type=code`;
+}
+
+/**
+ * Build the OAuth URL for Instagram Business Login (native Instagram flow).
+ * Uses instagram.com/oauth/authorize with the dedicated Instagram App ID.
+ * This is the correct flow for Instagram DM messaging.
+ */
+export function buildInstagramBusinessLoginUrl(): string {
+  const redirectUri = getFixedRedirectUri("instagram");
+  const state = JSON.stringify({ type: "instagram" });
+  return `https://www.instagram.com/oauth/authorize?client_id=${META_INSTAGRAM_APP_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${INSTAGRAM_BUSINESS_SCOPES}&response_type=code&state=${encodeURIComponent(state)}&enable_fb_login=0&force_authentication=1`;
 }
