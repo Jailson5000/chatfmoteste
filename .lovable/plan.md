@@ -1,56 +1,52 @@
 
 
-# Corrigir Nome e Foto de Perfil do Instagram
+# Corrigir Nome e Foto de Perfil do Facebook Messenger
 
 ## Problema
 
-Os logs mostram o erro:
+Os logs mostram que a busca de perfil do Facebook falha com:
 ```
-"Invalid OAuth access token - Cannot parse access token"
-```
-
-O codigo atual busca perfis de contatos do Instagram em `graph.facebook.com`:
-```
-https://graph.facebook.com/v22.0/{senderId}?fields=name,profile_pic&access_token={token}
+"Unsupported get request. Object with ID '7584297064950182' does not exist,
+cannot be loaded due to missing permissions"
 ```
 
-Porem, o token de Instagram Business Login e um **Instagram User Access Token**, que so funciona em `graph.instagram.com`. O Facebook nao reconhece esse token, gerando o erro.
+A API `GET /{PSID}?fields=first_name,last_name,profile_pic` requer que o app tenha a feature **"Business Asset User Profile Access"** aprovada no painel da Meta. Sem ela, o endpoint retorna erro mesmo com Page Access Token valido.
 
-## Correcao
+## Solucao
 
-### Arquivo: `supabase/functions/meta-webhook/index.ts` (linhas 402-446)
+Usar uma abordagem alternativa que nao requer essa feature: buscar o nome do remetente via **Message ID** (`mid`) do webhook.
 
-Alterar o bloco de resolucao de perfil para usar o endpoint correto por canal:
+O endpoint `GET /{message_id}?fields=from` retorna o campo `from.name` do remetente, e funciona com as permissoes ja concedidas (`pages_messaging`).
 
-- **Instagram**: `https://graph.instagram.com/v22.0/{senderId}?fields=name,profile_pic&access_token={token}`
-- **Facebook**: `https://graph.facebook.com/v22.0/{senderId}?fields=first_name,last_name,profile_pic&access_token={token}` (sem alteracao)
+## Alteracoes
 
-A mudanca e apenas na URL base usada para Instagram. O campo `name` e `profile_pic` continuam validos na API do Instagram.
+### Arquivo: `supabase/functions/meta-webhook/index.ts`
 
-### Tambem corrigir o fallback (linha 419-421)
+1. **Capturar o `mid`** do payload do webhook (ja disponivel em `message.mid`)
 
-O fallback tambem usa `graph.facebook.com` e precisa ser atualizado para usar `graph.instagram.com` quando o canal for Instagram.
-
-### Detalhes Tecnicos
+2. **Alterar a logica de resolucao de perfil para Facebook**: Em vez de `GET /{PSID}?fields=first_name,last_name,profile_pic`, usar:
 
 ```typescript
-// Determinar base URL por canal
-const graphBase = origin === "INSTAGRAM" 
-  ? "https://graph.instagram.com/v22.0" 
-  : "https://graph.facebook.com/v22.0";
-
-// Busca principal
-const profileRes = await fetch(
-  `${graphBase}/${senderId}?fields=${fields}&access_token=${token}`
-);
-
-// Fallback tambem usa graphBase
-const fallbackRes = await fetch(
-  `${graphBase}/${senderId}?fields=${fallbackField}&access_token=${token}`
-);
+// Facebook: use message ID to get sender name (doesn't require Business Asset User Profile Access)
+if (origin === "FACEBOOK" && messageMid) {
+  const midRes = await fetch(
+    `https://graph.facebook.com/v22.0/${messageMid}?fields=from&access_token=${token}`
+  );
+  if (midRes.ok) {
+    const midData = await midRes.json();
+    resolvedName = midData.from?.name || null;
+  }
+}
 ```
 
-### Clientes existentes
+3. **Manter o fluxo atual como fallback**: Se o `mid` approach falhar, tenta o endpoint original `/{PSID}` como fallback (para o caso da feature ser aprovada no futuro).
 
-Os contatos que ja foram criados com nome generico (ex: "INSTAGRAM 6179") serao atualizados automaticamente na proxima mensagem recebida, pois o codigo ja detecta nomes genericos e tenta resolver novamente (linha 376-379).
+4. **Instagram continua inalterado**: Ja funciona com `graph.instagram.com/{senderId}?fields=name,profile_pic`.
 
+### Limitacao
+
+A abordagem via `mid` retorna apenas o **nome** do contato, nao a foto de perfil. Para obter `profile_pic` do Facebook Messenger, e necessario ativar a feature "Business Asset User Profile Access" no painel de desenvolvedores da Meta (requer revisao do app). Isso pode ser feito manualmente depois.
+
+## Arquivo alterado
+
+- `supabase/functions/meta-webhook/index.ts` (redeploy necessario)
