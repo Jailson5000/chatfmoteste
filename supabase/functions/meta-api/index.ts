@@ -236,6 +236,26 @@ Deno.serve(async (req) => {
         report.checks.pageInfo = { error: String(err) };
       }
 
+      // Check 5: Token permissions via debug_token
+      try {
+        const appId = Deno.env.get("META_APP_ID");
+        const appSecret = Deno.env.get("META_APP_SECRET");
+        if (appId && appSecret) {
+          const debugRes = await fetch(
+            `${GRAPH_API_BASE}/debug_token?input_token=${diagToken}&access_token=${appId}|${appSecret}`
+          );
+          const debugData = await debugRes.json();
+          report.checks.tokenPermissions = {
+            scopes: debugData.data?.scopes || [],
+            hasInstagramManageMessages: (debugData.data?.scopes || []).includes("instagram_manage_messages"),
+            type: debugData.data?.type,
+            isValid: debugData.data?.is_valid,
+          };
+        }
+      } catch (err) {
+        report.checks.tokenPermissions = { error: String(err) };
+      }
+
       console.log("[meta-api] diagnose result:", JSON.stringify(report));
 
       return new Response(JSON.stringify(report), {

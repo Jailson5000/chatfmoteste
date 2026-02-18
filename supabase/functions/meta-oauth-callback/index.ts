@@ -188,6 +188,34 @@ Deno.serve(async (req) => {
         console.error("[meta-oauth] Instagram webhook subscription error:", subErr);
       }
 
+      // Verify token permissions via debug_token
+      let permissionWarning: string | null = null;
+      try {
+        const appId = Deno.env.get("META_APP_ID");
+        const appSecret = Deno.env.get("META_APP_SECRET");
+        if (appId && appSecret) {
+          const debugRes = await fetch(
+            `${GRAPH_API_BASE}/debug_token?input_token=${pageAccessToken}&access_token=${appId}|${appSecret}`
+          );
+          const debugData = await debugRes.json();
+          const scopes = debugData.data?.scopes || [];
+          const hasIgMessaging = scopes.includes("instagram_manage_messages");
+          console.log("[meta-oauth] Token debug:", {
+            scopes,
+            hasIgMessaging,
+            appId: debugData.data?.app_id,
+            type: debugData.data?.type,
+          });
+
+          if (!hasIgMessaging) {
+            console.warn("[meta-oauth] Token MISSING instagram_manage_messages!");
+            permissionWarning = "Token não possui a permissão instagram_manage_messages. Desconecte e reconecte selecionando Páginas + Contas do Instagram nos ativos.";
+          }
+        }
+      } catch (debugErr) {
+        console.warn("[meta-oauth] debug_token check failed:", debugErr);
+      }
+
       console.log("[meta-oauth] Instagram connection saved via encrypted token:", { id: saved.id, igUsername: displayUsername });
       return new Response(JSON.stringify({
         success: true,
@@ -196,6 +224,7 @@ Deno.serve(async (req) => {
         type: "instagram",
         igAccountId: igBizId || null,
         expiresAt: tokenExpiresAt,
+        ...(permissionWarning ? { warning: permissionWarning } : {}),
       }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
