@@ -1,131 +1,113 @@
 
+# Corrigir Recebimento de Mensagens Instagram - Causa Raiz Encontrada
 
-# Corrigir Deteccao de Permissoes Instagram - FMO
+## Problema Real Identificado
 
-## Problema
+Analisando a documentacao oficial da Meta (https://developers.facebook.com/docs/instagram-platform/webhooks/), descobri que existem **dois niveis de inscricao de webhook**, e o sistema so faz um deles:
 
-A conta Instagram da FMO nao recebe mensagens porque, durante o fluxo OAuth, os ativos do Instagram nao foram selecionados na tela "Escolher ativos" da Meta. O sistema atualmente nao detecta esse problema - a inscricao `subscribed_apps` retorna sucesso, mas isso so se aplica ao Facebook Messenger, nao ao Instagram DM.
+1. **Inscricao da Pagina (Facebook)** - `POST graph.facebook.com/{page_id}/subscribed_apps` -- O sistema JA FAZ isso. Funciona para Facebook Messenger.
 
-A Meta envia webhooks de Instagram DM pelo objeto "Instagram", que depende de a conta IG ter autorizado o app com `instagram_manage_messages` nos ativos corretos. Sem isso, a conta nao aparece nos "Limites de volume do Instagram" e nenhum evento chega.
+2. **Inscricao do Instagram** - `POST graph.instagram.com/{ig_account_id}/subscribed_apps?subscribed_fields=messages` -- O sistema NAO FAZ isso. E OBRIGATORIO para Instagram DM.
 
-## Solucao
+A documentacao da Meta diz explicitamente na secao "Enable Subscriptions":
 
-### 1. Adicionar verificacao de token no fluxo de conexao (`meta-oauth-callback`)
+```text
+POST /me/subscribed_apps
+  ?subscribed_fields=messages
+  &access_token={page_access_token}
 
-Apos salvar a conexao Instagram, usar a API `debug_token` da Meta para verificar se o token realmente tem a permissao `instagram_manage_messages`:
-
+Onde /me representa o Instagram professional account ID
+Endpoint: https://graph.instagram.com/v22.0/{ig_account_id}/subscribed_apps
 ```
-GET /debug_token?input_token={page_token}&access_token={app_id}|{app_secret}
-```
 
-Se a permissao nao estiver presente no token, retornar um aviso claro para o frontend informando que o usuario precisa reconectar e selecionar os ativos corretos.
+Isso explica por que a conta FMO nao aparece nos "Limites de volume do Instagram" no painel da Meta -- ela nunca foi inscrita no nivel do Instagram.
 
-### 2. Melhorar o diagnostico (`meta-api` acao `diagnose`)
+MiauChat provavelmente funciona porque foi inscrita manualmente ou em uma versao anterior do codigo.
 
-Adicionar verificacao de `debug_token` na acao `diagnose` para mostrar as permissoes reais do token. Isso permite ao usuario ver imediatamente se o problema e de permissao.
+## Requisito Adicional (Manual)
 
-### 3. Atualizar o frontend com aviso claro
+A documentacao da Meta tambem exige que o dono da conta Instagram ative manualmente:
 
-No `InstagramIntegration.tsx`, exibir um aviso quando o diagnostico detectar que a permissao `instagram_manage_messages` esta ausente, com instrucoes claras:
+**Instagram > Configuracoes > Mensagens e respostas de stories > Controles de mensagens > Ferramentas conectadas > Permitir acesso a mensagens**
 
-- "Desconecte e reconecte o Instagram"
-- "Na tela de autorizacao da Meta, selecione: Paginas + Contas do Instagram"
+Sem isso, a API nao recebe mensagens mesmo com a inscricao correta.
 
-## Detalhes Tecnicos
+## Alteracoes no Codigo
 
-### Arquivo: `supabase/functions/meta-oauth-callback/index.ts`
+### 1. `supabase/functions/meta-oauth-callback/index.ts`
 
-No bloco de save do Instagram (apos a inscricao do webhook), adicionar:
+Apos salvar a conexao Instagram e fazer o `POST /{page_id}/subscribed_apps` no graph.facebook.com, adicionar uma chamada ADICIONAL:
 
 ```typescript
-// Verify token permissions via debug_token
-try {
-  const appId = Deno.env.get("META_APP_ID");
-  const appSecret = Deno.env.get("META_APP_SECRET");
-  const debugRes = await fetch(
-    `${GRAPH_API_BASE}/debug_token?input_token=${pageAccessToken}&access_token=${appId}|${appSecret}`
+// Instagram-specific subscription (REQUIRED for IG DM webhooks)
+if (igBizId) {
+  const igSubRes = await fetch(
+    `https://graph.instagram.com/${GRAPH_API_VERSION}/${igBizId}/subscribed_apps`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subscribed_fields: "messages",
+        access_token: pageAccessToken,
+      }),
+    }
   );
-  const debugData = await debugRes.json();
-  const scopes = debugData.data?.scopes || [];
-  const hasIgMessaging = scopes.includes("instagram_manage_messages");
-  console.log("[meta-oauth] Token debug:", {
-    scopes,
-    hasIgMessaging,
-    appId: debugData.data?.app_id,
-    type: debugData.data?.type,
-  });
-
-  if (!hasIgMessaging) {
-    console.warn("[meta-oauth] Token MISSING instagram_manage_messages!");
-    // Still save connection but return warning
-    return Response with warning flag
-  }
-} catch (debugErr) {
-  console.warn("[meta-oauth] debug_token check failed:", debugErr);
+  const igSubData = await igSubRes.json();
+  console.log("[meta-oauth] Instagram account subscription:", JSON.stringify(igSubData));
 }
 ```
 
-### Arquivo: `supabase/functions/meta-api/index.ts` (acao `diagnose`)
+### 2. `supabase/functions/meta-api/index.ts` (acao resubscribe)
 
-Adicionar verificacao de `debug_token` no relatorio de diagnostico:
+Atualizar a acao `resubscribe` para TAMBEM chamar o endpoint do Instagram:
 
 ```typescript
-// Check 5: Token permissions via debug_token
-try {
-  const appId = Deno.env.get("META_APP_ID");
-  const appSecret = Deno.env.get("META_APP_SECRET");
-  const debugRes = await fetch(
-    `${GRAPH_API_BASE}/debug_token?input_token=${diagToken}&access_token=${appId}|${appSecret}`
+// Step 2b: Subscribe Instagram account specifically
+if (resubConn.ig_account_id) {
+  const igSubRes = await fetch(
+    `https://graph.instagram.com/${GRAPH_API_VERSION}/${resubConn.ig_account_id}/subscribed_apps`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subscribed_fields: "messages",
+        access_token: resubToken,
+      }),
+    }
   );
-  const debugData = await debugRes.json();
-  report.checks.tokenPermissions = {
-    scopes: debugData.data?.scopes || [],
-    hasInstagramManageMessages: (debugData.data?.scopes || []).includes("instagram_manage_messages"),
-    type: debugData.data?.type,
-    isValid: debugData.data?.is_valid,
-  };
-} catch (err) {
-  report.checks.tokenPermissions = { error: String(err) };
+  const igSubData = await igSubRes.json();
+  console.log("[meta-api] Instagram account resubscribe:", JSON.stringify(igSubData));
 }
 ```
 
-### Arquivo: `src/components/settings/integrations/InstagramIntegration.tsx`
+### 3. `src/components/settings/integrations/InstagramIntegration.tsx`
 
-Atualizar o dialog de diagnostico para mostrar um alerta quando `instagram_manage_messages` estiver ausente:
+- Remover os botoes "Reinscrever Webhooks" e "Diagnostico"
+- Remover o Dialog de diagnostico e todo o estado relacionado (diagOpen, diagReport, diagLoading)
+- Remover as funcoes handleResubscribe e handleDiagnose
+- Manter o resubscribe automatico ao ativar o toggle (mas agora ele ira incluir a chamada correta ao Instagram)
+- Limpar imports nao utilizados (RefreshCw, Stethoscope, Dialog, etc.)
+
+### 4. Adicionar `pages_manage_metadata` ao escopo OAuth
+
+No `src/lib/meta-config.ts`, adicionar o escopo `pages_manage_metadata` que a documentacao da Meta exige para Instagram Messaging:
 
 ```typescript
-{diagReport?.checks?.tokenPermissions && !diagReport.checks.tokenPermissions.hasInstagramManageMessages && (
-  <div className="bg-destructive/10 border border-destructive/30 rounded p-3">
-    <h4 className="font-medium text-destructive mb-1">Permissao ausente!</h4>
-    <p className="text-xs">O token NAO possui a permissao instagram_manage_messages.
-    A Meta nao enviara mensagens do Instagram para o sistema.</p>
-    <p className="text-xs mt-1 font-medium">Para corrigir:</p>
-    <ol className="text-xs list-decimal ml-4 mt-1">
-      <li>Desconecte o Instagram abaixo</li>
-      <li>Reconecte clicando em "Conectar"</li>
-      <li>Na tela da Meta, selecione "Paginas" E "Contas do Instagram" nos ativos</li>
-    </ol>
-  </div>
-)}
+instagram: "pages_show_list,pages_messaging,pages_manage_metadata,instagram_basic,instagram_manage_messages",
 ```
+
+## Acao Manual Necessaria
+
+Apos o deploy do codigo, o dono da conta Instagram @fmoadvbr deve:
+1. Abrir o Instagram no celular
+2. Ir em Configuracoes > Privacidade > Mensagens (ou Configuracoes > Mensagens e respostas de stories)
+3. Procurar "Controles de mensagens" ou "Ferramentas conectadas"
+4. Ativar "Permitir acesso a mensagens"
+5. Desconectar e reconectar o Instagram no sistema (para disparar a nova inscricao)
 
 ## Arquivos Alterados
 
-1. `supabase/functions/meta-oauth-callback/index.ts` - verificacao de permissoes via `debug_token` apos salvar
-2. `supabase/functions/meta-api/index.ts` - adicionar `debug_token` no diagnostico
-3. `src/components/settings/integrations/InstagramIntegration.tsx` - exibir alerta de permissao ausente
-
-## Acao Imediata do Usuario
-
-Apos o deploy, o usuario deve:
-1. Usar o botao "Diagnostico" para confirmar que `instagram_manage_messages` esta ausente
-2. Desconectar o Instagram da FMO
-3. Reconectar, e na tela de autorizacao da Meta, marcar **Paginas** E **Contas do Instagram** nos ativos
-4. Verificar novamente com o diagnostico que a permissao esta presente
-
-## Impacto
-
-- Baixo risco: apenas adiciona verificacoes, nao altera fluxos existentes
-- Previne problemas futuros: o sistema agora avisa quando a permissao esta ausente
-- Resolve o problema raiz: guia o usuario a conceder os ativos corretos
-
+1. `supabase/functions/meta-oauth-callback/index.ts` - adicionar inscricao no graph.instagram.com
+2. `supabase/functions/meta-api/index.ts` - adicionar inscricao Instagram no resubscribe
+3. `src/components/settings/integrations/InstagramIntegration.tsx` - remover botoes Diagnostico e Reinscrever
+4. `src/lib/meta-config.ts` - adicionar pages_manage_metadata ao escopo
