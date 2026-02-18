@@ -409,34 +409,35 @@ async function processMessagingEntry(
         const token = await decryptToken(connection.access_token);
         let profile: any = null;
 
-        if (origin === "FACEBOOK" && messageMid) {
-          // Facebook: use message ID to get sender name (doesn't require Business Asset User Profile Access)
-          console.log("[meta-webhook] Facebook: resolving profile via mid:", messageMid.slice(0, 20));
-          const midRes = await fetch(
-            `https://graph.facebook.com/v22.0/${messageMid}?fields=from&access_token=${token}`
+        if (origin === "FACEBOOK") {
+          // Facebook: try PSID first (returns name + photo when Business Asset User Profile Access is approved)
+          console.log("[meta-webhook] Facebook: resolving profile via PSID:", senderId);
+          const psidRes = await fetch(
+            `https://graph.facebook.com/v22.0/${senderId}?fields=first_name,last_name,profile_pic&access_token=${token}`
           );
-          if (midRes.ok) {
-            const midData = await midRes.json();
-            if (midData.from?.name) {
-              profile = { name: midData.from.name };
-              console.log("[meta-webhook] Facebook profile resolved via mid:", midData.from.name);
-            }
+          if (psidRes.ok) {
+            profile = await psidRes.json();
+            console.log("[meta-webhook] Facebook profile resolved via PSID:", profile?.first_name);
           } else {
-            const errBody = await midRes.text();
-            console.warn("[meta-webhook] Facebook mid fetch failed:", midRes.status, errBody.slice(0, 200));
+            const errBody = await psidRes.text();
+            console.warn("[meta-webhook] Facebook PSID fetch failed:", psidRes.status, errBody.slice(0, 200));
           }
 
-          // Fallback: try traditional PSID endpoint (works if Business Asset User Profile Access is approved)
-          if (!profile) {
-            console.log("[meta-webhook] Facebook: falling back to PSID profile endpoint");
-            const psidRes = await fetch(
-              `https://graph.facebook.com/v22.0/${senderId}?fields=first_name,last_name,profile_pic&access_token=${token}`
+          // Fallback: use message ID to get sender name (doesn't require Business Asset User Profile Access)
+          if (!profile && messageMid) {
+            console.log("[meta-webhook] Facebook: falling back to mid:", messageMid.slice(0, 20));
+            const midRes = await fetch(
+              `https://graph.facebook.com/v22.0/${messageMid}?fields=from&access_token=${token}`
             );
-            if (psidRes.ok) {
-              profile = await psidRes.json();
+            if (midRes.ok) {
+              const midData = await midRes.json();
+              if (midData.from?.name) {
+                profile = { name: midData.from.name };
+                console.log("[meta-webhook] Facebook profile resolved via mid:", midData.from.name);
+              }
             } else {
-              const errBody = await psidRes.text();
-              console.warn("[meta-webhook] Facebook PSID fallback also failed:", psidRes.status, errBody.slice(0, 200));
+              const errBody = await midRes.text();
+              console.warn("[meta-webhook] Facebook mid fallback also failed:", midRes.status, errBody.slice(0, 200));
             }
           }
         } else if (origin === "INSTAGRAM") {
