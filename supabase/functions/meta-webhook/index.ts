@@ -406,8 +406,12 @@ async function processMessagingEntry(
         const token = await decryptToken(connection.access_token);
         // Facebook Messenger requires first_name,last_name; Instagram uses name
         const fields = origin === "FACEBOOK" ? "first_name,last_name,profile_pic" : "name,profile_pic";
+        // Instagram Business Login tokens only work on graph.instagram.com
+        const graphBase = origin === "INSTAGRAM"
+          ? "https://graph.instagram.com/v22.0"
+          : "https://graph.facebook.com/v22.0";
         const profileRes = await fetch(
-          `https://graph.facebook.com/v22.0/${senderId}?fields=${fields}&access_token=${token}`
+          `${graphBase}/${senderId}?fields=${fields}&access_token=${token}`
         );
         let profile: any = null;
         if (profileRes.ok) {
@@ -417,7 +421,7 @@ async function processMessagingEntry(
           const fallbackField = origin === "FACEBOOK" ? "first_name" : "name";
           console.warn("[meta-webhook] Profile fetch failed with fields:", fields, "- retrying with", fallbackField);
           const fallbackRes = await fetch(
-            `https://graph.facebook.com/v22.0/${senderId}?fields=${fallbackField}&access_token=${token}`
+            `${graphBase}/${senderId}?fields=${fallbackField}&access_token=${token}`
           );
           if (fallbackRes.ok) {
             profile = await fallbackRes.json();
