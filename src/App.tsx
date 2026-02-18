@@ -46,7 +46,7 @@ const PublicBooking = React.lazy(() => import("./pages/PublicBooking"));
 const ConfirmAppointment = React.lazy(() => import("./pages/ConfirmAppointment"));
 const Support = React.lazy(() => import("./pages/Support"));
 const Tutorials = React.lazy(() => import("./pages/Tutorials"));
-const MetaTestPage = React.lazy(() => import("./pages/admin/MetaTestPage"));
+
 
 // Lazy imports — Global Admin pages (accessed by <0.1% of users)
 const GlobalAdminAuth = React.lazy(() => import("./pages/global-admin/GlobalAdminAuth"));
@@ -299,17 +299,6 @@ const App = () => (
           <Route path="/admin" element={<Navigate to="/settings" replace />} />
           <Route path="/admin/*" element={<Navigate to="/settings" replace />} />
           
-          {/* Meta Test Page - internal admin tool */}
-          <Route
-            path="/meta-test"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<MetaTestPage />} />
-          </Route>
           
           {/* Global Admin Routes - MiauChat SaaS Administration */}
           <Route
