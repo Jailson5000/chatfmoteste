@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Subscribe page to webhooks for Instagram messaging with verification
+      // Subscribe page to webhooks for Instagram messaging
       try {
         const subRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps`, {
           method: "POST",
@@ -156,36 +156,30 @@ Deno.serve(async (req) => {
           }),
         });
         const subData = await subRes.json();
-        console.log("[meta-oauth] Instagram webhook subscription result:", JSON.stringify(subData));
-
-        // Verify subscription was actually registered
-        const verifyRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${pageAccessToken}`);
-        const verifyData = await verifyRes.json();
-        console.log("[meta-oauth] Instagram subscription verification:", JSON.stringify(verifyData));
-
-        // If verification shows no subscription, retry after a short delay
-        const hasSubscription = verifyData.data?.length > 0;
-        if (!hasSubscription && subData.success) {
-          console.log("[meta-oauth] Subscription not confirmed, retrying after 2s...");
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const retryRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              subscribed_fields: "messages,messaging_postbacks,messaging_optins",
-              access_token: pageAccessToken,
-            }),
-          });
-          const retryData = await retryRes.json();
-          console.log("[meta-oauth] Instagram retry subscription result:", JSON.stringify(retryData));
-          
-          // Final verification
-          const finalVerifyRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${pageAccessToken}`);
-          const finalVerifyData = await finalVerifyRes.json();
-          console.log("[meta-oauth] Instagram final verification:", JSON.stringify(finalVerifyData));
-        }
+        console.log("[meta-oauth] Page webhook subscription result:", JSON.stringify(subData));
       } catch (subErr) {
-        console.error("[meta-oauth] Instagram webhook subscription error:", subErr);
+        console.error("[meta-oauth] Page webhook subscription error:", subErr);
+      }
+
+      // Instagram-specific subscription (REQUIRED for IG DM webhooks)
+      if (igBizId) {
+        try {
+          const igSubRes = await fetch(
+            `https://graph.instagram.com/${GRAPH_API_VERSION}/${igBizId}/subscribed_apps`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                subscribed_fields: "messages",
+                access_token: pageAccessToken,
+              }),
+            }
+          );
+          const igSubData = await igSubRes.json();
+          console.log("[meta-oauth] Instagram account subscription result:", JSON.stringify(igSubData));
+        } catch (igSubErr) {
+          console.error("[meta-oauth] Instagram account subscription error:", igSubErr);
+        }
       }
 
       // Verify token permissions via debug_token
@@ -440,7 +434,7 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Subscribe page to webhooks for Instagram messaging with verification
+      // Subscribe page to webhooks for Instagram messaging
       try {
         console.log("[meta-oauth] Subscribing page to webhooks for Instagram:", selectedIg.pageId);
         const subRes = await fetch(
@@ -455,32 +449,30 @@ Deno.serve(async (req) => {
           }
         );
         const subData = await subRes.json();
-        console.log("[meta-oauth] Instagram subscribe result:", JSON.stringify(subData));
-
-        // Verify subscription
-        const verifyRes = await fetch(`${GRAPH_API_BASE}/${selectedIg.pageId}/subscribed_apps?access_token=${selectedIg.pageAccessToken}`);
-        const verifyData = await verifyRes.json();
-        console.log("[meta-oauth] Instagram subscription verification:", JSON.stringify(verifyData));
-
-        // Retry if not confirmed
-        const hasSubscription = verifyData.data?.length > 0;
-        if (!hasSubscription && subData.success) {
-          console.log("[meta-oauth] Subscription not confirmed, retrying after 2s...");
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          await fetch(`${GRAPH_API_BASE}/${selectedIg.pageId}/subscribed_apps`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              subscribed_fields: "messages,messaging_postbacks,messaging_optins",
-              access_token: selectedIg.pageAccessToken,
-            }),
-          });
-          const finalVerifyRes = await fetch(`${GRAPH_API_BASE}/${selectedIg.pageId}/subscribed_apps?access_token=${selectedIg.pageAccessToken}`);
-          const finalVerifyData = await finalVerifyRes.json();
-          console.log("[meta-oauth] Instagram final verification:", JSON.stringify(finalVerifyData));
-        }
+        console.log("[meta-oauth] Page subscribe result:", JSON.stringify(subData));
       } catch (subErr) {
-        console.error("[meta-oauth] Failed to subscribe page for Instagram (non-blocking):", subErr);
+        console.error("[meta-oauth] Page subscription error (non-blocking):", subErr);
+      }
+
+      // Instagram-specific subscription (REQUIRED for IG DM webhooks)
+      if (selectedIg.igAccountId) {
+        try {
+          const igSubRes = await fetch(
+            `https://graph.instagram.com/${GRAPH_API_VERSION}/${selectedIg.igAccountId}/subscribed_apps`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                subscribed_fields: "messages",
+                access_token: selectedIg.pageAccessToken,
+              }),
+            }
+          );
+          const igSubData = await igSubRes.json();
+          console.log("[meta-oauth] Instagram account subscription result:", JSON.stringify(igSubData));
+        } catch (igSubErr) {
+          console.error("[meta-oauth] Instagram account subscription error:", igSubErr);
+        }
       }
 
       console.log("[meta-oauth] Instagram connection saved:", { id: savedIg.id, igUsername });

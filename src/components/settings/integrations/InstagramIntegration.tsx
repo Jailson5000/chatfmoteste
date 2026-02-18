@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Instagram, RefreshCw, Stethoscope } from "lucide-react";
+import { Instagram } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
 import { MetaHandlerControls } from "./MetaHandlerControls";
 import { toast } from "sonner";
@@ -9,13 +9,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { META_APP_ID, buildMetaOAuthUrl, getFixedRedirectUri } from "@/lib/meta-config";
 import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
 import { InstagramPagePickerDialog, type InstagramPage } from "./InstagramPagePickerDialog";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 
 function InstagramIcon() {
   return (
@@ -31,9 +24,6 @@ export function InstagramIntegration() {
   const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerPages, setPickerPages] = useState<InstagramPage[]>([]);
-  const [diagOpen, setDiagOpen] = useState(false);
-  const [diagReport, setDiagReport] = useState<any>(null);
-  const [diagLoading, setDiagLoading] = useState(false);
 
   // Cleanup listener on unmount
   useEffect(() => {
@@ -97,7 +87,7 @@ export function InstagramIntegration() {
     },
     onSuccess: (_, isActive) => {
       queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
-      toast.success(isActive ? "Instagram ativado e inscrito nos webhooks!" : "Instagram desativado");
+      toast.success(isActive ? "Instagram ativado!" : "Instagram desativado");
     },
     onError: () => toast.error("Erro ao alterar status"),
   });
@@ -134,44 +124,6 @@ export function InstagramIntegration() {
     },
     onError: () => toast.error("Erro ao atualizar configuração"),
   });
-
-  // Resubscribe manually
-  const handleResubscribe = useCallback(async () => {
-    if (!connection?.id) return;
-    toast.loading("Reinscrevendo webhooks...", { id: "ig-resub" });
-    try {
-      const { data, error } = await supabase.functions.invoke("meta-api", {
-        body: { action: "resubscribe", connectionId: connection.id },
-      });
-      if (error) throw error;
-      if (data?.success) {
-        toast.success("Webhooks reinscritos com sucesso!", { id: "ig-resub" });
-      } else {
-        toast.error("Falha ao reinscrever: " + JSON.stringify(data?.subscribeResult), { id: "ig-resub" });
-      }
-    } catch (err) {
-      toast.error("Erro ao reinscrever webhooks", { id: "ig-resub" });
-    }
-  }, [connection?.id]);
-
-  // Diagnose connection
-  const handleDiagnose = useCallback(async () => {
-    if (!connection?.id) return;
-    setDiagLoading(true);
-    setDiagReport(null);
-    setDiagOpen(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("meta-api", {
-        body: { action: "diagnose", connectionId: connection.id },
-      });
-      if (error) throw error;
-      setDiagReport(data);
-    } catch (err) {
-      setDiagReport({ error: String(err) });
-    } finally {
-      setDiagLoading(false);
-    }
-  }, [connection?.id]);
 
   // Save selected Instagram page
   const handleSelectPage = useCallback(async (page: InstagramPage) => {
@@ -300,7 +252,6 @@ export function InstagramIntegration() {
         isLoading={isLoading}
         onToggle={(checked) => toggleMutation.mutate(checked)}
         toggleDisabled={toggleMutation.isPending}
-        onSettings={handleDiagnose}
         onDisconnect={() => {
           if (window.confirm("Deseja desconectar o Instagram? Você poderá reconectar depois.")) {
             deleteMutation.mutate();
@@ -326,16 +277,6 @@ export function InstagramIntegration() {
             updateHandlerMutation.mutate({ default_human_agent_id: id === "none" ? null : id });
           }}
         />
-        <div className="flex gap-2 mt-3">
-          <Button variant="outline" size="sm" onClick={handleResubscribe}>
-            <RefreshCw className="h-4 w-4 mr-1" />
-            Reinscrever Webhooks
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleDiagnose}>
-            <Stethoscope className="h-4 w-4 mr-1" />
-            Diagnóstico
-          </Button>
-        </div>
       </IntegrationCard>
       <InstagramPagePickerDialog
         open={pickerOpen}
@@ -343,69 +284,6 @@ export function InstagramIntegration() {
         pages={pickerPages}
         onSelect={handleSelectPage}
       />
-      <Dialog open={diagOpen} onOpenChange={setDiagOpen}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Diagnóstico Instagram</DialogTitle>
-          </DialogHeader>
-          {diagLoading ? (
-            <p className="text-muted-foreground text-sm">Carregando diagnóstico...</p>
-          ) : diagReport ? (
-            <div className="space-y-3 text-sm">
-              {diagReport.connection && (
-                <div>
-                  <h4 className="font-medium mb-1">Conexão</h4>
-                  <div className="bg-muted rounded p-2 space-y-1 text-xs">
-                    <p>Página: {diagReport.connection.pageName}</p>
-                    <p>Page ID: {diagReport.connection.pageId}</p>
-                    <p>IG Account: {diagReport.connection.igAccountId || "N/A"}</p>
-                    <p>Ativa: {diagReport.connection.isActive ? "✅ Sim" : "❌ Não"}</p>
-                  </div>
-                </div>
-              )}
-              {diagReport.checks && (
-                <div>
-                  <h4 className="font-medium mb-1">Verificações</h4>
-                  {diagReport.checks.tokenPermissions && !diagReport.checks.tokenPermissions.hasInstagramManageMessages && (
-                    <div className="bg-destructive/10 border border-destructive/30 rounded p-3 mb-2">
-                      <h4 className="font-medium text-destructive mb-1">⚠️ Permissão ausente!</h4>
-                      <p className="text-xs">O token NÃO possui a permissão <strong>instagram_manage_messages</strong>. A Meta não enviará mensagens do Instagram para o sistema.</p>
-                      <p className="text-xs mt-1 font-medium">Para corrigir:</p>
-                      <ol className="text-xs list-decimal ml-4 mt-1">
-                        <li>Desconecte o Instagram abaixo</li>
-                        <li>Reconecte clicando em "Conectar"</li>
-                        <li>Na tela da Meta, selecione <strong>"Páginas"</strong> E <strong>"Contas do Instagram"</strong> nos ativos</li>
-                      </ol>
-                    </div>
-                  )}
-                  {diagReport.checks.tokenPermissions && diagReport.checks.tokenPermissions.hasInstagramManageMessages && (
-                    <div className="bg-green-500/10 border border-green-500/30 rounded p-2 mb-2">
-                      <p className="text-xs text-green-700">✅ Permissão <strong>instagram_manage_messages</strong> presente</p>
-                    </div>
-                  )}
-                  <div className="bg-muted rounded p-2 space-y-1 text-xs">
-                    <p>Token válido: {diagReport.checks.tokenValid === true ? "✅ Sim" : diagReport.checks.tokenValid === false ? "❌ Expirado" : "⚠️ Desconhecido"}</p>
-                    <p>Expira em: {diagReport.checks.tokenExpiresIn}</p>
-                    <p>Apps inscritos: {diagReport.checks.subscribedApps?.data?.length >= 0 ? `${diagReport.checks.subscribedApps.data.length} app(s)` : "❌ Erro"}</p>
-                    {diagReport.checks.igAccount && (
-                      <p>IG Account: {diagReport.checks.igAccount.username ? `✅ @${diagReport.checks.igAccount.username}` : `❌ ${JSON.stringify(diagReport.checks.igAccount.error || diagReport.checks.igAccount)}`}</p>
-                    )}
-                    {diagReport.checks.pageInfo && (
-                      <p>Página FB: {diagReport.checks.pageInfo.name ? `✅ ${diagReport.checks.pageInfo.name}` : "❌ Erro"}</p>
-                    )}
-                    {diagReport.checks.tokenPermissions?.scopes && (
-                      <p>Escopos do token: {diagReport.checks.tokenPermissions.scopes.join(", ") || "nenhum"}</p>
-                    )}
-                  </div>
-                </div>
-              )}
-              {diagReport.error && (
-                <p className="text-destructive text-xs">{String(diagReport.error)}</p>
-              )}
-            </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

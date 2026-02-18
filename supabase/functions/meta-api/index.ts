@@ -120,6 +120,29 @@ Deno.serve(async (req) => {
       const subData = await subRes.json();
       console.log("[meta-api] resubscribe: subscribe result:", JSON.stringify(subData));
 
+      // Step 2b: Subscribe Instagram account specifically (REQUIRED for IG DM webhooks)
+      let igSubscribeResult = null;
+      if (resubConn.ig_account_id) {
+        try {
+          const igSubRes = await fetch(
+            `https://graph.instagram.com/${GRAPH_API_VERSION}/${resubConn.ig_account_id}/subscribed_apps`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                subscribed_fields: "messages",
+                access_token: resubToken,
+              }),
+            }
+          );
+          igSubscribeResult = await igSubRes.json();
+          console.log("[meta-api] Instagram account resubscribe:", JSON.stringify(igSubscribeResult));
+        } catch (igErr) {
+          console.error("[meta-api] Instagram account resubscribe error:", igErr);
+          igSubscribeResult = { error: String(igErr) };
+        }
+      }
+
       // Step 3: Verify subscription after re-subscribing
       const verifyRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${resubToken}`);
       const verifyData = await verifyRes.json();
@@ -129,6 +152,7 @@ Deno.serve(async (req) => {
         success: subData.success === true,
         before: checkData,
         subscribeResult: subData,
+        igSubscribeResult,
         after: verifyData,
         pageId,
         igAccountId: resubConn.ig_account_id,
