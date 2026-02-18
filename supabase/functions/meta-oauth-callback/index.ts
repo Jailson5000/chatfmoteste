@@ -165,7 +165,7 @@ Deno.serve(async (req) => {
       if (igBizId) {
         try {
           const igSubRes = await fetch(
-            `https://graph.instagram.com/${GRAPH_API_VERSION}/${igBizId}/subscribed_apps`,
+            `${GRAPH_API_BASE}/${igBizId}/subscribed_apps`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -458,7 +458,7 @@ Deno.serve(async (req) => {
       if (selectedIg.igAccountId) {
         try {
           const igSubRes = await fetch(
-            `https://graph.instagram.com/${GRAPH_API_VERSION}/${selectedIg.igAccountId}/subscribed_apps`,
+            `${GRAPH_API_BASE}/${selectedIg.igAccountId}/subscribed_apps`,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },

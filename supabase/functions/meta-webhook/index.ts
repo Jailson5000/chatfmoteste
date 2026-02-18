@@ -404,7 +404,8 @@ async function processMessagingEntry(
     if (clientNeedsNameUpdate && connection.access_token) {
       try {
         const token = await decryptToken(connection.access_token);
-        const fields = "name,profile_pic";
+        // Facebook Messenger requires first_name,last_name; Instagram uses name
+        const fields = origin === "FACEBOOK" ? "first_name,last_name,profile_pic" : "name,profile_pic";
         const profileRes = await fetch(
           `https://graph.facebook.com/v22.0/${senderId}?fields=${fields}&access_token=${token}`
         );
@@ -412,10 +413,11 @@ async function processMessagingEntry(
         if (profileRes.ok) {
           profile = await profileRes.json();
         } else {
-          // Fallback: try with only "name" in case profile_pic is not supported
-          console.warn("[meta-webhook] Profile fetch failed with fields:", fields, "- retrying with name only");
+          // Fallback: try with only first_name (Facebook) or name (Instagram)
+          const fallbackField = origin === "FACEBOOK" ? "first_name" : "name";
+          console.warn("[meta-webhook] Profile fetch failed with fields:", fields, "- retrying with", fallbackField);
           const fallbackRes = await fetch(
-            `https://graph.facebook.com/v22.0/${senderId}?fields=name&access_token=${token}`
+            `https://graph.facebook.com/v22.0/${senderId}?fields=${fallbackField}&access_token=${token}`
           );
           if (fallbackRes.ok) {
             profile = await fallbackRes.json();
@@ -425,7 +427,10 @@ async function processMessagingEntry(
           }
         }
         if (profile) {
-          resolvedName = profile.name || null;
+          // Build name from first_name + last_name (Facebook) or name (Instagram)
+          resolvedName = profile.first_name && profile.last_name
+            ? `${profile.first_name} ${profile.last_name}`
+            : profile.name || profile.first_name || null;
           const avatarUrl = profile.profile_pic || null;
           if (resolvedName || avatarUrl) {
             const updateData: Record<string, any> = {};
