@@ -1,34 +1,54 @@
 
-# Corrigir Contagem de Conexoes no Dashboard
 
-## Problema Atual
+# Remover Chat Web da Pagina de Conexoes
 
-O codigo em `useSystemMetrics.tsx` (linhas 91-95) conta TODAS as `meta_connections` (WhatsApp Cloud, Instagram, Facebook) como conexoes. O correto e contar apenas WhatsApp (Evolution API) e WhatsApp Cloud API como conexoes. Instagram, Facebook e Chat Web nao sao conexoes.
+## Contexto
+
+A pagina de Conexoes (`/connections`) atualmente exibe 3 tipos de itens:
+- WhatsApp (Evolution API) - conexao ativa com QR Code
+- WhatsApp Cloud (API Oficial) - conexao via Meta OAuth
+- Chat Web - widget de atendimento
+
+O Chat Web nao precisa de gerenciamento de conexao (nao tem QR Code, status de conexao, webhook, etc). Ele ja esta disponivel na aba **Integracoes** em Configuracoes, que e o lugar correto.
+
+Instagram e Facebook tambem ja estao na aba Integracoes e nao devem ser trazidos para Conexoes, pois nao sao "conexoes WhatsApp".
 
 ## Mudanca
 
-### `src/hooks/useSystemMetrics.tsx`
+### `src/pages/Connections.tsx`
 
-Na query de `meta_connections` (linha 86), filtrar apenas `type = 'whatsapp_cloud'`:
+Remover o bloco do Chat Web da tabela (linhas 551-667). Isso inclui:
+- A row condicional `{trayIntegration?.is_enabled && (...)}` inteira
+- O Sheet de detalhes do Chat Web (`isTrayDetailOpen`)
+- As importacoes e estados relacionados ao Chat Web que ficarem orfaos (`isTrayDetailOpen`, `useTrayIntegration`, etc)
 
-```typescript
-// Antes:
-supabase.from("meta_connections").select("id, type, is_active")
+### O que permanece na pagina de Conexoes
 
-// Depois:
-supabase.from("meta_connections").select("id, type, is_active").eq("type", "whatsapp_cloud")
-```
+1. **WhatsApp (QR Code)** - instancias da Evolution API
+2. **WhatsApp Cloud (API Oficial)** - conexoes da meta_connections com type=whatsapp_cloud
 
-E atualizar o comentario (linha 91) para refletir que so conta WhatsApp Cloud:
+### O que permanece na aba Integracoes (Configuracoes)
 
-```typescript
-// Count WhatsApp Cloud API connections (only whatsapp_cloud, not instagram/facebook)
-```
+1. Chat Web (ja esta la)
+2. Instagram (ja esta la)
+3. Facebook (ja esta la)
+4. WhatsApp Cloud (ja esta la)
 
-## Sobre Conversas de IA
+## Detalhes Tecnicos
 
-As conversas atendidas por IA (`totalAIConversations`) ja sao contadas independente do canal -- o valor vem de `company_usage_summary.current_ai_conversations` que conta registros de `usage_records` do tipo `ai_conversations`, gravados por qualquer canal (WhatsApp, Instagram, Facebook, Chat Web). Nenhuma mudanca necessaria aqui.
+### Remocoes no `Connections.tsx`
+
+1. Remover o estado `isTrayDetailOpen` e seu Sheet associado
+2. Remover o bloco JSX da row do Chat Web (linhas 551-667)
+3. Remover importacoes que ficarem sem uso (`useTrayIntegration` se nao for mais usado em outro lugar da pagina)
+4. Manter a verificacao de `filteredInstances.length === 0` sem considerar `trayIntegration` (linha 670 - remover `&& !trayIntegration?.is_enabled`)
+
+### Impacto
+
+- Nenhuma funcionalidade perdida: o Chat Web continua gerenciavel em Configuracoes > Integracoes
+- A pagina de Conexoes fica focada no que realmente importa: conexoes WhatsApp
+- Codigo mais limpo e menos confuso para o usuario
 
 ## Risco
 
-Zero. Apenas um filtro adicional na query.
+Zero. Apenas remocao de UI duplicada. A funcionalidade do Chat Web permanece intacta na aba de Integracoes.
