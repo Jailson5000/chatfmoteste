@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
       }
 
       const { data: resubConn } = await supabaseAdminResub.from("meta_connections")
-        .select("id, access_token, page_id, ig_account_id, type, law_firm_id")
+        .select("id, access_token, page_id, ig_account_id, type, law_firm_id, source")
         .eq("id", body.connectionId)
         .eq("law_firm_id", resubProfile.law_firm_id)
         .single();
@@ -100,6 +100,43 @@ Deno.serve(async (req) => {
 
       const pageId = resubConn.page_id;
 
+      // Detect if this is an Instagram Business Login connection
+      // (ig_account_id === page_id means it was connected via native Instagram Login)
+      const isInstagramBusinessLogin = resubConn.type === "instagram" && 
+        resubConn.ig_account_id && resubConn.ig_account_id === resubConn.page_id;
+
+      if (isInstagramBusinessLogin) {
+        // Instagram Business Login: use graph.instagram.com with IG User Access Token
+        const igUserId = resubConn.ig_account_id;
+        console.log("[meta-api] resubscribe: Instagram Business Login detected, using graph.instagram.com for", igUserId);
+
+        const igSubRes = await fetch(
+          `https://graph.instagram.com/${GRAPH_API_VERSION}/${igUserId}/subscribed_apps`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              subscribed_fields: "messages",
+              access_token: resubToken,
+            }),
+          }
+        );
+        const igSubData = await igSubRes.json();
+        console.log("[meta-api] resubscribe: IG Business Login result:", JSON.stringify(igSubData));
+
+        return new Response(JSON.stringify({
+          success: igSubData.success === true,
+          igSubscribeResult: igSubData,
+          igAccountId: igUserId,
+          type: resubConn.type,
+          flow: "instagram_business_login",
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Facebook Login flow: use graph.facebook.com (for Facebook and legacy Instagram connections)
       // Step 1: Check current subscription status
       console.log("[meta-api] resubscribe: checking current subscriptions for page", pageId);
       const checkRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${resubToken}`);
@@ -120,7 +157,7 @@ Deno.serve(async (req) => {
       const subData = await subRes.json();
       console.log("[meta-api] resubscribe: subscribe result:", JSON.stringify(subData));
 
-      // Step 2b: Subscribe Instagram account specifically (REQUIRED for IG DM webhooks)
+      // Step 2b: Subscribe Instagram account specifically (for legacy Facebook Login Instagram connections)
       let igSubscribeResult = null;
       if (resubConn.ig_account_id) {
         try {
@@ -852,7 +889,7 @@ Deno.serve(async (req) => {
     if (originConnectionId) {
       const { data: specificConn } = await supabaseAdmin
         .from("meta_connections")
-        .select("id, access_token, page_id")
+        .select("id, access_token, page_id, ig_account_id")
         .eq("id", originConnectionId)
         .eq("law_firm_id", lawFirmId)
         .eq("is_active", true)
@@ -864,7 +901,7 @@ Deno.serve(async (req) => {
     if (!connection) {
       const { data: fallbackConn } = await supabaseAdmin
         .from("meta_connections")
-        .select("id, access_token, page_id")
+        .select("id, access_token, page_id, ig_account_id")
         .eq("law_firm_id", lawFirmId)
         .eq("type", connectionType)
         .eq("is_active", true)
@@ -877,7 +914,7 @@ Deno.serve(async (req) => {
       if (!connection) {
         const { data: anyConn } = await supabaseAdmin
           .from("meta_connections")
-          .select("id, access_token, page_id")
+          .select("id, access_token, page_id, ig_account_id")
           .eq("law_firm_id", lawFirmId)
           .eq("type", connectionType)
           .eq("is_active", true)
@@ -918,7 +955,7 @@ Deno.serve(async (req) => {
       graphResponse = await sendWhatsAppCloudMessage(accessToken, connection.page_id, recipientId, content, messageType, mediaUrl);
     } else {
       // Instagram and Facebook Messenger use Send API
-      graphResponse = await sendMessagingMessage(accessToken, recipientId, content, messageType, mediaUrl, connection.page_id, origin);
+      graphResponse = await sendMessagingMessage(accessToken, recipientId, content, messageType, mediaUrl, connection.page_id, origin, connection.ig_account_id);
     }
 
     const graphResult = await graphResponse.json();
@@ -993,6 +1030,8 @@ Deno.serve(async (req) => {
 
 /**
  * Send message via Instagram / Facebook Messenger Send API.
+ * For Instagram Business Login connections (igAccountId === pageId),
+ * uses graph.instagram.com with the IG User Access Token.
  */
 async function sendMessagingMessage(
   accessToken: string,
@@ -1001,7 +1040,8 @@ async function sendMessagingMessage(
   messageType: string,
   mediaUrl?: string,
   pageId?: string,
-  origin?: string
+  origin?: string,
+  igAccountId?: string
 ): Promise<Response> {
   let messagePayload: any;
 
@@ -1017,10 +1057,21 @@ async function sendMessagingMessage(
     };
   }
 
-  // Instagram requires /{page_id}/messages instead of /me/messages
-  const endpoint = (origin === "INSTAGRAM" && pageId)
-    ? `${GRAPH_API_BASE}/${pageId}/messages`
-    : `${GRAPH_API_BASE}/me/messages`;
+  // Detect Instagram Business Login connection (igAccountId === pageId)
+  const isInstagramBusinessLogin = origin === "INSTAGRAM" && igAccountId && igAccountId === pageId;
+
+  let endpoint: string;
+  if (isInstagramBusinessLogin) {
+    // Instagram Business Login: use graph.instagram.com with IG user ID
+    endpoint = `https://graph.instagram.com/${GRAPH_API_VERSION}/${igAccountId}/messages`;
+    console.log("[meta-api] Sending via graph.instagram.com (IG Business Login):", endpoint);
+  } else if (origin === "INSTAGRAM" && pageId) {
+    // Legacy Facebook Login Instagram: use graph.facebook.com/{page_id}/messages
+    endpoint = `${GRAPH_API_BASE}/${pageId}/messages`;
+  } else {
+    // Facebook Messenger: use /me/messages
+    endpoint = `${GRAPH_API_BASE}/me/messages`;
+  }
 
   return fetch(endpoint, {
     method: "POST",

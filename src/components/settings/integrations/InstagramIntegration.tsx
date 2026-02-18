@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Instagram } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
 import { MetaHandlerControls } from "./MetaHandlerControls";
@@ -6,9 +6,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { META_APP_ID, buildMetaOAuthUrl, getFixedRedirectUri } from "@/lib/meta-config";
+import { META_INSTAGRAM_APP_ID, buildInstagramBusinessLoginUrl, getFixedRedirectUri } from "@/lib/meta-config";
 import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
-import { InstagramPagePickerDialog, type InstagramPage } from "./InstagramPagePickerDialog";
 
 function InstagramIcon() {
   return (
@@ -22,8 +21,6 @@ export function InstagramIntegration() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerPages, setPickerPages] = useState<InstagramPage[]>([]);
 
   // Cleanup listener on unmount
   useEffect(() => {
@@ -125,45 +122,14 @@ export function InstagramIntegration() {
     onError: () => toast.error("Erro ao atualizar configuração"),
   });
 
-  // Save selected Instagram page
-  const handleSelectPage = useCallback(async (page: InstagramPage) => {
-    toast.loading("Conectando Instagram...", { id: "ig-connect" });
-    try {
-      const response = await supabase.functions.invoke("meta-oauth-callback", {
-        body: {
-          type: "instagram",
-          step: "save",
-          pageId: page.pageId,
-          encryptedPageToken: page.encryptedToken,
-          igAccountId: page.igAccountId,
-          igName: page.igName,
-          igUsername: page.igUsername,
-          pageName: page.pageName,
-        },
-      });
-      if (response.error) {
-        const realMsg = await getFunctionErrorMessage(response.error);
-        throw new Error(realMsg);
-      }
-      if (!response.data?.success) {
-        throw new Error(response.data?.error || response.data?.message || "Falha ao salvar conexão");
-      }
-      queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
-      toast.success("Instagram conectado com sucesso!", { id: "ig-connect" });
-      setPickerOpen(false);
-      setPickerPages([]);
-    } catch (err) {
-      console.error("Instagram save error:", err);
-      toast.error(err instanceof Error ? err.message : "Erro ao conectar Instagram", { id: "ig-connect" });
-    }
-  }, [queryClient]);
-
   const handleConnect = useCallback(() => {
-    if (!META_APP_ID) {
-      toast.error("META_APP_ID não configurado. Configure nas variáveis de ambiente.");
+    if (!META_INSTAGRAM_APP_ID) {
+      toast.error("META_INSTAGRAM_APP_ID não configurado.");
       return;
     }
-    const authUrl = buildMetaOAuthUrl("instagram");
+
+    // Use Instagram Business Login (native Instagram OAuth)
+    const authUrl = buildInstagramBusinessLoginUrl();
     window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
 
     if (listenerRef.current) {
@@ -176,25 +142,21 @@ export function InstagramIntegration() {
         listenerRef.current = null;
         const code = event.data.code;
         const redirectUri = getFixedRedirectUri("instagram");
-        toast.loading("Buscando contas Instagram...", { id: "ig-connect" });
+        toast.loading("Conectando Instagram...", { id: "ig-connect" });
         try {
+          // Use the new instagram_login flow (direct token exchange via api.instagram.com)
           const response = await supabase.functions.invoke("meta-oauth-callback", {
-            body: { code, redirectUri, type: "instagram", step: "list_pages" },
+            body: { code, redirectUri, type: "instagram", flow: "instagram_login" },
           });
           if (response.error) {
             const realMsg = await getFunctionErrorMessage(response.error);
             throw new Error(realMsg);
           }
           if (!response.data?.success) {
-            throw new Error(response.data?.error || response.data?.message || "Falha ao buscar contas");
+            throw new Error(response.data?.error || response.data?.message || "Falha ao conectar Instagram");
           }
-          const pages: InstagramPage[] = response.data.pages || [];
-          if (pages.length === 0) {
-            throw new Error("Nenhuma conta Instagram encontrada vinculada às suas páginas.");
-          }
-          setPickerPages(pages);
-          setPickerOpen(true);
-          toast.dismiss("ig-connect");
+          queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
+          toast.success("Instagram conectado com sucesso!", { id: "ig-connect" });
         } catch (err) {
           console.error("Instagram OAuth error:", err);
           toast.error(err instanceof Error ? err.message : "Erro ao conectar Instagram", { id: "ig-connect" });
@@ -221,72 +183,56 @@ export function InstagramIntegration() {
 
   if (!connection) {
     return (
-      <>
-        <IntegrationCard
-          icon={<InstagramIcon />}
-          title="Instagram DM"
-          description="Receba e responda mensagens do Instagram Direct diretamente na plataforma. Requer conta Instagram Profissional."
-          isLoading={isLoading}
-          onConnect={handleConnect}
-        />
-        <InstagramPagePickerDialog
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          pages={pickerPages}
-          onSelect={handleSelectPage}
-        />
-      </>
+      <IntegrationCard
+        icon={<InstagramIcon />}
+        title="Instagram DM"
+        description="Receba e responda mensagens do Instagram Direct diretamente na plataforma. Requer conta Instagram Profissional."
+        isLoading={isLoading}
+        onConnect={handleConnect}
+      />
     );
   }
 
   const currentHandlerType = (connection as any).default_handler_type || "human";
 
   return (
-    <>
-      <IntegrationCard
-        icon={<InstagramIcon />}
-        title="Instagram DM"
-        description={`Conectado: ${connection.page_name || "Página"}`}
-        isConnected={true}
-        isActive={connection.is_active}
-        isLoading={isLoading}
-        onToggle={(checked) => toggleMutation.mutate(checked)}
-        toggleDisabled={toggleMutation.isPending}
-        onSettings={() => {
-          toast.info(`Página: ${connection.page_name || "N/A"}\nIG Account: ${(connection as any).ig_account_id || "N/A"}`);
-        }}
-        onDisconnect={() => {
-          if (window.confirm("Deseja desconectar o Instagram? Você poderá reconectar depois.")) {
-            deleteMutation.mutate();
+    <IntegrationCard
+      icon={<InstagramIcon />}
+      title="Instagram DM"
+      description={`Conectado: ${connection.page_name || "Página"}`}
+      isConnected={true}
+      isActive={connection.is_active}
+      isLoading={isLoading}
+      onToggle={(checked) => toggleMutation.mutate(checked)}
+      toggleDisabled={toggleMutation.isPending}
+      onSettings={() => {
+        toast.info(`Página: ${connection.page_name || "N/A"}\nIG Account: ${(connection as any).ig_account_id || "N/A"}`);
+      }}
+      onDisconnect={() => {
+        if (window.confirm("Deseja desconectar o Instagram? Você poderá reconectar depois.")) {
+          deleteMutation.mutate();
+        }
+      }}
+    >
+      <MetaHandlerControls
+        handlerType={currentHandlerType}
+        automationId={(connection as any).default_automation_id}
+        humanAgentId={(connection as any).default_human_agent_id}
+        disabled={updateHandlerMutation.isPending}
+        onHandlerTypeChange={(value) => {
+          if (value === "ai") {
+            updateHandlerMutation.mutate({ default_handler_type: "ai", default_human_agent_id: null });
+          } else {
+            updateHandlerMutation.mutate({ default_handler_type: "human", default_automation_id: null });
           }
         }}
-      >
-        <MetaHandlerControls
-          handlerType={currentHandlerType}
-          automationId={(connection as any).default_automation_id}
-          humanAgentId={(connection as any).default_human_agent_id}
-          disabled={updateHandlerMutation.isPending}
-          onHandlerTypeChange={(value) => {
-            if (value === "ai") {
-              updateHandlerMutation.mutate({ default_handler_type: "ai", default_human_agent_id: null });
-            } else {
-              updateHandlerMutation.mutate({ default_handler_type: "human", default_automation_id: null });
-            }
-          }}
-          onAutomationChange={(id) => {
-            updateHandlerMutation.mutate({ default_automation_id: id === "none" ? null : id });
-          }}
-          onHumanAgentChange={(id) => {
-            updateHandlerMutation.mutate({ default_human_agent_id: id === "none" ? null : id });
-          }}
-        />
-      </IntegrationCard>
-      <InstagramPagePickerDialog
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        pages={pickerPages}
-        onSelect={handleSelectPage}
+        onAutomationChange={(id) => {
+          updateHandlerMutation.mutate({ default_automation_id: id === "none" ? null : id });
+        }}
+        onHumanAgentChange={(id) => {
+          updateHandlerMutation.mutate({ default_human_agent_id: id === "none" ? null : id });
+        }}
       />
-    </>
+    </IntegrationCard>
   );
 }
