@@ -1,60 +1,84 @@
 
-# Adicionar Controles de IA nos Cards do Instagram e Facebook
 
-## Situacao Atual
+# Atualizar Contagem de Conexoes e Landing Page
 
-O backend ja esta completamente preparado:
-- A tabela `meta_connections` ja possui os campos `default_handler_type`, `default_automation_id` e `default_human_agent_id`
-- O webhook `meta-webhook` ja usa esses campos ao criar conversas novas (define `current_handler`, `current_automation_id` e `assigned_to`)
-- O que falta e apenas o **frontend** expor esses controles nos cards de integracao
+## 1. Contagem de Conexoes (Dashboard Global Admin)
 
-## O Que Sera Feito
+### Problema
+O hook `useSystemMetrics.tsx` conta apenas `current_instances` (da view `company_usage_summary`), que vem da tabela `whatsapp_instances` (Evolution API). Nao inclui conexoes da API Oficial (WhatsApp Cloud), Instagram e Facebook que estao na tabela `meta_connections`.
 
-Adicionar os mesmos dropdowns do Chat Web (Atendimento: Humano/Agente IA + selecao de agente) nos cards do Instagram DM e Facebook Messenger quando estiverem conectados.
+### Solucao
+No arquivo `src/hooks/useSystemMetrics.tsx`:
+- Adicionar uma query para contar registros ativos da tabela `meta_connections` (onde `is_active = true`)
+- Somar ao `totalConnections` existente
+- Tambem contar conexoes meta ativas para o `activeConnections` (meta_connections ativas sao sempre "conectadas")
 
-### Mudanca 1: `IntegrationCard.tsx` - Aceitar conteudo extra
+Trecho afetado (apos linha 84):
+```typescript
+// Contar conexoes Meta (WhatsApp Cloud, Instagram, Facebook)
+const { data: metaConnectionsData } = await supabase
+  .from("meta_connections")
+  .select("id, type, is_active");
 
-Adicionar uma prop `children` ao componente `IntegrationCard` para renderizar conteudo customizado (os dropdowns) dentro do card quando conectado.
+const activeMetaConnections = metaConnectionsData?.filter(c => c.is_active).length || 0;
 
-### Mudanca 2: `InstagramIntegration.tsx` - Adicionar controles de IA
-
-Quando conectado, exibir:
-- Dropdown "Atendimento": Humano ou Agente IA
-- Se "Agente IA": dropdown para selecionar qual agente
-- Se "Humano": dropdown para selecionar responsavel
-
-Ao mudar, atualizar os campos `default_handler_type`, `default_automation_id` e `default_human_agent_id` diretamente na tabela `meta_connections`.
-
-### Mudanca 3: `FacebookIntegration.tsx` - Mesma logica
-
-Identica ao Instagram: adicionar os mesmos controles de IA/Humano ao card do Facebook Messenger.
-
-## Detalhes Tecnicos
-
-### Componentes reutilizados
-- `useAutomations()` - lista os agentes IA ativos
-- `useTeamMembers()` - lista os membros da equipe
-- `Select` do Radix UI - mesmos dropdowns ja usados no Chat Web
-
-### Fluxo de dados
-```text
-Card Instagram/Facebook (frontend)
-  |-- Update meta_connections.default_handler_type
-  |-- Update meta_connections.default_automation_id
-  |-- Update meta_connections.default_human_agent_id
-  |
-  v
-meta-webhook (backend, ja implementado)
-  |-- Nova conversa criada com current_handler = "ai" ou "human"
-  |-- current_automation_id preenchido se IA
-  |-- assigned_to preenchido se humano
+// Somar ao total
+totalConnections += activeMetaConnections;
+activeConnections += activeMetaConnections;
 ```
 
-### Valores padrao
-- Conexoes existentes: `default_handler_type` e `null`, tratado como "human" (comportamento atual mantido)
-- Ao mudar para "ai": limpa `default_human_agent_id`
-- Ao mudar para "human": limpa `default_automation_id`
+## 2. Atualizar Landing Page - Secao Multiplataforma
 
-## Resultado
+### Problema
+A secao "Multiplataforma" (linhas 494-575) menciona apenas "WhatsApp e Site". Precisa incluir WhatsApp API Oficial, Instagram DM e Facebook Messenger.
 
-Os cards do Instagram e Facebook terao a mesma interface do Chat Web, com selecao de modo de atendimento e agente, sem necessidade de nenhuma mudanca no backend.
+### Solucao
+No arquivo `src/pages/landing/LandingPage.tsx`:
+
+**Titulo da secao** (linha 506-508): Mudar de "WhatsApp e Site" para "WhatsApp, Instagram, Facebook e Site"
+
+**Grid de cards**: Expandir de 2 cards (WhatsApp + Chat Web) para 4 cards em layout responsivo:
+
+1. **WhatsApp** (manter existente, atualizar texto):
+   - Adicionar mencionamento da API Oficial
+   - Destacar: "Compativel com WhatsApp Business API Oficial e conexao direta"
+   - Features: Multiplos numeros, IA 24/7, Transcricao de audios, Leitura de imagens, API Oficial do WhatsApp
+
+2. **Instagram DM** (novo card, cor roxa/gradient):
+   - Icone Instagram
+   - Texto: Receba e responda mensagens do Instagram Direct na mesma plataforma
+   - Features: Respostas automaticas com IA, Resolucao de nome e foto do perfil, Historico unificado, Story mentions e replies
+
+3. **Facebook Messenger** (novo card, cor azul):
+   - Icone Facebook
+   - Texto: Atenda mensagens do Messenger da sua pagina com IA ou atendente humano
+   - Features: Integracao direta com sua pagina, IA respondendo automaticamente, Historico completo, Transferencia para humano
+
+4. **Chat Web** (manter existente, sem alteracoes)
+
+**Highlight** (linha 569-573): Atualizar texto para incluir todos os canais:
+- "Conversas do WhatsApp, Instagram, Facebook e Chat Web aparecem no mesmo painel, com historico unificado e IA compartilhada."
+
+### Imports adicionais
+Importar icones do Lucide para Instagram e Facebook (usar `Instagram` se disponivel, senao `MessageSquare` e `Facebook`). Verificar se `lucide-react` tem esses icones, caso contrario usar icones customizados SVG inline.
+
+## 3. Extracao de Perfil - WhatsApp Cloud API (Informativo)
+
+A extracao de perfil ja esta **100% funcional**:
+- O webhook extrai `value.contacts[].profile.name` do payload da WhatsApp Cloud API
+- O nome e salvo no registro do cliente e no `contact_name` da conversa
+- A cada nova mensagem, o nome e atualizado na conversa
+- Quando o cliente nao tem nome no payload, usa o numero de telefone como fallback
+
+Nenhuma mudanca necessaria aqui.
+
+## Arquivos Modificados
+
+| Arquivo | Mudanca |
+|---|---|
+| `src/hooks/useSystemMetrics.tsx` | Adicionar contagem de meta_connections |
+| `src/pages/landing/LandingPage.tsx` | Expandir secao multiplataforma com Instagram e Facebook |
+
+## Risco
+
+Baixo. A contagem de conexoes e uma soma adicional. A landing page e apenas visual, sem impacto funcional.
