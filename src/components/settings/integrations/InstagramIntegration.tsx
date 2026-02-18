@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Instagram } from "lucide-react";
+import { Instagram, RefreshCw, Stethoscope } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
 import { MetaHandlerControls } from "./MetaHandlerControls";
 import { toast } from "sonner";
@@ -9,6 +9,13 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { META_APP_ID, buildMetaOAuthUrl, getFixedRedirectUri } from "@/lib/meta-config";
 import { getFunctionErrorMessage } from "@/lib/supabaseFunctionError";
 import { InstagramPagePickerDialog, type InstagramPage } from "./InstagramPagePickerDialog";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 function InstagramIcon() {
   return (
@@ -24,7 +31,9 @@ export function InstagramIntegration() {
   const listenerRef = useRef<((event: MessageEvent) => void) | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerPages, setPickerPages] = useState<InstagramPage[]>([]);
-  // pendingOAuthData removed - tokens are now passed via encryptedToken in page picker
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [diagReport, setDiagReport] = useState<any>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
 
   // Cleanup listener on unmount
   useEffect(() => {
@@ -60,7 +69,7 @@ export function InstagramIntegration() {
     enabled: !!user?.id,
   });
 
-  // Toggle active state
+  // Toggle active state + auto resubscribe on activation
   const toggleMutation = useMutation({
     mutationFn: async (isActive: boolean) => {
       if (!connection?.id) throw new Error("No connection");
@@ -69,10 +78,26 @@ export function InstagramIntegration() {
         .update({ is_active: isActive })
         .eq("id", connection.id);
       if (error) throw error;
+
+      // Auto-resubscribe when activating
+      if (isActive) {
+        try {
+          const { data, error: resubError } = await supabase.functions.invoke("meta-api", {
+            body: { action: "resubscribe", connectionId: connection.id },
+          });
+          if (resubError) {
+            console.error("[InstagramIntegration] Resubscribe error:", resubError);
+          } else {
+            console.log("[InstagramIntegration] Resubscribe result:", data);
+          }
+        } catch (err) {
+          console.error("[InstagramIntegration] Resubscribe failed:", err);
+        }
+      }
     },
     onSuccess: (_, isActive) => {
       queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
-      toast.success(isActive ? "Instagram ativado!" : "Instagram desativado");
+      toast.success(isActive ? "Instagram ativado e inscrito nos webhooks!" : "Instagram desativado");
     },
     onError: () => toast.error("Erro ao alterar status"),
   });
@@ -110,10 +135,47 @@ export function InstagramIntegration() {
     onError: () => toast.error("Erro ao atualizar configuração"),
   });
 
+  // Resubscribe manually
+  const handleResubscribe = useCallback(async () => {
+    if (!connection?.id) return;
+    toast.loading("Reinscrevendo webhooks...", { id: "ig-resub" });
+    try {
+      const { data, error } = await supabase.functions.invoke("meta-api", {
+        body: { action: "resubscribe", connectionId: connection.id },
+      });
+      if (error) throw error;
+      if (data?.success) {
+        toast.success("Webhooks reinscritos com sucesso!", { id: "ig-resub" });
+      } else {
+        toast.error("Falha ao reinscrever: " + JSON.stringify(data?.subscribeResult), { id: "ig-resub" });
+      }
+    } catch (err) {
+      toast.error("Erro ao reinscrever webhooks", { id: "ig-resub" });
+    }
+  }, [connection?.id]);
+
+  // Diagnose connection
+  const handleDiagnose = useCallback(async () => {
+    if (!connection?.id) return;
+    setDiagLoading(true);
+    setDiagReport(null);
+    setDiagOpen(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("meta-api", {
+        body: { action: "diagnose", connectionId: connection.id },
+      });
+      if (error) throw error;
+      setDiagReport(data);
+    } catch (err) {
+      setDiagReport({ error: String(err) });
+    } finally {
+      setDiagLoading(false);
+    }
+  }, [connection?.id]);
+
   // Save selected Instagram page
   const handleSelectPage = useCallback(async (page: InstagramPage) => {
     toast.loading("Conectando Instagram...", { id: "ig-connect" });
-
     try {
       const response = await supabase.functions.invoke("meta-oauth-callback", {
         body: {
@@ -127,20 +189,16 @@ export function InstagramIntegration() {
           pageName: page.pageName,
         },
       });
-
       if (response.error) {
         const realMsg = await getFunctionErrorMessage(response.error);
         throw new Error(realMsg);
       }
-
       if (!response.data?.success) {
         throw new Error(response.data?.error || response.data?.message || "Falha ao salvar conexão");
       }
-
       queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
       toast.success("Instagram conectado com sucesso!", { id: "ig-connect" });
       setPickerOpen(false);
-      // no longer need pendingOAuthData
       setPickerPages([]);
     } catch (err) {
       console.error("Instagram save error:", err);
@@ -153,49 +211,35 @@ export function InstagramIntegration() {
       toast.error("META_APP_ID não configurado. Configure nas variáveis de ambiente.");
       return;
     }
-
     const authUrl = buildMetaOAuthUrl("instagram");
     window.open(authUrl, "meta-oauth", "width=600,height=700,scrollbars=yes");
 
-    // Remove previous listener if any
     if (listenerRef.current) {
       window.removeEventListener("message", listenerRef.current);
     }
 
     const handleMessage = async (event: MessageEvent) => {
-      // Handle code from popup (new flow)
       if (event.data?.type === "meta-oauth-code" && event.data.connectionType === "instagram") {
         window.removeEventListener("message", handleMessage);
         listenerRef.current = null;
-
         const code = event.data.code;
         const redirectUri = getFixedRedirectUri("instagram");
-
         toast.loading("Buscando contas Instagram...", { id: "ig-connect" });
-
         try {
-          // Step 1: List pages with IG accounts
           const response = await supabase.functions.invoke("meta-oauth-callback", {
             body: { code, redirectUri, type: "instagram", step: "list_pages" },
           });
-
           if (response.error) {
             const realMsg = await getFunctionErrorMessage(response.error);
             throw new Error(realMsg);
           }
-
           if (!response.data?.success) {
             throw new Error(response.data?.error || response.data?.message || "Falha ao buscar contas");
           }
-
           const pages: InstagramPage[] = response.data.pages || [];
-
           if (pages.length === 0) {
             throw new Error("Nenhuma conta Instagram encontrada vinculada às suas páginas.");
           }
-
-          // Pages now include encryptedToken from backend
-          setPickerPages(pages);
           setPickerPages(pages);
           setPickerOpen(true);
           toast.dismiss("ig-connect");
@@ -205,8 +249,7 @@ export function InstagramIntegration() {
         }
         return;
       }
-
-      // Legacy handlers (backward compat)
+      // Legacy handlers
       if (event.data?.type === "meta-oauth-success") {
         window.removeEventListener("message", handleMessage);
         listenerRef.current = null;
@@ -257,9 +300,7 @@ export function InstagramIntegration() {
         isLoading={isLoading}
         onToggle={(checked) => toggleMutation.mutate(checked)}
         toggleDisabled={toggleMutation.isPending}
-        onSettings={() => {
-          toast.info(`Página: ${connection.page_name}${connection.ig_account_id ? ` | IG: ${connection.ig_account_id}` : ""}`);
-        }}
+        onSettings={handleDiagnose}
         onDisconnect={() => {
           if (window.confirm("Deseja desconectar o Instagram? Você poderá reconectar depois.")) {
             deleteMutation.mutate();
@@ -285,6 +326,16 @@ export function InstagramIntegration() {
             updateHandlerMutation.mutate({ default_human_agent_id: id === "none" ? null : id });
           }}
         />
+        <div className="flex gap-2 mt-3">
+          <Button variant="outline" size="sm" onClick={handleResubscribe}>
+            <RefreshCw className="h-4 w-4 mr-1" />
+            Reinscrever Webhooks
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleDiagnose}>
+            <Stethoscope className="h-4 w-4 mr-1" />
+            Diagnóstico
+          </Button>
+        </div>
       </IntegrationCard>
       <InstagramPagePickerDialog
         open={pickerOpen}
@@ -292,6 +343,49 @@ export function InstagramIntegration() {
         pages={pickerPages}
         onSelect={handleSelectPage}
       />
+      <Dialog open={diagOpen} onOpenChange={setDiagOpen}>
+        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Diagnóstico Instagram</DialogTitle>
+          </DialogHeader>
+          {diagLoading ? (
+            <p className="text-muted-foreground text-sm">Carregando diagnóstico...</p>
+          ) : diagReport ? (
+            <div className="space-y-3 text-sm">
+              {diagReport.connection && (
+                <div>
+                  <h4 className="font-medium mb-1">Conexão</h4>
+                  <div className="bg-muted rounded p-2 space-y-1 text-xs">
+                    <p>Página: {diagReport.connection.pageName}</p>
+                    <p>Page ID: {diagReport.connection.pageId}</p>
+                    <p>IG Account: {diagReport.connection.igAccountId || "N/A"}</p>
+                    <p>Ativa: {diagReport.connection.isActive ? "✅ Sim" : "❌ Não"}</p>
+                  </div>
+                </div>
+              )}
+              {diagReport.checks && (
+                <div>
+                  <h4 className="font-medium mb-1">Verificações</h4>
+                  <div className="bg-muted rounded p-2 space-y-1 text-xs">
+                    <p>Token válido: {diagReport.checks.tokenValid === true ? "✅ Sim" : diagReport.checks.tokenValid === false ? "❌ Expirado" : "⚠️ Desconhecido"}</p>
+                    <p>Expira em: {diagReport.checks.tokenExpiresIn}</p>
+                    <p>Apps inscritos: {diagReport.checks.subscribedApps?.data?.length >= 0 ? `${diagReport.checks.subscribedApps.data.length} app(s)` : "❌ Erro"}</p>
+                    {diagReport.checks.igAccount && (
+                      <p>IG Account: {diagReport.checks.igAccount.username ? `✅ @${diagReport.checks.igAccount.username}` : `❌ ${JSON.stringify(diagReport.checks.igAccount.error || diagReport.checks.igAccount)}`}</p>
+                    )}
+                    {diagReport.checks.pageInfo && (
+                      <p>Página FB: {diagReport.checks.pageInfo.name ? `✅ ${diagReport.checks.pageInfo.name}` : "❌ Erro"}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+              {diagReport.error && (
+                <p className="text-destructive text-xs">{String(diagReport.error)}</p>
+              )}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

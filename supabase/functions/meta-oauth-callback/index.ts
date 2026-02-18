@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Subscribe page to webhooks for Instagram messaging
+      // Subscribe page to webhooks for Instagram messaging with verification
       try {
         const subRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps`, {
           method: "POST",
@@ -157,6 +157,33 @@ Deno.serve(async (req) => {
         });
         const subData = await subRes.json();
         console.log("[meta-oauth] Instagram webhook subscription result:", JSON.stringify(subData));
+
+        // Verify subscription was actually registered
+        const verifyRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${pageAccessToken}`);
+        const verifyData = await verifyRes.json();
+        console.log("[meta-oauth] Instagram subscription verification:", JSON.stringify(verifyData));
+
+        // If verification shows no subscription, retry after a short delay
+        const hasSubscription = verifyData.data?.length > 0;
+        if (!hasSubscription && subData.success) {
+          console.log("[meta-oauth] Subscription not confirmed, retrying after 2s...");
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          const retryRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              subscribed_fields: "messages,messaging_postbacks,messaging_optins",
+              access_token: pageAccessToken,
+            }),
+          });
+          const retryData = await retryRes.json();
+          console.log("[meta-oauth] Instagram retry subscription result:", JSON.stringify(retryData));
+          
+          // Final verification
+          const finalVerifyRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${pageAccessToken}`);
+          const finalVerifyData = await finalVerifyRes.json();
+          console.log("[meta-oauth] Instagram final verification:", JSON.stringify(finalVerifyData));
+        }
       } catch (subErr) {
         console.error("[meta-oauth] Instagram webhook subscription error:", subErr);
       }
@@ -384,7 +411,7 @@ Deno.serve(async (req) => {
         });
       }
 
-      // Subscribe page to webhooks for Instagram messaging
+      // Subscribe page to webhooks for Instagram messaging with verification
       try {
         console.log("[meta-oauth] Subscribing page to webhooks for Instagram:", selectedIg.pageId);
         const subRes = await fetch(
@@ -399,7 +426,30 @@ Deno.serve(async (req) => {
           }
         );
         const subData = await subRes.json();
-        console.log("[meta-oauth] Instagram subscribe result:", subData);
+        console.log("[meta-oauth] Instagram subscribe result:", JSON.stringify(subData));
+
+        // Verify subscription
+        const verifyRes = await fetch(`${GRAPH_API_BASE}/${selectedIg.pageId}/subscribed_apps?access_token=${selectedIg.pageAccessToken}`);
+        const verifyData = await verifyRes.json();
+        console.log("[meta-oauth] Instagram subscription verification:", JSON.stringify(verifyData));
+
+        // Retry if not confirmed
+        const hasSubscription = verifyData.data?.length > 0;
+        if (!hasSubscription && subData.success) {
+          console.log("[meta-oauth] Subscription not confirmed, retrying after 2s...");
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          await fetch(`${GRAPH_API_BASE}/${selectedIg.pageId}/subscribed_apps`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              subscribed_fields: "messages,messaging_postbacks,messaging_optins",
+              access_token: selectedIg.pageAccessToken,
+            }),
+          });
+          const finalVerifyRes = await fetch(`${GRAPH_API_BASE}/${selectedIg.pageId}/subscribed_apps?access_token=${selectedIg.pageAccessToken}`);
+          const finalVerifyData = await finalVerifyRes.json();
+          console.log("[meta-oauth] Instagram final verification:", JSON.stringify(finalVerifyData));
+        }
       } catch (subErr) {
         console.error("[meta-oauth] Failed to subscribe page for Instagram (non-blocking):", subErr);
       }
