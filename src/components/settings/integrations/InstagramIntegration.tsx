@@ -366,6 +366,23 @@ export function InstagramIntegration() {
               {diagReport.checks && (
                 <div>
                   <h4 className="font-medium mb-1">Verificações</h4>
+                  {diagReport.checks.tokenPermissions && !diagReport.checks.tokenPermissions.hasInstagramManageMessages && (
+                    <div className="bg-destructive/10 border border-destructive/30 rounded p-3 mb-2">
+                      <h4 className="font-medium text-destructive mb-1">⚠️ Permissão ausente!</h4>
+                      <p className="text-xs">O token NÃO possui a permissão <strong>instagram_manage_messages</strong>. A Meta não enviará mensagens do Instagram para o sistema.</p>
+                      <p className="text-xs mt-1 font-medium">Para corrigir:</p>
+                      <ol className="text-xs list-decimal ml-4 mt-1">
+                        <li>Desconecte o Instagram abaixo</li>
+                        <li>Reconecte clicando em "Conectar"</li>
+                        <li>Na tela da Meta, selecione <strong>"Páginas"</strong> E <strong>"Contas do Instagram"</strong> nos ativos</li>
+                      </ol>
+                    </div>
+                  )}
+                  {diagReport.checks.tokenPermissions && diagReport.checks.tokenPermissions.hasInstagramManageMessages && (
+                    <div className="bg-green-500/10 border border-green-500/30 rounded p-2 mb-2">
+                      <p className="text-xs text-green-700">✅ Permissão <strong>instagram_manage_messages</strong> presente</p>
+                    </div>
+                  )}
                   <div className="bg-muted rounded p-2 space-y-1 text-xs">
                     <p>Token válido: {diagReport.checks.tokenValid === true ? "✅ Sim" : diagReport.checks.tokenValid === false ? "❌ Expirado" : "⚠️ Desconhecido"}</p>
                     <p>Expira em: {diagReport.checks.tokenExpiresIn}</p>
@@ -375,6 +392,9 @@ export function InstagramIntegration() {
                     )}
                     {diagReport.checks.pageInfo && (
                       <p>Página FB: {diagReport.checks.pageInfo.name ? `✅ ${diagReport.checks.pageInfo.name}` : "❌ Erro"}</p>
+                    )}
+                    {diagReport.checks.tokenPermissions?.scopes && (
+                      <p>Escopos do token: {diagReport.checks.tokenPermissions.scopes.join(", ") || "nenhum"}</p>
                     )}
                   </div>
                 </div>
