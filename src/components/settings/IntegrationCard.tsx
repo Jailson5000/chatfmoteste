@@ -18,6 +18,7 @@ interface IntegrationCardProps {
   onConnect?: () => void;
   onDisconnect?: () => void;
   toggleDisabled?: boolean;
+  children?: ReactNode;
 }
 
 export function IntegrationCard({
@@ -33,6 +34,7 @@ export function IntegrationCard({
   onConnect,
   onDisconnect,
   toggleDisabled = false,
+  children,
 }: IntegrationCardProps) {
   if (isLoading) {
     return (
@@ -78,6 +80,9 @@ export function IntegrationCard({
         <p className="text-xs text-muted-foreground line-clamp-3 flex-1 mb-4">
           {description}
         </p>
+
+        {/* Custom content (e.g. handler controls) */}
+        {isConnected && children}
 
         {/* Footer actions */}
         <div className="flex items-center justify-between mt-auto pt-2 border-t border-border/50">

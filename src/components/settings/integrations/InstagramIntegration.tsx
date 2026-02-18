@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Instagram } from "lucide-react";
 import { IntegrationCard } from "../IntegrationCard";
+import { MetaHandlerControls } from "./MetaHandlerControls";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -91,6 +92,22 @@ export function InstagramIntegration() {
       toast.success("Conexão removida");
     },
     onError: () => toast.error("Erro ao remover conexão"),
+  });
+
+  const updateHandlerMutation = useMutation({
+    mutationFn: async (updates: Record<string, unknown>) => {
+      if (!connection?.id) throw new Error("No connection");
+      const { error } = await supabase
+        .from("meta_connections")
+        .update(updates)
+        .eq("id", connection.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["meta-connection", "instagram"] });
+      toast.success("Configuração atualizada!");
+    },
+    onError: () => toast.error("Erro ao atualizar configuração"),
   });
 
   // Save selected Instagram page
@@ -227,6 +244,8 @@ export function InstagramIntegration() {
     );
   }
 
+  const currentHandlerType = (connection as any).default_handler_type || "human";
+
   return (
     <>
       <IntegrationCard
@@ -246,7 +265,27 @@ export function InstagramIntegration() {
             deleteMutation.mutate();
           }
         }}
-      />
+      >
+        <MetaHandlerControls
+          handlerType={currentHandlerType}
+          automationId={(connection as any).default_automation_id}
+          humanAgentId={(connection as any).default_human_agent_id}
+          disabled={updateHandlerMutation.isPending}
+          onHandlerTypeChange={(value) => {
+            if (value === "ai") {
+              updateHandlerMutation.mutate({ default_handler_type: "ai", default_human_agent_id: null });
+            } else {
+              updateHandlerMutation.mutate({ default_handler_type: "human", default_automation_id: null });
+            }
+          }}
+          onAutomationChange={(id) => {
+            updateHandlerMutation.mutate({ default_automation_id: id === "none" ? null : id });
+          }}
+          onHumanAgentChange={(id) => {
+            updateHandlerMutation.mutate({ default_human_agent_id: id === "none" ? null : id });
+          }}
+        />
+      </IntegrationCard>
       <InstagramPagePickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}
