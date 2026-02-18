@@ -83,12 +83,12 @@ export function useSystemMetrics() {
       // For active connections, we need to check the whatsapp_instances table
       const [{ data: instancesData }, { data: metaConnectionsData }] = await Promise.all([
         supabase.from("whatsapp_instances").select("id, status"),
-        supabase.from("meta_connections").select("id, type, is_active"),
+        supabase.from("meta_connections").select("id, type, is_active").eq("type", "whatsapp_cloud"),
       ]);
       
       activeConnections = instancesData?.filter(i => i.status === "connected").length || 0;
 
-      // Count Meta connections (WhatsApp Cloud, Instagram, Facebook)
+      // Count WhatsApp Cloud API connections (only whatsapp_cloud, not instagram/facebook)
       const totalMetaConnections = metaConnectionsData?.length || 0;
       const activeMetaConnections = metaConnectionsData?.filter(c => c.is_active).length || 0;
       totalConnections += totalMetaConnections;
