@@ -51,6 +51,199 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Handle resubscribe action - re-subscribe page to webhooks
+    if (body.action === "resubscribe" && body.connectionId) {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const tkn = authHeader.replace("Bearer ", "");
+      const { data: resubClaims, error: resubClaimsErr } = await supabaseAuth.auth.getClaims(tkn);
+      if (resubClaimsErr || !resubClaims?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const resubUserId = resubClaims.claims.sub;
+      const supabaseAdminResub = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data: resubProfile } = await supabaseAdminResub.from("profiles").select("law_firm_id").eq("id", resubUserId).single();
+      if (!resubProfile?.law_firm_id) {
+        return new Response(JSON.stringify({ error: "No tenant" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: resubConn } = await supabaseAdminResub.from("meta_connections")
+        .select("id, access_token, page_id, ig_account_id, type, law_firm_id")
+        .eq("id", body.connectionId)
+        .eq("law_firm_id", resubProfile.law_firm_id)
+        .single();
+
+      if (!resubConn) {
+        return new Response(JSON.stringify({ error: "Connection not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let resubToken = resubConn.access_token;
+      if (isEncrypted(resubToken)) {
+        resubToken = await decryptToken(resubToken);
+      }
+
+      const pageId = resubConn.page_id;
+
+      // Step 1: Check current subscription status
+      console.log("[meta-api] resubscribe: checking current subscriptions for page", pageId);
+      const checkRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${resubToken}`);
+      const checkData = await checkRes.json();
+      console.log("[meta-api] resubscribe: current subscriptions:", JSON.stringify(checkData));
+
+      // Step 2: Re-subscribe with required fields
+      const subscribeFields = "messages,messaging_postbacks,messaging_optins";
+      console.log("[meta-api] resubscribe: subscribing with fields:", subscribeFields);
+      const subRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subscribed_fields: subscribeFields,
+          access_token: resubToken,
+        }),
+      });
+      const subData = await subRes.json();
+      console.log("[meta-api] resubscribe: subscribe result:", JSON.stringify(subData));
+
+      // Step 3: Verify subscription after re-subscribing
+      const verifyRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps?access_token=${resubToken}`);
+      const verifyData = await verifyRes.json();
+      console.log("[meta-api] resubscribe: verification:", JSON.stringify(verifyData));
+
+      return new Response(JSON.stringify({
+        success: subData.success === true,
+        before: checkData,
+        subscribeResult: subData,
+        after: verifyData,
+        pageId,
+        igAccountId: resubConn.ig_account_id,
+        type: resubConn.type,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle diagnose action - check connection health
+    if (body.action === "diagnose" && body.connectionId) {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader?.startsWith("Bearer ")) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+      const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+      const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const tkn = authHeader.replace("Bearer ", "");
+      const { data: diagClaims, error: diagClaimsErr } = await supabaseAuth.auth.getClaims(tkn);
+      if (diagClaimsErr || !diagClaims?.claims) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const diagUserId = diagClaims.claims.sub;
+      const supabaseAdminDiag = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+      const { data: diagProfile } = await supabaseAdminDiag.from("profiles").select("law_firm_id").eq("id", diagUserId).single();
+      if (!diagProfile?.law_firm_id) {
+        return new Response(JSON.stringify({ error: "No tenant" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: diagConn } = await supabaseAdminDiag.from("meta_connections")
+        .select("id, access_token, page_id, ig_account_id, type, is_active, page_name, token_expires_at, source, created_at, updated_at")
+        .eq("id", body.connectionId)
+        .eq("law_firm_id", diagProfile.law_firm_id)
+        .single();
+
+      if (!diagConn) {
+        return new Response(JSON.stringify({ error: "Connection not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      let diagToken = diagConn.access_token;
+      if (isEncrypted(diagToken)) {
+        diagToken = await decryptToken(diagToken);
+      }
+
+      const report: Record<string, any> = {
+        connection: {
+          id: diagConn.id,
+          type: diagConn.type,
+          pageId: diagConn.page_id,
+          igAccountId: diagConn.ig_account_id,
+          pageName: diagConn.page_name,
+          isActive: diagConn.is_active,
+          source: diagConn.source,
+          tokenExpiresAt: diagConn.token_expires_at,
+          createdAt: diagConn.created_at,
+          updatedAt: diagConn.updated_at,
+        },
+        checks: {},
+      };
+
+      // Check 1: Token validity
+      const tokenExpiry = diagConn.token_expires_at ? new Date(diagConn.token_expires_at) : null;
+      report.checks.tokenValid = tokenExpiry ? tokenExpiry > new Date() : "unknown";
+      report.checks.tokenExpiresIn = tokenExpiry ? Math.round((tokenExpiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) + " days" : "unknown";
+
+      // Check 2: Subscribed apps
+      try {
+        const subRes = await fetch(`${GRAPH_API_BASE}/${diagConn.page_id}/subscribed_apps?access_token=${diagToken}`);
+        const subData = await subRes.json();
+        report.checks.subscribedApps = subData;
+      } catch (err) {
+        report.checks.subscribedApps = { error: String(err) };
+      }
+
+      // Check 3: IG account accessibility (if Instagram)
+      if (diagConn.ig_account_id) {
+        try {
+          const igRes = await fetch(`${GRAPH_API_BASE}/${diagConn.ig_account_id}?fields=username,name,id&access_token=${diagToken}`);
+          const igData = await igRes.json();
+          report.checks.igAccount = igData;
+        } catch (err) {
+          report.checks.igAccount = { error: String(err) };
+        }
+      }
+
+      // Check 4: Page info
+      try {
+        const pageRes = await fetch(`${GRAPH_API_BASE}/${diagConn.page_id}?fields=name,id,instagram_business_account&access_token=${diagToken}`);
+        const pageData = await pageRes.json();
+        report.checks.pageInfo = pageData;
+      } catch (err) {
+        report.checks.pageInfo = { error: String(err) };
+      }
+
+      console.log("[meta-api] diagnose result:", JSON.stringify(report));
+
+      return new Response(JSON.stringify(report), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Handle template management actions
     if (["list_templates", "create_template", "delete_template"].includes(body.action) && body.connectionId) {
       const authHeader = req.headers.get("Authorization");
