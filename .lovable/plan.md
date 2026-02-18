@@ -1,42 +1,73 @@
 
 
-# Corrigir "Total de Conversas" no Dashboard
+# Corrigir Envio de Mensagens para Instagram
 
 ## Problema
 
-O campo "Total de Conversas" mostra 83, mas deveria mostrar o numero real de conversas. O valor atual e calculado contando apenas conversas que tiveram mensagens no periodo selecionado (`uniqueConversations` derivado da tabela `messages`). Isso exclui conversas que existem mas nao tiveram mensagens no periodo.
+O sistema recebe mensagens do Instagram normalmente (nome e foto funcionam), mas nao consegue ENVIAR mensagens de volta. O erro da API da Meta e:
 
-Enquanto isso, "Conversas Ativas" mostra 382 corretamente (todas as conversas nao arquivadas).
-
-## Causa
-
-No arquivo `src/hooks/useDashboardMetrics.tsx`, o campo `totalConversations` e calculado assim:
-
-```typescript
-const uniqueConversations = new Set(messages?.map(m => m.conversation_id) || []).size;
+```
+"pages_messaging permission(s) must be granted before impersonating a user's page"
+code: 190 (OAuthException)
 ```
 
-Isso conta apenas conversas com mensagens no periodo, nao o total real.
+## Diagnostico
+
+A funcao `sendMessagingMessage` no arquivo `supabase/functions/meta-api/index.ts` usa o endpoint `/me/messages` para enviar mensagens no Instagram. Porem, a API de Mensagens do Instagram exige o uso explicito do **Page ID** no endpoint (`/{page_id}/messages`) em vez do alias `/me`. Embora `/me` funcione para o Facebook Messenger, para o Instagram ele gera o erro de "impersonating a user's page".
+
+Evidencia:
+- O token funciona para LEITURA (buscar perfil do contato via GET) -- "Profile resolved: Jailson Ferreira"
+- O token FALHA para ESCRITA (enviar mensagem via POST /me/messages) -- erro 190
+- A conexao correta (`b7cf1da1`) e encontrada com `page_id: 977414192123496`
+- Mas o `page_id` nao e passado para a funcao de envio
 
 ## Solucao
 
-Alterar o calculo de `totalConversations` para contar conversas diretamente da tabela `conversations`, usando a data de criacao ou ultima mensagem como filtro de periodo.
+### Arquivo: `supabase/functions/meta-api/index.ts`
 
-### Arquivo: `src/hooks/useDashboardMetrics.tsx`
+1. **Passar `page_id` e `origin` para a funcao `sendMessagingMessage`**
 
-1. Adicionar uma query direta a tabela `conversations` com filtro de data no campo `created_at` (conversas criadas no periodo) ou `last_message_at` (conversas com atividade no periodo)
-2. Usar `count: "exact"` para eficiencia
-3. Aplicar os mesmos filtros de atendente, departamento e conexao
+   Na chamada (linha ~684):
+   ```
+   // Antes:
+   graphResponse = await sendMessagingMessage(accessToken, recipientId, content, messageType, mediaUrl);
+   
+   // Depois:
+   graphResponse = await sendMessagingMessage(accessToken, recipientId, content, messageType, mediaUrl, connection.page_id, origin);
+   ```
 
-O campo "Total de Conversas" passara a mostrar o total de conversas que tiveram atividade (last_message_at) no periodo, incluindo aquelas cujas mensagens individuais podem nao ter sido carregadas.
+2. **Alterar a funcao `sendMessagingMessage` para usar `/{page_id}/messages` no Instagram**
 
-### Detalhes tecnicos
+   A funcao passa a aceitar `pageId` e `origin` opcionais. Quando `origin === "INSTAGRAM"` e um `pageId` esta disponivel, usa `/{pageId}/messages` em vez de `/me/messages`:
 
-Na funcao `queryFn` do `dashboard-message-metrics`:
+   ```typescript
+   async function sendMessagingMessage(
+     accessToken: string,
+     recipientId: string,
+     content: string,
+     messageType: string,
+     mediaUrl?: string,
+     pageId?: string,
+     origin?: string
+   ): Promise<Response> {
+     // ... payload unchanged ...
+     
+     const endpoint = (origin === "INSTAGRAM" && pageId)
+       ? `${GRAPH_API_BASE}/${pageId}/messages`
+       : `${GRAPH_API_BASE}/me/messages`;
+     
+     return fetch(endpoint, { ... });
+   }
+   ```
 
-- Antes de buscar mensagens, fazer um `SELECT count(*)` em `conversations` com filtro `last_message_at` dentro do range de datas
-- Substituir `uniqueConversations` pelo resultado dessa contagem
-- Manter os demais calculos (received, sent, avgResponseTime) inalterados
+## Impacto
 
-Isso resolve o problema do limite de 1000 linhas do Supabase que pode estar truncando a contagem de mensagens, e mostra o numero real de conversas com atividade no periodo.
+- 1 arquivo alterado: `supabase/functions/meta-api/index.ts`
+- Apenas o envio para Instagram e afetado
+- Facebook Messenger continua usando `/me/messages` (sem mudanca)
+- Nao requer reconexao do Instagram
+
+## Risco
+
+Baixo. Apenas altera o endpoint usado para Instagram. O `/{page_id}/messages` com page token e o metodo documentado pela Meta para a API de Mensagens do Instagram.
 
