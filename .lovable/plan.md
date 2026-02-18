@@ -1,28 +1,61 @@
 
-# ✅ Instagram DM - Migração Concluída
 
-## O que foi feito
+# Corrigir Instagram - ID Errado na Inscricao de Webhook
 
-### 1. Escopos atualizados (`src/lib/meta-config.ts`)
-- `INSTAGRAM_BUSINESS_SCOPES` agora inclui todos os 5 escopos exigidos:
-  `instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights`
+## Problema
 
-### 2. Frontend simplificado (`InstagramIntegration.tsx`)
-- Removidos handlers legados (`meta-oauth-success`, `meta-oauth-error`)
-- Mantido apenas o handler `meta-oauth-code` que chama `flow: "instagram_login"`
+Os logs mostram dois IDs diferentes retornados pela API do Instagram:
 
-### 3. Backend limpo (`meta-oauth-callback/index.ts`)
-- Removido fluxo `step === "save"` com `encryptedPageToken` (155 linhas)
-- Removido fluxo antigo do Facebook para Instagram (167 linhas)
-- Mantido APENAS o fluxo `instagram_login` para `type === "instagram"`
-- Chamadas legadas retornam erro 400 orientando a reconectar
+```text
+Token exchange -> user_id: 25982752248032036  (app-scoped user ID)
+/me endpoint   -> user_id: 17841479677897649  (IGID - Instagram Graph API ID)
+```
 
-### 4. Anteriormente implementado
-- `meta-api`: resubscribe e envio via `graph.instagram.com` para conexões nativas
-- `meta-webhook`: redeployado com correção do Facebook profile
+O codigo usa `tokenData.user_id` (app-scoped ID) para:
+1. Inscrever webhooks em `graph.instagram.com/{id}/subscribed_apps`
+2. Salvar como `page_id` e `ig_account_id` no banco
 
-## Ação Manual Necessária
+Porem, a API do Instagram requer o **IGID** (retornado por `/me`) para operacoes como webhook subscription e envio de mensagens. O app-scoped ID nao e reconhecido como um objeto valido na Graph API, gerando o erro:
 
-1. **Desconectar** o Instagram atual no sistema
-2. **Reconectar** usando o botão "Conectar" (agora usa Instagram Business Login nativo)
-3. Verificar que "Permitir acesso a mensagens" está ativado no app do Instagram
+```
+"Object with ID '25982752248032036' does not exist, cannot be loaded due to missing permissions"
+```
+
+## Correcao
+
+### Arquivo: `supabase/functions/meta-oauth-callback/index.ts`
+
+Alterar a logica para usar `me.user_id` (IGID) em vez de `tokenData.user_id` (app-scoped ID) em todos os lugares:
+
+**Linha 125** - Manter `tokenData.user_id` apenas como fallback inicial
+
+**Apos buscar `/me` (linha 143)** - Reatribuir `igUserId` para `me.user_id || me.id`:
+
+```typescript
+// ANTES (errado):
+const igUserId = String(tokenData.user_id);
+// ... usado em tudo depois
+
+// DEPOIS (correto):
+const appScopedId = String(tokenData.user_id); // apenas para log
+// ... apos /me:
+const igUserId = String(me.user_id || me.id || appScopedId);
+```
+
+Isso corrige automaticamente:
+- Webhook subscription (linha 155): usara o IGID correto
+- `page_id` salvo no banco (linha 183): usara o IGID correto
+- `ig_account_id` salvo no banco (linha 185): usara o IGID correto
+
+### Impacto
+
+Apos o deploy, o usuario deve **desconectar e reconectar** o Instagram para que a nova conexao seja salva com o IGID correto e a inscricao de webhook funcione.
+
+## Detalhes Tecnicos
+
+A API do Instagram retorna dois tipos de ID:
+- **App-scoped ID** (`tokenData.user_id`): Unico por app, usado internamente pelo Instagram para identificar o usuario no contexto do app. NAO pode ser usado em chamadas da Graph API.
+- **IGID** (`me.user_id` ou `me.id`): O ID real do usuario no Instagram Graph, usado para todas as operacoes da API (webhook, mensagens, etc).
+
+A correcao e de uma linha: usar o ID correto retornado pelo `/me` em vez do ID retornado pela troca de token.
+
