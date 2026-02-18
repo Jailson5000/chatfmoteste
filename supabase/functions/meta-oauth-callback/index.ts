@@ -147,7 +147,7 @@ Deno.serve(async (req) => {
 
       // Subscribe page to webhooks for Instagram messaging
       try {
-        await fetch(`${GRAPH_API_BASE_LOCAL}/${pageId}/subscribed_apps`, {
+        const subRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -155,7 +155,11 @@ Deno.serve(async (req) => {
             access_token: pageAccessToken,
           }),
         });
-      } catch {}
+        const subData = await subRes.json();
+        console.log("[meta-oauth] Instagram webhook subscription result:", JSON.stringify(subData));
+      } catch (subErr) {
+        console.error("[meta-oauth] Instagram webhook subscription error:", subErr);
+      }
 
       console.log("[meta-oauth] Instagram connection saved via encrypted token:", { id: saved.id, igUsername: displayUsername });
       return new Response(JSON.stringify({
