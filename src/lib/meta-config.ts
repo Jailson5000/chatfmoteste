@@ -20,7 +20,7 @@ export const META_CONFIG_ID = import.meta.env.VITE_META_CONFIG_ID || "1461954655
 export const META_GRAPH_API_VERSION = "v22.0";
 
 // Scopes for Instagram Business Login (mandatory since Jan 2025)
-export const INSTAGRAM_BUSINESS_SCOPES = "instagram_business_basic,instagram_business_manage_messages";
+export const INSTAGRAM_BUSINESS_SCOPES = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights";
 
 // OAuth scopes per channel
 export const META_SCOPES = {
