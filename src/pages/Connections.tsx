@@ -8,7 +8,7 @@ import {
   XCircle,
   RefreshCw,
   Loader2,
-  Globe,
+  
   Bot,
   Phone,
   QrCode,
@@ -41,7 +41,7 @@ import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useCustomStatuses } from "@/hooks/useCustomStatuses";
 import { useAutomations } from "@/hooks/useAutomations";
 import { useToast } from "@/hooks/use-toast";
-import { useTrayIntegration } from "@/hooks/useTrayIntegration";
+
 import { useTenant } from "@/hooks/useTenant";
 import { NewInstanceDialog } from "@/components/connections/NewInstanceDialog";
 import { NewWhatsAppCloudDialog } from "@/components/connections/NewWhatsAppCloudDialog";
@@ -63,12 +63,6 @@ export default function Connections() {
   const { members: teamMembers } = useTeamMembers();
   const { statuses } = useCustomStatuses();
   const { automations } = useAutomations();
-  const { 
-    integration: trayIntegration, 
-    isLoading: trayLoading, 
-    updateSettings: updateTraySettings,
-    isUpdatingSettings: isUpdatingTraySettings 
-  } = useTrayIntegration();
   
   const {
     instances,
@@ -112,7 +106,7 @@ export default function Connections() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedInstance, setSelectedInstance] = useState<WhatsAppInstance | null>(null);
   const [selectedCloudConnection, setSelectedCloudConnection] = useState<any>(null);
-  const [isTrayDetailOpen, setIsTrayDetailOpen] = useState(false);
+  
   const [isNewInstanceOpen, setIsNewInstanceOpen] = useState(false);
   const [isNewCloudOpen, setIsNewCloudOpen] = useState(false);
   const [isQRDialogOpen, setIsQRDialogOpen] = useState(false);
@@ -548,126 +542,8 @@ export default function Connections() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {/* Chat Web Integration Row */}
-              {trayIntegration?.is_enabled && (
-                <tr 
-                  className={`hover:bg-muted/20 cursor-pointer transition-colors bg-gradient-to-r from-orange-500/5 to-transparent ${
-                    isTrayDetailOpen ? "bg-muted/30" : ""
-                  }`}
-                  onClick={() => setIsTrayDetailOpen(true)}
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-orange-500/10 flex items-center justify-center">
-                        <Globe className="h-5 w-5 text-orange-500" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-orange-500">Chat Web</p>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <span>Widget de atendimento</span>
-                          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-orange-500/10 text-orange-500 border-orange-500/20">
-                            WEB
-                          </Badge>
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {trayIntegration.default_status_id ? (
-                      (() => {
-                        const status = statuses.find(s => s.id === trayIntegration.default_status_id);
-                        return status ? (
-                          <Badge variant="outline" style={{ borderColor: status.color, color: status.color }}>
-                            {status.name}
-                          </Badge>
-                        ) : <span className="text-muted-foreground">—</span>;
-                      })()
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {trayIntegration.default_department_id ? (
-                      (() => {
-                        const dept = departments.find(d => d.id === trayIntegration.default_department_id);
-                        return dept ? (
-                          <Badge variant="outline" style={{ borderColor: dept.color, color: dept.color }}>
-                            {dept.name}
-                          </Badge>
-                        ) : <span className="text-muted-foreground">—</span>;
-                      })()
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {(() => {
-                      const handlerType = trayIntegration.default_handler_type;
-                      
-                      if (handlerType === 'ai' && trayIntegration.default_automation_id) {
-                        const agent = automations.find(a => a.id === trayIntegration.default_automation_id);
-                        return agent ? (
-                          <div className="flex items-center gap-2">
-                            <Bot className="h-3 w-3 text-blue-500" />
-                            <span className="text-sm">{agent.name}</span>
-                            <Badge className="bg-blue-500/20 text-blue-400 text-[10px] px-1">IA</Badge>
-                          </div>
-                        ) : <span className="text-muted-foreground">—</span>;
-                      } else if (handlerType === 'human' && trayIntegration.default_human_agent_id) {
-                        const member = teamMembers.find(m => m.id === trayIntegration.default_human_agent_id);
-                        return member ? (
-                          <div className="flex items-center gap-2">
-                            <Avatar className="h-5 w-5">
-                              <AvatarImage src={member.avatar_url || undefined} />
-                              <AvatarFallback className="text-[8px]">
-                                {member.full_name?.substring(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-sm">{member.full_name}</span>
-                          </div>
-                        ) : <span className="text-muted-foreground">Nenhum</span>;
-                      } else if (handlerType === 'human') {
-                        return <span className="text-muted-foreground">Nenhum (Humano)</span>;
-                      } else {
-                        return <span className="text-muted-foreground">—</span>;
-                      }
-                    })()}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">
-                    {trayIntegration.activated_at 
-                      ? formatDistanceToNow(new Date(trayIntegration.activated_at), { addSuffix: true, locale: ptBR })
-                      : "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20">
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />
-                      Ativo
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setIsTrayDetailOpen(true)}>
-                          Ver detalhes
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </td>
-                </tr>
-              )}
-              
               {/* WhatsApp Instances */}
-              {filteredInstances.length === 0 && !trayIntegration?.is_enabled ? (
+              {filteredInstances.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                     {searchQuery ? "Nenhuma conexão encontrada" : "Nenhuma conexão configurada"}
@@ -1024,232 +900,6 @@ export default function Connections() {
               }}
             />
           )}
-        </SheetContent>
-      </Sheet>
-
-      {/* Chat Web Detail Panel */}
-      <Sheet open={isTrayDetailOpen} onOpenChange={setIsTrayDetailOpen}>
-        <SheetContent className="w-[500px] sm:max-w-[500px] p-0 overflow-y-auto">
-          <SheetHeader className="p-6 border-b bg-gradient-to-r from-orange-500/10 to-transparent">
-            <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-full bg-orange-500/20 flex items-center justify-center">
-                <Globe className="h-6 w-6 text-orange-500" />
-              </div>
-              <div>
-                <SheetTitle className="text-orange-500">Chat Web</SheetTitle>
-                <p className="text-sm text-muted-foreground">Widget de atendimento para qualquer site</p>
-              </div>
-            </div>
-          </SheetHeader>
-          
-          <div className="p-6 space-y-6">
-            {/* Status */}
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium">Status da Conexão</span>
-              <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 mr-1.5" />
-                Ativo
-              </Badge>
-            </div>
-
-            {/* Ativado em */}
-            {trayIntegration?.activated_at && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Ativado em</span>
-                <span>{new Date(trayIntegration.activated_at).toLocaleDateString('pt-BR')}</span>
-              </div>
-            )}
-
-            <div className="border-t pt-6">
-              <h3 className="text-sm font-semibold mb-4">Configurações Padrão</h3>
-              
-              <div className="space-y-4">
-                {/* Status Padrão */}
-                <div className="space-y-2">
-                  <label className="text-sm text-muted-foreground">Status Padrão</label>
-                  <Select
-                    value={trayIntegration?.default_status_id || "none"}
-                    onValueChange={(value) => {
-                      updateTraySettings({ 
-                        default_status_id: value === "none" ? null : value 
-                      });
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione um status..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhum</SelectItem>
-                      {statuses.map((status) => (
-                        <SelectItem key={status.id} value={status.id}>
-                          <div className="flex items-center gap-2">
-                            <span 
-                              className="w-2 h-2 rounded-full" 
-                              style={{ backgroundColor: status.color }} 
-                            />
-                            {status.name}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Departamento Padrão */}
-                <div className="space-y-2">
-                  <label className="text-sm text-muted-foreground">Departamento Padrão</label>
-                  <Select
-                    value={trayIntegration?.default_department_id || "none"}
-                    onValueChange={(value) => {
-                      updateTraySettings({ 
-                        default_department_id: value === "none" ? null : value 
-                      });
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione um departamento..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Nenhum</SelectItem>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.id}>
-                          <div className="flex items-center gap-2">
-                            <span 
-                              className="w-2 h-2 rounded-full" 
-                              style={{ backgroundColor: dept.color }} 
-                            />
-                            {dept.name}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Tipo de Atendimento */}
-                <div className="space-y-2">
-                  <label className="text-sm text-muted-foreground">Tipo de Atendimento</label>
-                  <Select
-                    value={trayIntegration?.default_handler_type || "human"}
-                    onValueChange={(value) => {
-                      // When switching handler type, clear the corresponding assignment
-                      if (value === 'human') {
-                        updateTraySettings({ 
-                          default_handler_type: value,
-                          default_automation_id: null
-                        });
-                      } else {
-                        updateTraySettings({ 
-                          default_handler_type: value,
-                          default_human_agent_id: null
-                        });
-                      }
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Selecione o tipo..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="human">
-                        <div className="flex items-center gap-2">
-                          <Phone className="h-3 w-3 text-green-500" />
-                          Atendente Humano
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="ai">
-                        <div className="flex items-center gap-2">
-                          <Bot className="h-3 w-3 text-blue-500" />
-                          Agente IA
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Agente IA Responsável - só mostra se tipo for IA */}
-                {trayIntegration?.default_handler_type === 'ai' && (
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">Agente IA</label>
-                    <Select
-                      value={trayIntegration?.default_automation_id || "none"}
-                      onValueChange={(value) => {
-                        updateTraySettings({ 
-                          default_automation_id: value === "none" ? null : value 
-                        });
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione um agente IA..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Nenhum</SelectItem>
-                        {automations.filter(a => a.is_active).map((agent) => (
-                          <SelectItem key={agent.id} value={agent.id}>
-                            <div className="flex items-center gap-2">
-                              <Bot className="h-3 w-3 text-blue-500" />
-                              {agent.name}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {/* Atendente Humano Responsável - só mostra se tipo for Humano */}
-                {trayIntegration?.default_handler_type === 'human' && (
-                  <div className="space-y-2">
-                    <label className="text-sm text-muted-foreground">Atendente Responsável</label>
-                    <Select
-                      value={trayIntegration?.default_human_agent_id || "none"}
-                      onValueChange={(value) => {
-                        updateTraySettings({ 
-                          default_human_agent_id: value === "none" ? null : value 
-                        });
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione um atendente..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Nenhum (Fila)</SelectItem>
-                        {teamMembers.map((member) => (
-                          <SelectItem key={member.id} value={member.id}>
-                            <div className="flex items-center gap-2">
-                              <Avatar className="h-4 w-4">
-                                <AvatarImage src={member.avatar_url || undefined} />
-                                <AvatarFallback className="text-[8px]">
-                                  {member.full_name?.substring(0, 2).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              {member.full_name}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Informações adicionais */}
-            <div className="border-t pt-6">
-              <h3 className="text-sm font-semibold mb-4">Informações</h3>
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Tipo</span>
-                  <Badge variant="secondary" className="bg-orange-500/10 text-orange-500 border-orange-500/20">
-                    WEB
-                  </Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Widget Key</span>
-                  <span className="font-mono text-xs">{trayIntegration?.widget_key?.slice(0, 8)}...</span>
-                </div>
-              </div>
-            </div>
-          </div>
         </SheetContent>
       </Sheet>
 
