@@ -313,6 +313,9 @@ async function processMessagingEntry(
 
     const lawFirmId = connection.law_firm_id;
 
+    // Capture message ID for Facebook profile resolution via mid
+    const messageMid = message.mid || null;
+
     // Determine message content and type
     let content = message.text || "";
     let messageType = "text";
@@ -404,34 +407,62 @@ async function processMessagingEntry(
     if (clientNeedsNameUpdate && connection.access_token) {
       try {
         const token = await decryptToken(connection.access_token);
-        // Facebook Messenger requires first_name,last_name; Instagram uses name
-        const fields = origin === "FACEBOOK" ? "first_name,last_name,profile_pic" : "name,profile_pic";
-        // Instagram Business Login tokens only work on graph.instagram.com
-        const graphBase = origin === "INSTAGRAM"
-          ? "https://graph.instagram.com/v22.0"
-          : "https://graph.facebook.com/v22.0";
-        const profileRes = await fetch(
-          `${graphBase}/${senderId}?fields=${fields}&access_token=${token}`
-        );
         let profile: any = null;
-        if (profileRes.ok) {
-          profile = await profileRes.json();
-        } else {
-          // Fallback: try with only first_name (Facebook) or name (Instagram)
-          const fallbackField = origin === "FACEBOOK" ? "first_name" : "name";
-          console.warn("[meta-webhook] Profile fetch failed with fields:", fields, "- retrying with", fallbackField);
-          const fallbackRes = await fetch(
-            `${graphBase}/${senderId}?fields=${fallbackField}&access_token=${token}`
+
+        if (origin === "FACEBOOK" && messageMid) {
+          // Facebook: use message ID to get sender name (doesn't require Business Asset User Profile Access)
+          console.log("[meta-webhook] Facebook: resolving profile via mid:", messageMid.slice(0, 20));
+          const midRes = await fetch(
+            `https://graph.facebook.com/v22.0/${messageMid}?fields=from&access_token=${token}`
           );
-          if (fallbackRes.ok) {
-            profile = await fallbackRes.json();
+          if (midRes.ok) {
+            const midData = await midRes.json();
+            if (midData.from?.name) {
+              profile = { name: midData.from.name };
+              console.log("[meta-webhook] Facebook profile resolved via mid:", midData.from.name);
+            }
           } else {
-            const errBody = await fallbackRes.text();
-            console.warn("[meta-webhook] Profile fallback also failed:", fallbackRes.status, errBody.slice(0, 200));
+            const errBody = await midRes.text();
+            console.warn("[meta-webhook] Facebook mid fetch failed:", midRes.status, errBody.slice(0, 200));
+          }
+
+          // Fallback: try traditional PSID endpoint (works if Business Asset User Profile Access is approved)
+          if (!profile) {
+            console.log("[meta-webhook] Facebook: falling back to PSID profile endpoint");
+            const psidRes = await fetch(
+              `https://graph.facebook.com/v22.0/${senderId}?fields=first_name,last_name,profile_pic&access_token=${token}`
+            );
+            if (psidRes.ok) {
+              profile = await psidRes.json();
+            } else {
+              const errBody = await psidRes.text();
+              console.warn("[meta-webhook] Facebook PSID fallback also failed:", psidRes.status, errBody.slice(0, 200));
+            }
+          }
+        } else if (origin === "INSTAGRAM") {
+          // Instagram: use graph.instagram.com with Instagram User Access Token
+          const profileRes = await fetch(
+            `https://graph.instagram.com/v22.0/${senderId}?fields=name,profile_pic&access_token=${token}`
+          );
+          if (profileRes.ok) {
+            profile = await profileRes.json();
+          } else {
+            // Fallback with just name
+            console.warn("[meta-webhook] Instagram profile fetch failed, retrying with name only");
+            const fallbackRes = await fetch(
+              `https://graph.instagram.com/v22.0/${senderId}?fields=name&access_token=${token}`
+            );
+            if (fallbackRes.ok) {
+              profile = await fallbackRes.json();
+            } else {
+              const errBody = await fallbackRes.text();
+              console.warn("[meta-webhook] Instagram profile fallback also failed:", fallbackRes.status, errBody.slice(0, 200));
+            }
           }
         }
+
         if (profile) {
-          // Build name from first_name + last_name (Facebook) or name (Instagram)
+          // Build name from first_name + last_name (Facebook PSID) or name (Instagram / Facebook mid)
           resolvedName = profile.first_name && profile.last_name
             ? `${profile.first_name} ${profile.last_name}`
             : profile.name || profile.first_name || null;
