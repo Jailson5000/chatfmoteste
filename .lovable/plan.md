@@ -1,73 +1,57 @@
 
 
-# Corrigir Envio de Mensagens para Instagram
+# Corrigir Recebimento de Mensagens do Instagram
 
 ## Problema
 
-O sistema recebe mensagens do Instagram normalmente (nome e foto funcionam), mas nao consegue ENVIAR mensagens de volta. O erro da API da Meta e:
+Mensagens enviadas para o Instagram da FMO (@fmoadvbr) nao chegam ao sistema, apesar da conexao mostrar "Conectado". O webhook funciona corretamente para outras contas (MiauChat), mas zero eventos chegam para a conta da FMO.
 
-```
-"pages_messaging permission(s) must be granted before impersonating a user's page"
-code: 190 (OAuthException)
-```
+## Causa Raiz
 
-## Diagnostico
+Bug no arquivo `supabase/functions/meta-oauth-callback/index.ts`, linha 150:
 
-A funcao `sendMessagingMessage` no arquivo `supabase/functions/meta-api/index.ts` usa o endpoint `/me/messages` para enviar mensagens no Instagram. Porem, a API de Mensagens do Instagram exige o uso explicito do **Page ID** no endpoint (`/{page_id}/messages`) em vez do alias `/me`. Embora `/me` funcione para o Facebook Messenger, para o Instagram ele gera o erro de "impersonating a user's page".
+A variavel `GRAPH_API_BASE_LOCAL` e definida dentro do bloco `if (!igBizId)` (linha 92), mas e usada fora dele na linha 150 para fazer a inscricao no webhook (`subscribed_apps`). Quando o frontend envia o `igAccountId` (que e o caso no fluxo do page picker), o bloco condicional e pulado, `GRAPH_API_BASE_LOCAL` fica `undefined`, e a chamada `subscribed_apps` falha silenciosamente dentro do `try/catch` vazio.
 
-Evidencia:
-- O token funciona para LEITURA (buscar perfil do contato via GET) -- "Profile resolved: Jailson Ferreira"
-- O token FALHA para ESCRITA (enviar mensagem via POST /me/messages) -- erro 190
-- A conexao correta (`b7cf1da1`) e encontrada com `page_id: 977414192123496`
-- Mas o `page_id` nao e passado para a funcao de envio
+Resultado: a pagina nunca e inscrita para receber eventos de webhook, e mensagens do Instagram nunca chegam.
 
 ## Solucao
 
-### Arquivo: `supabase/functions/meta-api/index.ts`
+### Arquivo: `supabase/functions/meta-oauth-callback/index.ts`
 
-1. **Passar `page_id` e `origin` para a funcao `sendMessagingMessage`**
+1. **Usar a constante global `GRAPH_API_BASE`** (ja definida na linha 6) em vez de `GRAPH_API_BASE_LOCAL` na chamada do `subscribed_apps` (linha 150)
 
-   Na chamada (linha ~684):
-   ```
-   // Antes:
-   graphResponse = await sendMessagingMessage(accessToken, recipientId, content, messageType, mediaUrl);
-   
-   // Depois:
-   graphResponse = await sendMessagingMessage(accessToken, recipientId, content, messageType, mediaUrl, connection.page_id, origin);
-   ```
+2. **Adicionar log do resultado** da inscricao para diagnostico futuro, removendo o `catch {}` vazio
 
-2. **Alterar a funcao `sendMessagingMessage` para usar `/{page_id}/messages` no Instagram**
+### Codigo corrigido (linhas 148-158):
 
-   A funcao passa a aceitar `pageId` e `origin` opcionais. Quando `origin === "INSTAGRAM"` e um `pageId` esta disponivel, usa `/{pageId}/messages` em vez de `/me/messages`:
+```typescript
+// Subscribe page to webhooks for Instagram messaging
+try {
+  const subRes = await fetch(`${GRAPH_API_BASE}/${pageId}/subscribed_apps`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      subscribed_fields: "messages,messaging_postbacks,messaging_optins",
+      access_token: pageAccessToken,
+    }),
+  });
+  const subData = await subRes.json();
+  console.log("[meta-oauth] Instagram webhook subscription result:", JSON.stringify(subData));
+} catch (subErr) {
+  console.error("[meta-oauth] Instagram webhook subscription error:", subErr);
+}
+```
 
-   ```typescript
-   async function sendMessagingMessage(
-     accessToken: string,
-     recipientId: string,
-     content: string,
-     messageType: string,
-     mediaUrl?: string,
-     pageId?: string,
-     origin?: string
-   ): Promise<Response> {
-     // ... payload unchanged ...
-     
-     const endpoint = (origin === "INSTAGRAM" && pageId)
-       ? `${GRAPH_API_BASE}/${pageId}/messages`
-       : `${GRAPH_API_BASE}/me/messages`;
-     
-     return fetch(endpoint, { ... });
-   }
-   ```
+### Acao adicional apos deploy
+
+Apos o deploy, sera necessario **reconectar o Instagram da FMO** (desconectar e conectar novamente) para que a inscricao do webhook seja executada com a correcao. Alternativamente, podemos adicionar uma acao "resubscribe" para evitar a reconexao.
+
+## Arquivos Alterados
+
+1. `supabase/functions/meta-oauth-callback/index.ts` - corrigir referencia a variavel e adicionar logs
 
 ## Impacto
 
-- 1 arquivo alterado: `supabase/functions/meta-api/index.ts`
-- Apenas o envio para Instagram e afetado
-- Facebook Messenger continua usando `/me/messages` (sem mudanca)
-- Nao requer reconexao do Instagram
-
-## Risco
-
-Baixo. Apenas altera o endpoint usado para Instagram. O `/{page_id}/messages` com page token e o metodo documentado pela Meta para a API de Mensagens do Instagram.
-
+- Corrige o bug que impede a inscricao de webhook para novas conexoes Instagram
+- Nao afeta conexoes existentes que ja funcionam
+- Baixo risco: apenas corrige uma referencia de variavel incorreta
