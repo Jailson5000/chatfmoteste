@@ -122,7 +122,7 @@ Deno.serve(async (req) => {
       }
 
       const shortToken = tokenData.access_token;
-      const igUserId = String(tokenData.user_id);
+      const appScopedId = String(tokenData.user_id); // app-scoped ID (NOT usable for Graph API calls)
 
       // 2. Exchange for long-lived token (60 days)
       console.log("[meta-oauth] IG: getting long-lived token...");
@@ -141,7 +141,12 @@ Deno.serve(async (req) => {
         `https://graph.instagram.com/me?fields=user_id,username,name,profile_picture_url&access_token=${longToken}`
       );
       const me = await meRes.json();
-      console.log("[meta-oauth] IG account info:", { userId: me.user_id, username: me.username, name: me.name });
+      console.log("[meta-oauth] IG account info:", { appScopedId, igId: me.user_id, meId: me.id, username: me.username, name: me.name });
+
+      // CRITICAL: Use the IGID from /me endpoint, NOT the app-scoped ID from token exchange
+      // The app-scoped ID cannot be used for Graph API calls (webhooks, messaging, etc.)
+      const igUserId = String(me.user_id || me.id || appScopedId);
+      console.log("[meta-oauth] IG: using IGID for all operations:", igUserId, "(app-scoped was:", appScopedId, ")");
 
       const igUsername = me.username || igUserId;
       const igName = me.name || igUsername;
