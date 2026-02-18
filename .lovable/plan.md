@@ -1,23 +1,40 @@
 
-# Ajustes na Landing Page - Seção Multiplataforma
 
-## Mudanças
+# Corrigir Instagram - Escopos OAuth Invalidos
 
-### 1. WhatsApp Integrado - Trocar ícone Phone pelo ícone MessageCircle (logo do WhatsApp)
+## Problema
 
-No card do WhatsApp (linha 522), o ícone principal é `Phone`. Trocar por `MessageCircle` que já é usado no canto superior direito do mesmo card e representa melhor o WhatsApp.
+Ao clicar em "Conectar" no Instagram, o popup do Facebook exibe:
 
-**Arquivo:** `src/pages/landing/LandingPage.tsx`
-- Linha 522: Trocar `<Phone ...>` por `<MessageCircle ...>` (o ícone `MessageCircle` já está importado)
-- Remover `Phone` dos imports (linha 24) se não for usado em outro lugar
+> Invalid Scopes: instagram_business_basic, instagram_business_manage_messages
 
-### 2. Instagram Direct - Renomear para "Instagram" e remover feature
+Esses escopos pertencem a Instagram Business Login API (que usa `instagram.com/oauth/authorize`) e nao sao validos no dialogo OAuth do Facebook (`facebook.com/dialog/oauth`), que e o endpoint utilizado atualmente.
 
-- Linha 549: Trocar título de "Instagram Direct" para "Instagram"
-- Linha 556: Remover "Nome e foto do perfil" da lista de features (ficam 4 itens: Respostas automáticas com IA, Histórico unificado, Story mentions e replies, Transferência para humano)
+Como resultado, a Meta rejeita a solicitacao, nao retorna nenhum codigo de autorizacao, e o sistema exibe "Codigo de autorizacao nao encontrado".
 
-## Arquivos Modificados
+## Correcao
 
-| Arquivo | Mudança |
-|---|---|
-| `src/pages/landing/LandingPage.tsx` | Trocar ícone Phone por MessageCircle, renomear Instagram Direct, remover feature |
+### `src/lib/meta-config.ts`
+
+Remover os escopos invalidos da configuracao do Instagram:
+
+**Antes:**
+```
+instagram: "pages_show_list,instagram_basic,instagram_manage_messages,instagram_business_basic,instagram_business_manage_messages"
+```
+
+**Depois:**
+```
+instagram: "pages_show_list,instagram_basic,instagram_manage_messages"
+```
+
+Os escopos restantes (`pages_show_list`, `instagram_basic`, `instagram_manage_messages`) sao suficientes para:
+- Listar paginas do Facebook vinculadas (`pages_show_list`)
+- Acessar dados basicos do Instagram (`instagram_basic`)
+- Enviar e receber mensagens do Instagram Direct (`instagram_manage_messages`)
+
+## Impacto
+
+- Apenas 1 linha alterada em 1 arquivo
+- Nenhuma mudanca no backend (edge functions)
+- O fluxo OAuth voltara a funcionar normalmente
