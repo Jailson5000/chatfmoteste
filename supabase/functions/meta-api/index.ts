@@ -681,7 +681,7 @@ Deno.serve(async (req) => {
       graphResponse = await sendWhatsAppCloudMessage(accessToken, connection.page_id, recipientId, content, messageType, mediaUrl);
     } else {
       // Instagram and Facebook Messenger use Send API
-      graphResponse = await sendMessagingMessage(accessToken, recipientId, content, messageType, mediaUrl);
+      graphResponse = await sendMessagingMessage(accessToken, recipientId, content, messageType, mediaUrl, connection.page_id, origin);
     }
 
     const graphResult = await graphResponse.json();
@@ -762,7 +762,9 @@ async function sendMessagingMessage(
   recipientId: string,
   content: string,
   messageType: string,
-  mediaUrl?: string
+  mediaUrl?: string,
+  pageId?: string,
+  origin?: string
 ): Promise<Response> {
   let messagePayload: any;
 
@@ -778,7 +780,12 @@ async function sendMessagingMessage(
     };
   }
 
-  return fetch(`${GRAPH_API_BASE}/me/messages`, {
+  // Instagram requires /{page_id}/messages instead of /me/messages
+  const endpoint = (origin === "INSTAGRAM" && pageId)
+    ? `${GRAPH_API_BASE}/${pageId}/messages`
+    : `${GRAPH_API_BASE}/me/messages`;
+
+  return fetch(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
