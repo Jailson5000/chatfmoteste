@@ -1,18 +1,26 @@
 
 
-## Reduzir espacos entre descricao e precos nos cards de planos
+## Adicionar integrações Facebook e Instagram nos planos
 
-### Problema
-Ha muito espaco vazio entre a descricao do plano e a linha de preco. Isso e causado por dois fatores:
-1. A descricao tem `min-h-[72px]` - reserva espaco demais quando o texto e curto
-2. O bloco de preco tem `min-h-[80px]` - reserva espaco excessivo para o texto promocional
+### O que será feito
+Atualizar as features de **todos os 5 planos** no banco de dados para incluir menções às integrações com Facebook e Instagram, além de melhorar as descrições do PRIME e BASIC.
 
-### Solucao
+### Alterações por plano
 
-**Arquivo:** `src/pages/landing/LandingPage.tsx`
+**PRIME** - Adicionar:
+- "Integração Facebook e Instagram"
 
-1. **Reduzir min-h da descricao** de `72px` para `48px` (linha 909) - ainda mantendo alinhamento entre cards mas com menos espaco desperdicado
-2. **Reduzir min-h do bloco de preco** de `80px` para `56px` (linha 913) - suficiente para acomodar o texto promocional sem espaco extra
-3. **Reduzir mb do bloco de preco** de `mb-3` para `mb-1` (linha 913) - menos espaco abaixo dos precos tambem
+**BASIC** - Adicionar:
+- "Integração Facebook e Instagram"
 
-Resultado: os cards ficarao mais compactos, com os precos mais proximos da descricao.
+**STARTER** - Adicionar:
+- "Integração Facebook e Instagram"
+
+**PROFESSIONAL** - Adicionar:
+- "Integração Facebook e Instagram"
+
+**ENTERPRISE** - Adicionar:
+- "Integração Facebook e Instagram"
+
+### Implementação
+Uma única migração SQL atualizará o campo `features` (array) de cada plano na tabela `plans`, adicionando a linha "Integração Facebook e Instagram" à lista existente de cada plano. Nenhuma alteração de código frontend é necessária, pois os cards já renderizam dinamicamente as features do banco.
