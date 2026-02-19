@@ -1,32 +1,18 @@
 
 
-## Corrigir alinhamento dos precos e reduzir espaco superior
+## Reduzir espacos entre descricao e precos nos cards de planos
 
 ### Problema
-Os precos estao desalinhados porque:
-1. O texto promocional (BASIC: "De R$ 297 por", ENTERPRISE: "A partir de R$ 1.697") cria alturas diferentes entre os cards
-2. O "R$", valor e "/mes" estao como spans soltos misturados com divs, sem uma linha de preco bem definida
-3. O `min-h-[60px]` nao e suficiente para acomodar o texto promocional mais alto
-4. O `mt-3` adiciona espaco desnecessario acima do bloco de precos
+Ha muito espaco vazio entre a descricao do plano e a linha de preco. Isso e causado por dois fatores:
+1. A descricao tem `min-h-[72px]` - reserva espaco demais quando o texto e curto
+2. O bloco de preco tem `min-h-[80px]` - reserva espaco excessivo para o texto promocional
 
 ### Solucao
 
 **Arquivo:** `src/pages/landing/LandingPage.tsx`
 
-**Reestruturar o bloco de precos (linhas 913-929):**
-- Aumentar `min-h` de `60px` para `80px` para acomodar qualquer texto promocional
-- Reduzir `mt-3` para `mt-1` para diminuir o espaco acima dos precos
-- Envolver "R$ {price} / mes" em uma div propria com `flex items-baseline` para que o preco fique sempre numa linha consistente
-- Mover o texto promocional (tanto BASIC quanto ENTERPRISE) para uma div separada acima da linha de preco
-- Usar `justify-end` no container flex-col para que a linha do preco fique sempre alinhada na base
+1. **Reduzir min-h da descricao** de `72px` para `48px` (linha 909) - ainda mantendo alinhamento entre cards mas com menos espaco desperdicado
+2. **Reduzir min-h do bloco de preco** de `80px` para `56px` (linha 913) - suficiente para acomodar o texto promocional sem espaco extra
+3. **Reduzir mb do bloco de preco** de `mb-3` para `mb-1` (linha 913) - menos espaco abaixo dos precos tambem
 
-**Estrutura final do bloco:**
-```text
-+----------------------------------+
-| [texto promo, se existir]        |  <- parte superior (altura variavel)
-|                                  |
-| R$ 197  / mes                    |  <- parte inferior (sempre alinhada)
-+----------------------------------+
-```
-
-Todos os 5 cards terao o mesmo `min-h`, com o preco sempre posicionado na base do bloco, garantindo alinhamento horizontal perfeito.
+Resultado: os cards ficarao mais compactos, com os precos mais proximos da descricao.
