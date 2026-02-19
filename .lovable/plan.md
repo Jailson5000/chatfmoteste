@@ -1,26 +1,25 @@
 
 
-## Adicionar integrações Facebook e Instagram nos planos
+## Adicionar 4 features em todos os planos
 
-### O que será feito
-Atualizar as features de **todos os 5 planos** no banco de dados para incluir menções às integrações com Facebook e Instagram, além de melhorar as descrições do PRIME e BASIC.
+### O que sera feito
+Adicionar as seguintes features na lista de todos os 5 planos (PRIME, BASIC, STARTER, PROFESSIONAL, ENTERPRISE):
 
-### Alterações por plano
+- Agendamento inteligente
+- Follow-ups automaticos
+- Kanban avancado
+- Gestao de tarefas
 
-**PRIME** - Adicionar:
-- "Integração Facebook e Instagram"
+### Implementacao
+Um UPDATE no campo `features` (jsonb array) da tabela `plans` para cada um dos 5 planos, concatenando as 4 novas features ao array existente.
 
-**BASIC** - Adicionar:
-- "Integração Facebook e Instagram"
+Nenhuma alteracao de codigo frontend e necessaria -- os cards da landing page e do painel admin ja renderizam as features dinamicamente a partir do banco.
 
-**STARTER** - Adicionar:
-- "Integração Facebook e Instagram"
+### SQL a ser executado
+```sql
+UPDATE public.plans 
+SET features = features || '["Agendamento inteligente", "Follow-ups automáticos", "Kanban avançado", "Gestão de tarefas"]'::jsonb,
+    updated_at = now()
+WHERE name IN ('PRIME', 'BASIC', 'STARTER', 'PROFESSIONAL', 'ENTERPRISE');
+```
 
-**PROFESSIONAL** - Adicionar:
-- "Integração Facebook e Instagram"
-
-**ENTERPRISE** - Adicionar:
-- "Integração Facebook e Instagram"
-
-### Implementação
-Uma única migração SQL atualizará o campo `features` (array) de cada plano na tabela `plans`, adicionando a linha "Integração Facebook e Instagram" à lista existente de cada plano. Nenhuma alteração de código frontend é necessária, pois os cards já renderizam dinamicamente as features do banco.
