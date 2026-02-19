@@ -467,7 +467,31 @@ async function processMessagingEntry(
           resolvedName = profile.first_name && profile.last_name
             ? `${profile.first_name} ${profile.last_name}`
             : profile.name || profile.first_name || null;
-          const avatarUrl = profile.profile_pic || null;
+          let avatarUrl = profile.profile_pic || null;
+
+          // Persist avatar to permanent storage (Meta CDN URLs expire)
+          if (avatarUrl && clientId) {
+            try {
+              const avatarRes = await fetch(avatarUrl);
+              if (avatarRes.ok) {
+                const avatarBuffer = await avatarRes.arrayBuffer();
+                const avatarPath = `${lawFirmId}/avatars/${clientId}.jpg`;
+                const { error: avUpErr } = await supabase.storage
+                  .from("chat-media")
+                  .upload(avatarPath, avatarBuffer, { contentType: "image/jpeg", upsert: true });
+                if (!avUpErr) {
+                  const { data: avPub } = supabase.storage.from("chat-media").getPublicUrl(avatarPath);
+                  avatarUrl = avPub.publicUrl;
+                  console.log("[meta-webhook] Avatar persisted to storage:", avatarUrl?.slice(0, 80));
+                } else {
+                  console.warn("[meta-webhook] Avatar upload failed, using temp URL:", avUpErr.message);
+                }
+              }
+            } catch (avErr) {
+              console.warn("[meta-webhook] Avatar download failed, using temp URL:", avErr);
+            }
+          }
+
           if (resolvedName || avatarUrl) {
             const updateData: Record<string, any> = {};
             if (resolvedName) updateData.name = resolvedName;
@@ -548,6 +572,40 @@ async function processMessagingEntry(
         continue;
       }
       conversationId = newConv.id;
+    }
+
+    // Persist media to permanent storage (Meta CDN URLs expire in hours)
+    if (mediaUrl && mediaUrl.startsWith("http") && conversationId) {
+      try {
+        const mediaRes = await fetch(mediaUrl);
+        if (mediaRes.ok) {
+          const mediaBuffer = await mediaRes.arrayBuffer();
+          const ext = getExtFromMime(mediaMimeType || "image/jpeg");
+          const msgId = message.mid || crypto.randomUUID();
+          // Sanitize msgId for storage path (remove dots/special chars)
+          const safeMsgId = msgId.replace(/[^a-zA-Z0-9_-]/g, "_");
+          const mediaPath = `${lawFirmId}/${conversationId}/${safeMsgId}.${ext}`;
+
+          const { error: mUpErr } = await supabase.storage
+            .from("chat-media")
+            .upload(mediaPath, mediaBuffer, {
+              contentType: mediaMimeType || "application/octet-stream",
+              upsert: true,
+            });
+
+          if (!mUpErr) {
+            const { data: mPub } = supabase.storage.from("chat-media").getPublicUrl(mediaPath);
+            mediaUrl = mPub.publicUrl;
+            console.log("[meta-webhook] Media persisted:", mediaPath, "size:", mediaBuffer.byteLength);
+          } else {
+            console.warn("[meta-webhook] Media upload failed, using temp URL:", mUpErr.message);
+          }
+        } else {
+          console.warn("[meta-webhook] Media download failed:", mediaRes.status);
+        }
+      } catch (mErr) {
+        console.warn("[meta-webhook] Media persist error, using temp URL:", mErr);
+      }
     }
 
     // Insert message
