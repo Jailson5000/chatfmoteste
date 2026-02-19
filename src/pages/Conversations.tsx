@@ -736,14 +736,26 @@ export default function Conversations() {
       const phoneEnding = normalizedPhone.slice(-9);
       
       // Try to find existing conversation by phone (flexible matching)
-      const existingConv = conversations.find(c => {
+      const matchPhone = (c: any) => {
         const convPhone = (c.contact_phone || "").replace(/\D/g, "");
         const convEnding = convPhone.slice(-9);
         return convPhone === normalizedPhone || 
                convEnding === phoneEnding ||
                convPhone.endsWith(normalizedPhone.slice(-8)) || 
                normalizedPhone.endsWith(convPhone.slice(-8));
-      });
+      };
+      
+      // If connectionId is specified, prioritize matching phone + connection
+      let existingConv = null;
+      if (connectionIdParam) {
+        existingConv = conversations.find(c => 
+          c.whatsapp_instance_id === connectionIdParam && matchPhone(c)
+        );
+      }
+      // Fallback: any conversation with this phone
+      if (!existingConv) {
+        existingConv = conversations.find(c => matchPhone(c));
+      }
       
       if (existingConv) {
         setSelectedConversationId(existingConv.id);
