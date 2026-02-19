@@ -906,11 +906,11 @@ export function LandingPage() {
                 )}
                 <div>
                   <p className="text-sm font-bold tracking-wide">{plan.name}</p>
-                <p className="text-xs text-white/40 mt-1 min-h-[72px]">
+                <p className="text-xs text-white/40 mt-1 min-h-[48px]">
                     {plan.description}
                   </p>
                 </div>
-                <div className="mt-1 mb-3 min-h-[80px] flex flex-col justify-end">
+                <div className="mt-1 mb-1 min-h-[56px] flex flex-col justify-end">
                   {plan.startingFrom && (
                     <span className="text-white/40 text-xs">A partir de </span>
                   )}
