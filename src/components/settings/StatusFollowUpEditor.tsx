@@ -46,7 +46,7 @@ export function StatusFollowUpEditor({ statusId }: StatusFollowUpEditorProps) {
     await createFollowUp.mutateAsync({
       status_id: statusId,
       template_id: null,
-      delay_minutes: 30,
+      delay_minutes: 10,
       delay_unit: "min",
       position: followUps.length,
       give_up_on_no_response: false,
@@ -147,7 +147,7 @@ export function StatusFollowUpEditor({ statusId }: StatusFollowUpEditorProps) {
             </div>
             <div className="flex items-center gap-2 text-muted-foreground">
               <span>depois de</span>
-              <div className="px-2 py-1 bg-muted rounded">30</div>
+              <div className="px-2 py-1 bg-muted rounded">10</div>
               <span>min.</span>
             </div>
           </div>
@@ -242,15 +242,32 @@ function FollowUpCard({ followUp, index, templates, statuses, onUpdate, onDelete
               <Input
                 type="number"
                 value={followUp.delay_minutes}
-                onChange={(e) => handleChange("delay_minutes", parseInt(e.target.value) || 1)}
+                onChange={(e) => {
+                  const raw = parseInt(e.target.value) || 1;
+                  if (followUp.delay_unit === "min") {
+                    const rounded = Math.max(10, Math.round(raw / 10) * 10);
+                    handleChange("delay_minutes", rounded);
+                  } else {
+                    handleChange("delay_minutes", Math.max(1, raw));
+                  }
+                }}
                 className="w-20"
-                min={1}
+                min={followUp.delay_unit === "min" ? 10 : 1}
+                step={followUp.delay_unit === "min" ? 10 : 1}
                 disabled={isUpdating}
               />
               <Select
                 value={followUp.delay_unit}
-                onValueChange={(value) => handleChange("delay_unit", value)}
-                disabled={isUpdating}
+                onValueChange={(value) => {
+                  handleChange("delay_unit", value);
+                  // Ao mudar para minutos, ajustar valor para múltiplo de 10
+                  if (value === "min" && followUp.delay_minutes < 10) {
+                    handleChange("delay_minutes", 10);
+                  } else if (value === "min") {
+                    const rounded = Math.round(followUp.delay_minutes / 10) * 10;
+                    handleChange("delay_minutes", Math.max(10, rounded));
+                  }
+                }}
               >
                 <SelectTrigger className="w-24">
                   <SelectValue />
