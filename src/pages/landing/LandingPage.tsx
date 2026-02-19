@@ -910,7 +910,7 @@ export function LandingPage() {
                     {plan.description}
                   </p>
                 </div>
-                <div className="mt-3 mb-3">
+                <div className="mt-3 mb-3 min-h-[60px] flex flex-col justify-end">
                   {plan.startingFrom && (
                     <span className="text-white/40 text-xs">A partir de </span>
                   )}
