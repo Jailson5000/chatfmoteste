@@ -72,7 +72,10 @@ type EvolutionAction =
   // N8N integration endpoints
   | "n8n_forward_message"
   | "n8n_get_conversation"
-  | "n8n_send_reply";
+  | "n8n_send_reply"
+  // Webhook reapply endpoints
+  | "reapply_webhook"
+  | "reapply_all_webhooks";
 
 interface EvolutionRequest {
   action: EvolutionAction;
@@ -184,7 +187,7 @@ function buildWebhookConfig(webhookUrl: string) {
       "MESSAGES_UPSERT",
       "MESSAGES_UPDATE",
       "MESSAGES_DELETE",
-      "SEND_MESSAGE",
+      "CONTACTS_UPDATE",
     ],
   };
 }
@@ -3789,6 +3792,103 @@ serve(async (req) => {
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
+      }
+
+      case "reapply_webhook": {
+        // Reapply optimized webhook config to a single instance
+        if (!isGlobalAdmin) {
+          throw new Error("Only global admins can reapply webhook configurations");
+        }
+
+        if (!body.instanceId) {
+          throw new Error("instanceId is required");
+        }
+
+        const instance = await getInstanceById(supabaseClient, null, body.instanceId, true);
+        const apiKey = instance.api_key;
+        const apiUrl = normalizeUrl(instance.api_url);
+
+        console.log(`[Evolution API] Reapplying webhook config for: ${instance.instance_name}`);
+
+        const reapplyRes = await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
+          method: "POST",
+          headers: {
+            apikey: apiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+        });
+
+        if (!reapplyRes.ok) {
+          const errorText = await safeReadResponseText(reapplyRes);
+          throw new Error(simplifyEvolutionError(reapplyRes.status, errorText));
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          message: `Webhook reapplied for ${instance.instance_name}`,
+          instance_name: instance.instance_name,
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      case "reapply_all_webhooks": {
+        // Batch reapply webhook config to ALL active instances
+        if (!isGlobalAdmin) {
+          throw new Error("Only global admins can reapply webhook configurations");
+        }
+
+        console.log("[Evolution API] Reapplying webhook config to ALL instances...");
+
+        // Fetch all instances (not suspended)
+        const { data: allInstances, error: fetchError } = await supabaseClient
+          .from("whatsapp_instances")
+          .select("id, instance_name, api_url, api_key, status")
+          .neq("status", "suspended");
+
+        if (fetchError) throw new Error(`Failed to fetch instances: ${fetchError.message}`);
+
+        const results: Array<{ instance_name: string; success: boolean; error?: string }> = [];
+
+        for (const inst of (allInstances || [])) {
+          try {
+            const instApiUrl = normalizeUrl(inst.api_url);
+            const res = await fetchWithTimeout(`${instApiUrl}/webhook/set/${inst.instance_name}`, {
+              method: "POST",
+              headers: {
+                apikey: inst.api_key,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+            }, 10000);
+
+            if (!res.ok) {
+              const errText = await safeReadResponseText(res);
+              results.push({ instance_name: inst.instance_name, success: false, error: `HTTP ${res.status}: ${errText.slice(0, 100)}` });
+            } else {
+              results.push({ instance_name: inst.instance_name, success: true });
+            }
+          } catch (e: any) {
+            results.push({ instance_name: inst.instance_name, success: false, error: e?.message || "unknown error" });
+          }
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        const failCount = results.filter(r => !r.success).length;
+
+        console.log(`[Evolution API] Reapply complete: ${successCount} success, ${failCount} failed out of ${results.length}`);
+
+        return new Response(JSON.stringify({
+          success: true,
+          message: `Webhook reapplied: ${successCount}/${results.length} instances updated`,
+          total: results.length,
+          success_count: successCount,
+          fail_count: failCount,
+          results,
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       default:
