@@ -185,7 +185,6 @@ function buildWebhookConfig(webhookUrl: string) {
       "CONNECTION_UPDATE",
       "QRCODE_UPDATED",
       "MESSAGES_UPSERT",
-      "MESSAGES_UPDATE",
       "MESSAGES_DELETE",
       "CONTACTS_UPDATE",
     ],
