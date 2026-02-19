@@ -1,39 +1,47 @@
 
-# Corrigir "Iniciar Conversa" para Abrir na Conexao Correta
 
-## Problema
+# Corrigir "Iniciar Conversa" -- Selecionar Conexao Correta
 
-Na pagina de Contatos, o botao "Iniciar conversa" navega para a pagina de Conversas passando apenas `phone` e `name` na URL. Como nao envia o `connectionId`, a pagina de Conversas abre na conexao padrao (primeira disponivel) em vez da conexao vinculada ao contato.
+## Problema Raiz
 
-Exemplo: O contato "Contato 2752" esta na conexao 6064, mas ao clicar "Iniciar conversa", abre na conexao 9089.
+Quando voce clica em "Iniciar conversa" na pagina de Contatos, a URL recebe corretamente o parametro `connectionId`. Porem, na pagina de Conversas (linha 739), a busca por conversa existente encontra a **primeira** conversa com aquele telefone, ignorando a conexao solicitada.
+
+Como o contato "Vicente" existe nas duas conexoes (9089 e 6064), o sistema sempre abre a da 9089 (que aparece primeiro na lista).
 
 ## Solucao
 
-Alterar a navegacao do botao "Iniciar conversa" para incluir o `connectionId` baseado na instancia vinculada ao contato.
+Alterar a logica de busca na pagina de Conversas para priorizar a conexao correta:
 
-### Arquivo: `src/pages/Contacts.tsx`
+1. Se `connectionIdParam` esta presente, buscar primeiro uma conversa que combine telefone **E** conexao
+2. Se nao encontrar com a conexao especifica, usar o fallback atual (qualquer conversa com aquele telefone)
 
-Na linha 522, onde o navigate e chamado:
+### Arquivo: `src/pages/Conversations.tsx` (linhas 738-752)
 
 ```text
 ANTES:
-navigate(`/conversations?phone=${...}&name=${...}`)
+// Busca qualquer conversa com o telefone (ignora conexao)
+const existingConv = conversations.find(c => matchPhone(c))
 
 DEPOIS:
-navigate(`/conversations?phone=${...}&name=${...}&connectionId=${client.whatsapp_instance_id || client.conversations?.[0]?.whatsapp_instance_id || ''}`)
+// Se connectionId informado, buscar conversa com telefone + conexao especifica
+let existingConv = null;
+if (connectionIdParam) {
+  existingConv = conversations.find(c => 
+    c.whatsapp_instance_id === connectionIdParam && matchPhone(c)
+  );
+}
+// Fallback: qualquer conversa com o telefone
+if (!existingConv) {
+  existingConv = conversations.find(c => matchPhone(c));
+}
 ```
 
-A logica de fallback segue a mesma prioridade ja usada no sistema:
-1. `client.whatsapp_instance_id` (conexao direta do contato)
-2. `client.conversations[0].whatsapp_instance_id` (conexao da ultima conversa)
-3. Sem connectionId (fallback para comportamento padrao)
-
-## Status dos Webhooks
-
-Os webhooks estao funcionando corretamente apos a configuracao manual. Nenhum evento desnecessario (presence.update, chats.update, etc.) esta aparecendo nos logs recentes, confirmando que a Evolution API parou de enviar esses eventos.
+Isso garante que ao clicar "Iniciar conversa" no contato da conexao 6064, o sistema abre a conversa correta da 6064, nao a da 9089.
 
 ## Detalhes Tecnicos
 
-- Alteracao em 1 arquivo: `src/pages/Contacts.tsx` (linha 522)
-- A pagina de Conversas ja possui logica para ler o parametro `connectionId` da URL e selecionar a conexao correta
-- Nenhuma alteracao necessaria no backend ou nos webhooks
+- 1 arquivo alterado: `src/pages/Conversations.tsx`
+- Alteracao apenas na logica de busca local (linhas 738-752)
+- Nao afeta criacao de novas conversas (linha 756 ja usa `connectionIdParam` corretamente)
+- Sem alteracoes no backend
+
