@@ -519,7 +519,8 @@ export default function Contacts() {
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
                             onClick={() => {
-                              navigate(`/conversations?phone=${encodeURIComponent(client.phone)}&name=${encodeURIComponent(client.name)}`);
+                              const connId = client.whatsapp_instance_id || (client as any).conversations?.[0]?.whatsapp_instance_id || '';
+                              navigate(`/conversations?phone=${encodeURIComponent(client.phone)}&name=${encodeURIComponent(client.name)}${connId ? `&connectionId=${connId}` : ''}`);
                             }}
                           >
                             <MessageCircle className="h-4 w-4 mr-2" />
