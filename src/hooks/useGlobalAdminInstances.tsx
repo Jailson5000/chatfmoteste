@@ -474,7 +474,7 @@ export function useGlobalAdminInstances() {
           const { data, error } = await supabase.functions.invoke("evolution-api", {
             body: {
               action: "global_configure_webhook",
-              instanceId: instance.id,
+              instanceName: instance.instance_name,
             },
           });
           if (error || !data?.success) {
