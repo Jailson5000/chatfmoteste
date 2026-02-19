@@ -97,6 +97,11 @@ export function extractSubdomain(hostname: string): string | null {
     return null;
   }
   
+  // Ambiente de desenvolvimento/preview Lovable - ignorar
+  if (host.endsWith('.lovable.app') || host.endsWith('.lovableproject.com')) {
+    return null;
+  }
+  
   // Verifica se é um dos domínios principais
   if (MAIN_DOMAINS.includes(host)) {
     return null;
