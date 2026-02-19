@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { createContext, useContext, useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import { User, Session, AuthError } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 
 // Token refresh margin: refresh 5 minutes before expiry
 const TOKEN_REFRESH_MARGIN_SECONDS = 300;
@@ -8,16 +9,34 @@ const TOKEN_REFRESH_MARGIN_SECONDS = 300;
 // Timeout de segurança: evita loading infinito caso o SDK trave na inicialização
 const AUTH_INIT_TIMEOUT_MS = 10000;
 
-export function useAuth() {
+interface AuthContextType {
+  user: User | null;
+  session: Session | null;
+  loading: boolean;
+  mustChangePassword: boolean;
+  clearMustChangePassword: () => Promise<void>;
+  signOut: () => Promise<void>;
+  refreshToken: () => Promise<void>;
+  handleApiError: (error: any) => Promise<boolean>;
+  sessionExpired: boolean;
+  clearSessionExpired: () => void;
+}
+
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// ---------- Provider (mounted ONCE at the top of the tree) ----------
+
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [mustChangePassword, setMustChangePassword] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
-  
-  // Refs to track refresh state and prevent duplicate operations
+
   const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isRefreshingRef = useRef(false);
+
+  const queryClient = useQueryClient();
 
   // Check if an auth error is fatal (requires re-login)
   const isAuthErrorFatal = useCallback((error: AuthError): boolean => {
@@ -29,7 +48,6 @@ export function useAuth() {
       'session_not_found',
       'refresh_token_not_found',
     ];
-    
     const errorStr = `${error.message} ${error.code || ''}`.toLowerCase();
     return fatalMessages.some(msg => errorStr.includes(msg.toLowerCase()));
   }, []);
@@ -37,20 +55,14 @@ export function useAuth() {
   // Handle session expiration - auto logout
   const handleSessionExpired = useCallback(async (reason: string = "Sessão expirada") => {
     console.log("[useAuth] Sessão expirada:", reason);
-    
-    // Clear local state
     setSession(null);
     setUser(null);
     setMustChangePassword(false);
     setSessionExpired(true);
-    
-    // Clear any pending refresh
     if (refreshTimeoutRef.current) {
       clearTimeout(refreshTimeoutRef.current);
       refreshTimeoutRef.current = null;
     }
-    
-    // Sign out from Supabase (clears tokens)
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -64,23 +76,17 @@ export function useAuth() {
       console.log("[useAuth] Refresh já em andamento, ignorando...");
       return;
     }
-
     isRefreshingRef.current = true;
     console.log("[useAuth] Iniciando refresh de token...");
-
     try {
       const { data, error } = await supabase.auth.refreshSession();
-      
       if (error) {
         console.error("[useAuth] Erro ao refresh:", error.message);
-        
-        // Check if it's a fatal error (token completely invalid)
         if (isAuthErrorFatal(error)) {
           await handleSessionExpired("Token inválido");
         }
         return;
       }
-
       if (data.session) {
         console.log("[useAuth] Token refreshed com sucesso");
         setSession(data.session);
@@ -100,18 +106,15 @@ export function useAuth() {
 
   // Proactive token refresh before expiry
   const scheduleTokenRefresh = useCallback((currentSession: Session) => {
-    // Clear any existing refresh timer
     if (refreshTimeoutRef.current) {
       clearTimeout(refreshTimeoutRef.current);
       refreshTimeoutRef.current = null;
     }
-
     if (!currentSession?.expires_at) {
       console.log("[useAuth] Sessão sem expires_at, refresh não agendado");
       return;
     }
-
-    const expiresAt = currentSession.expires_at * 1000; // Convert to ms
+    const expiresAt = currentSession.expires_at * 1000;
     const now = Date.now();
     const timeUntilExpiry = expiresAt - now;
     const refreshTime = timeUntilExpiry - (TOKEN_REFRESH_MARGIN_SECONDS * 1000);
@@ -120,12 +123,10 @@ export function useAuth() {
     console.log("[useAuth] Refresh agendado para:", Math.round(refreshTime / 1000), "segundos");
 
     if (refreshTime <= 0) {
-      // Token already expired or about to expire, refresh immediately
       console.log("[useAuth] Token próximo de expirar, refreshing agora...");
       refreshToken();
       return;
     }
-
     refreshTimeoutRef.current = setTimeout(() => {
       console.log("[useAuth] Executando refresh agendado...");
       refreshToken();
@@ -135,11 +136,8 @@ export function useAuth() {
   // Handle API errors that might indicate token issues
   const handleApiError = useCallback(async (error: any): Promise<boolean> => {
     if (!error) return false;
-    
     const errorMessage = error?.message || error?.error_description || String(error);
     const statusCode = error?.status || error?.code;
-    
-    // Check for auth-related errors
     if (
       statusCode === 401 ||
       statusCode === 403 ||
@@ -149,8 +147,6 @@ export function useAuth() {
       errorMessage.includes('unauthorized')
     ) {
       console.log("[useAuth] API retornou erro de auth:", errorMessage);
-      
-      // Try to refresh first
       try {
         const { data, error: refreshError } = await supabase.auth.refreshSession();
         if (refreshError || !data.session) {
@@ -166,12 +162,12 @@ export function useAuth() {
         return true;
       }
     }
-    
     return false;
   }, [handleSessionExpired]);
 
+  // ---------- Single auth listener + cache invalidation ----------
   useEffect(() => {
-    console.log("[useAuth] Inicializando listener de auth...");
+    console.log("[useAuth] Inicializando listener de auth (singleton)...");
 
     let finished = false;
     let initTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -186,7 +182,6 @@ export function useAuth() {
       setLoading(false);
     };
 
-    // Timeout de segurança: se nada responder, destrava a UI
     initTimeout = setTimeout(() => {
       if (finished) return;
       console.warn("[useAuth] Timeout na inicialização de auth - liberando UI");
@@ -196,15 +191,13 @@ export function useAuth() {
       finishLoading();
     }, AUTH_INIT_TIMEOUT_MS);
 
-    // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, currentSession) => {
         console.log("[useAuth] onAuthStateChange:", event, "| Sessão:", currentSession ? "presente" : "ausente");
 
-        // Handle specific events
         switch (event) {
           case 'SIGNED_OUT':
-            console.log("[useAuth] Usuário deslogado");
+            console.log("[useAuth] Usuário deslogado — limpando cache");
             setSession(null);
             setUser(null);
             setMustChangePassword(false);
@@ -212,6 +205,8 @@ export function useAuth() {
               clearTimeout(refreshTimeoutRef.current);
               refreshTimeoutRef.current = null;
             }
+            // Cache invalidation (replaces AuthCacheInvalidator)
+            queryClient.clear();
             break;
 
           case 'TOKEN_REFRESHED':
@@ -232,6 +227,12 @@ export function useAuth() {
               setSessionExpired(false);
               scheduleTokenRefresh(currentSession);
 
+              // Cache invalidation on sign-in (replaces AuthCacheInvalidator)
+              if (event === 'SIGNED_IN') {
+                console.log("[useAuth] SIGNED_IN — invalidando queries");
+                queryClient.invalidateQueries();
+              }
+
               // Check must_change_password flag (deferred to avoid deadlock)
               setTimeout(async () => {
                 console.log("[useAuth] Buscando profile para must_change_password...");
@@ -245,13 +246,7 @@ export function useAuth() {
                   console.error("[useAuth] Erro ao buscar profile:", error.message);
                   return;
                 }
-
-                if (profile?.must_change_password) {
-                  console.log("[useAuth] Usuário precisa trocar senha");
-                  setMustChangePassword(true);
-                } else {
-                  setMustChangePassword(false);
-                }
+                setMustChangePassword(!!profile?.must_change_password);
               }, 0);
             } else {
               setSession(null);
@@ -268,15 +263,11 @@ export function useAuth() {
       }
     );
 
-    // THEN check for existing session
     console.log("[useAuth] Verificando sessão existente...");
     supabase.auth.getSession()
       .then(({ data: { session: existingSession }, error }) => {
         if (error) {
           console.error("[useAuth] Erro ao obter sessão:", error.message);
-          console.log("[useAuth] Limpando sessão inválida...");
-
-          // Force clear localStorage tokens
           try {
             const keys = Object.keys(localStorage);
             keys.forEach(key => {
@@ -287,8 +278,6 @@ export function useAuth() {
           } catch (e) {
             console.error("[useAuth] Erro ao limpar localStorage:", e);
           }
-
-          // Não aguardar signOut aqui (pode travar em redes instáveis)
           supabase.auth.signOut().catch(() => {});
           setSession(null);
           setUser(null);
@@ -299,7 +288,6 @@ export function useAuth() {
         console.log("[useAuth] getSession resultado:", existingSession ? "sessão encontrada" : "sem sessão");
 
         if (existingSession) {
-          // Validate the session has required fields
           if (!existingSession.user?.id || !existingSession.access_token) {
             console.log("[useAuth] Sessão incompleta, limpando...");
             supabase.auth.signOut().catch(() => {});
@@ -308,7 +296,6 @@ export function useAuth() {
             finishLoading();
             return;
           }
-
           setSession(existingSession);
           setUser(existingSession.user);
           setSessionExpired(false);
@@ -317,7 +304,6 @@ export function useAuth() {
           setSession(null);
           setUser(null);
         }
-
         finishLoading();
       })
       .catch((err) => {
@@ -327,7 +313,6 @@ export function useAuth() {
         finishLoading();
       });
 
-    // Cleanup on unmount
     return () => {
       subscription.unsubscribe();
       if (refreshTimeoutRef.current) {
@@ -337,23 +322,22 @@ export function useAuth() {
         clearTimeout(initTimeout);
       }
     };
-  }, [scheduleTokenRefresh]);
-  const clearMustChangePassword = async () => {
+  }, [scheduleTokenRefresh, queryClient]);
+
+  const clearMustChangePassword = useCallback(async () => {
     if (user) {
       const { error } = await supabase
         .from('profiles')
         .update({ must_change_password: false })
         .eq('id', user.id);
-      
       if (error) {
         await handleApiError(error);
       } else {
         setMustChangePassword(false);
       }
     }
-  };
+  }, [user, handleApiError]);
 
-  // Manual sign out
   const signOut = useCallback(async () => {
     console.log("[useAuth] signOut manual iniciado");
     if (refreshTimeoutRef.current) {
@@ -363,16 +347,15 @@ export function useAuth() {
     await supabase.auth.signOut();
   }, []);
 
-  // Clear session expired flag (for UI to reset after showing message)
   const clearSessionExpired = useCallback(() => {
     setSessionExpired(false);
   }, []);
 
-  return { 
-    user, 
-    session, 
-    loading, 
-    mustChangePassword, 
+  const value: AuthContextType = {
+    user,
+    session,
+    loading,
+    mustChangePassword,
     clearMustChangePassword,
     signOut,
     refreshToken,
@@ -380,4 +363,16 @@ export function useAuth() {
     sessionExpired,
     clearSessionExpired,
   };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+// ---------- Consumer hook (zero listeners, zero timers) ----------
+
+export function useAuth(): AuthContextType {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
+  }
+  return context;
 }
