@@ -1,4 +1,4 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -70,6 +70,7 @@ const GlobalAdminTutorials = React.lazy(() => import("./pages/global-admin/Globa
 const GlobalAdminOnboarding = React.lazy(() => import("./pages/global-admin/GlobalAdminOnboarding"));
 
 import { APP_BUILD_ID } from "@/lib/buildInfo";
+import { supabase } from "@/integrations/supabase/client";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -80,6 +81,23 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Listener global: invalida cache quando o estado de auth muda
+function AuthCacheInvalidator() {
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN') {
+        console.log("[AuthCacheInvalidator] SIGNED_IN — invalidando queries");
+        queryClient.invalidateQueries();
+      } else if (event === 'SIGNED_OUT') {
+        console.log("[AuthCacheInvalidator] SIGNED_OUT — limpando cache");
+        queryClient.clear();
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+  return null;
+}
 
 const LazyFallback = () => (
   <div className="flex items-center justify-center min-h-screen">
@@ -95,6 +113,7 @@ const App = () => (
           <TooltipProvider>
             <Toaster />
             <Sonner />
+            <AuthCacheInvalidator />
           <BrowserRouter>
             <Suspense fallback={<LazyFallback />}>
             <Routes>

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 
 export interface BusinessHours {
   monday: { enabled: boolean; start: string; end: string };
@@ -38,20 +39,19 @@ export interface LawFirm {
 export function useLawFirm() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   const { data: lawFirm, isLoading } = useQuery({
-    queryKey: ["law_firm"],
+    queryKey: ["law_firm", user?.id],
+    enabled: !!user,
     queryFn: async () => {
-      const { data: profile } = await supabase.auth.getUser();
-      if (!profile.user) return null;
+      if (!user) return null;
 
       const { data: userProfile } = await supabase
         .from("profiles")
         .select("law_firm_id")
-        .eq("id", profile.user.id)
+        .eq("id", user.id)
         .single();
-
-      if (!userProfile?.law_firm_id) return null;
 
       const { data, error } = await supabase
         .from("law_firms")

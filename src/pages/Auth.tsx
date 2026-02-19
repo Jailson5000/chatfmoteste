@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 
@@ -26,6 +27,7 @@ export default function Auth() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -84,6 +86,8 @@ export default function Auth() {
           variant: "destructive",
         });
       } else {
+        // Clear stale cache so queries refetch with new user
+        queryClient.clear();
         toast({
           title: "Bem-vindo!",
           description: "Login realizado com sucesso.",
