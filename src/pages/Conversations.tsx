@@ -752,8 +752,8 @@ export default function Conversations() {
           c.whatsapp_instance_id === connectionIdParam && matchPhone(c)
         );
       }
-      // Fallback: any conversation with this phone
-      if (!existingConv) {
+      // Fallback: only if no specific connection was requested
+      if (!existingConv && !connectionIdParam) {
         existingConv = conversations.find(c => matchPhone(c));
       }
       
