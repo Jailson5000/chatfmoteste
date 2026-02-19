@@ -1,59 +1,56 @@
 
 
-# Persistir Midias Instagram/Facebook + Limpeza Automatica
+# Corrigir Carregamento Automatico Apos Login
 
-## Diagnostico
+## Problema
 
-### O que acontece hoje
-- **Avatar**: A URL temporaria da Meta (`lookaside.fbsbx.com`) e salva diretamente em `clients.avatar_url`. Expira em horas.
-- **Midia de mensagens**: A `media_url` temporaria e salva diretamente em `messages.media_url`. Expira em horas.
-- **Ao deletar conversa**: Os registros de `messages` sao apagados via `ON DELETE CASCADE`, mas os **arquivos no bucket `chat-media` NAO sao apagados** -- ficam orfaos consumindo espaco.
+Quando o usuario faz login, os dados nao carregam automaticamente. Ele precisa dar F5 para que o Dashboard, Conversas e outras paginas funcionem.
 
-### O que sera corrigido
-1. Avatares e midias de mensagens serao baixados e salvos permanentemente no bucket
-2. Uma funcao de limpeza automatica ira apagar arquivos do bucket quando conversas/clientes forem deletados
+## Causa Raiz
 
-## Alteracoes
+O hook `useLawFirm` usa a queryKey `["law_firm"]` sem incluir o ID do usuario. Quando o app carrega antes do login, o React Query armazena o resultado `null` no cache. Apos o login:
 
-### 1. Persistir avatar no bucket (`meta-webhook/index.ts`)
+1. A queryKey nao muda (nao depende do usuario)
+2. O cache de 2 minutos (staleTime) impede uma nova busca
+3. Nao existe invalidacao de cache quando o estado de autenticacao muda
 
-Na secao de resolucao de perfil (linha 470-476), ao obter `profile_pic`:
+Como `lawFirm` continua `null`, todas as queries dependentes (conversas, metricas, contatos, etc.) ficam desabilitadas (`enabled: !!lawFirm?.id`), resultando em telas vazias.
 
-- Baixar a imagem da URL temporaria
-- Fazer upload para `chat-media/{law_firm_id}/avatars/{client_id}.jpg`
-- Salvar a URL publica permanente em `clients.avatar_url`
+## Solucao
 
-Isso ja segue o padrao existente do sistema de avatares do WhatsApp (descrito na memoria `avatar-persistence-logic`).
+### 1. Adicionar `user?.id` na queryKey do `useLawFirm`
 
-### 2. Persistir midia de mensagens no bucket (`meta-webhook/index.ts`)
+Arquivo: `src/hooks/useLawFirm.tsx`
 
-Antes do insert da mensagem (linha 553), quando `mediaUrl` e uma URL HTTP temporaria:
+- Importar `useAuth` para acessar o usuario atual
+- Alterar a queryKey de `["law_firm"]` para `["law_firm", user?.id]`
+- Adicionar `enabled: !!user` para nao executar a query sem usuario logado
 
-- Baixar o conteudo binario
-- Fazer upload para `chat-media/{law_firm_id}/{conversation_id}/{mid}.{ext}`
-- Substituir a URL temporaria pela URL publica permanente
+Isso faz com que, ao mudar o estado de autenticacao (login/logout), o React Query trate como uma query nova e execute automaticamente.
 
-### 3. Limpeza automatica de arquivos orfaos (nova migration SQL)
+### 2. Invalidar todo o cache apos login bem-sucedido
 
-Criar triggers que apagam arquivos do bucket `chat-media` quando registros sao deletados:
+Arquivo: `src/pages/Auth.tsx`
 
-**Opcao mais segura -- funcao de limpeza periodica via Edge Function**:
-- Criar uma edge function `cleanup-orphan-media` que verifica arquivos no bucket sem correspondencia no banco
-- Pode ser chamada manualmente ou agendada
+- Apos o `signInWithPassword` com sucesso, chamar `queryClient.clear()` para limpar todo o cache antigo
+- Isso garante que nenhum dado stale de uma sessao anterior interfira
 
-**Motivo**: Triggers SQL nao conseguem chamar a Storage API diretamente para deletar arquivos. A limpeza precisa ser feita via codigo (Edge Function ou chamada manual).
+### 3. Invalidar cache no listener de auth do App
 
-### Resumo de impacto no espaco
+Arquivo: `src/App.tsx`
 
-- **Avatares**: Muito pequenos (~5-20KB cada), impacto minimo
-- **Midias de mensagens**: Podem ser maiores (fotos 100-500KB, videos ate varios MB), mas e necessario para manter o historico funcional
-- **Sem persistencia**: As midias ficam "quebradas" em poucas horas, tornando o historico inutil
+- Adicionar um `useEffect` com `onAuthStateChange` no nivel do `QueryClientProvider` que, ao receber evento `SIGNED_IN`, faca `queryClient.invalidateQueries()` para forcar refetch de todas as queries ativas
 
-## Arquivos alterados
+## Impacto
 
-1. `supabase/functions/meta-webhook/index.ts` -- persistencia de avatar e midia (redeploy necessario)
-2. Nova migration SQL -- (opcional) funcao helper para limpeza
+- Dashboard: carrega metricas imediatamente apos login
+- Conversas: lista de conversas aparece sem F5
+- Kanban: cards carregam automaticamente
+- Todas as outras paginas: dados disponiveis ao navegar
 
-## Respondendo a pergunta sobre limpeza
+## Arquivos Alterados
 
-**Hoje**: Quando uma conversa e apagada, as **mensagens** sao removidas do banco (CASCADE), mas os **arquivos no bucket continuam la**. Isso vale para WhatsApp tambem, nao so Instagram/Facebook. Posso criar uma funcao de limpeza para resolver isso, mas e uma melhoria separada -- o foco principal aqui e garantir que as midias sejam persistidas e visiveis permanentemente.
+1. `src/hooks/useLawFirm.tsx` -- queryKey com user?.id + enabled flag
+2. `src/pages/Auth.tsx` -- limpar cache apos login
+3. `src/App.tsx` -- listener global de invalidacao no auth state change
+
