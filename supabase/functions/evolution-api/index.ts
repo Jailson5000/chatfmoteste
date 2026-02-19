@@ -3173,14 +3173,28 @@ serve(async (req) => {
           throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
         }
         
-        if (!body.instanceName) {
+        // Support both instanceName (preferred) and instanceId (fallback)
+        let resolvedInstanceName = body.instanceName;
+        if (!resolvedInstanceName && body.instanceId) {
+          console.log(`[Evolution API] Resolving instanceName from instanceId: ${body.instanceId}`);
+          const { data: instanceRow, error: lookupError } = await supabaseAdmin
+            .from("whatsapp_instances")
+            .select("instance_name")
+            .eq("id", body.instanceId)
+            .single();
+          if (lookupError || !instanceRow) {
+            throw new Error(`Instance not found for id: ${body.instanceId}`);
+          }
+          resolvedInstanceName = instanceRow.instance_name;
+        }
+        if (!resolvedInstanceName) {
           throw new Error("instanceName is required");
         }
 
         const apiUrl = normalizeUrl(globalApiUrl);
-        console.log(`[Evolution API] GLOBAL Configuring webhook for: ${body.instanceName}`);
+        console.log(`[Evolution API] GLOBAL Configuring webhook for: ${resolvedInstanceName}`);
 
-        const webhookResponse = await fetchWithTimeout(`${apiUrl}/webhook/set/${body.instanceName}`, {
+        const webhookResponse = await fetchWithTimeout(`${apiUrl}/webhook/set/${resolvedInstanceName}`, {
           method: "POST",
           headers: {
             apikey: globalApiKey,
