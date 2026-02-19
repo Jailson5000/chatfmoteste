@@ -3194,14 +3194,30 @@ serve(async (req) => {
         const apiUrl = normalizeUrl(globalApiUrl);
         console.log(`[Evolution API] GLOBAL Configuring webhook for: ${resolvedInstanceName}`);
 
-        const webhookResponse = await fetchWithTimeout(`${apiUrl}/webhook/set/${resolvedInstanceName}`, {
+        const webhookConfig = buildWebhookConfig(WEBHOOK_URL);
+        
+        // Try with { webhook: ... } wrapper first (required by some Evolution API versions)
+        let webhookResponse = await fetchWithTimeout(`${apiUrl}/webhook/set/${resolvedInstanceName}`, {
           method: "POST",
           headers: {
             apikey: globalApiKey,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+          body: JSON.stringify({ webhook: webhookConfig }),
         });
+
+        // Fallback: if wrapped format fails with 400, try without wrapper
+        if (webhookResponse.status === 400) {
+          console.log(`[Evolution API] Wrapped format failed for ${resolvedInstanceName}, trying unwrapped...`);
+          webhookResponse = await fetchWithTimeout(`${apiUrl}/webhook/set/${resolvedInstanceName}`, {
+            method: "POST",
+            headers: {
+              apikey: globalApiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(webhookConfig),
+          });
+        }
 
         if (!webhookResponse.ok) {
           const errorText = await safeReadResponseText(webhookResponse);
