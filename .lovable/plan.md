@@ -1,92 +1,85 @@
 
-# Otimizar Webhooks para Reduzir Invocacoes
 
-## Situacao Atual
+# Configurar Eventos na Evolution API -- Manual + Automatizado
 
-Analisei os dados das ultimas 24 horas e o resultado e alarmante:
+## Sim, funciona! Mas com cuidados.
 
-```text
-Total de invocacoes/dia: ~14.660
-Invocacoes UTEIS:        ~5.038  (messages.upsert + messages.update)
-Invocacoes DESPERDICADAS: ~9.622  (65.6% do total!)
-```
+Entrar instancia por instancia no painel da Evolution (como voce mostrou no screenshot) e desligar os eventos desnecessarios **funciona perfeitamente** e e a forma mais imediata de resolver.
 
-Detalhamento por evento:
+## O que deixar LIGADO (ON) em cada instancia
 
-```text
-contacts.update   4.938  (33.7%) - Atualiza nomes, mas dispara excessivamente
-chats.update      1.838  (12.5%) - Nao faz NADA, apenas loga "Unhandled event"
-presence.update   1.175  ( 8.0%) - Nao faz NADA, apenas loga
-send.message        519  ( 3.5%) - Nao faz NADA, apenas loga
-chats.upsert        456  ( 3.1%) - Nao faz NADA, apenas loga
-null (sem token)    305  ( 2.1%) - Requisicoes rejeitadas
-messages.edited     141  ( 1.0%) - Nao faz NADA, apenas loga
-contacts.upsert      77  ( 0.5%) - Nao faz NADA
-call                 37  ( 0.3%) - Nao faz NADA
-```
+| Evento | Status | Motivo |
+|--------|--------|--------|
+| CONNECTION_UPDATE | ON | Detecta conexao/desconexao |
+| MESSAGES_DELETE | ON | Exclusao de mensagens |
+| MESSAGES_UPDATE | ON | ACK (entrega/leitura) |
+| MESSAGES_UPSERT | ON | Mensagens recebidas (PRINCIPAL) |
+| QRCODE_UPDATED | ON | QR Code para conectar |
+| CONTACTS_UPDATE | ON | Resolucao de nomes de contatos |
 
-Isso significa que com 7 empresas, gastamos **~440k invocacoes/mes** -- quase o limite de 500k do plano Pro. Com 35 empresas seria impossivel.
+## O que DESLIGAR (OFF) em cada instancia
 
-## Estrategia: Filtro Rapido no Inicio da Funcao
+| Evento | Status | Economia/dia |
+|--------|--------|-------------|
+| SEND_MESSAGE | OFF | ~519 invocacoes (esta ligado no seu screenshot!) |
+| PRESENCE_UPDATE | OFF | ~1.175 invocacoes |
+| CHATS_UPDATE | OFF | ~1.838 invocacoes (nao aparece no screenshot, talvez ja OFF) |
+| CHATS_UPSERT | OFF | ~456 invocacoes |
+| CONTACTS_UPSERT | OFF | ~77 invocacoes |
+| MESSAGES_EDITED | OFF | ~141 invocacoes (pode nao aparecer dependendo da versao) |
+| CALL | OFF | ~37 invocacoes |
+| GROUP_UPDATE | OFF | Nao usado |
+| GROUPS_UPSERT | OFF | Nao usado |
+| LABELS_ASSOCIATION | OFF | Nao usado |
+| LABELS_EDIT | OFF | Nao usado |
+| LOGOUT_INSTANCE | OFF | Nao usado |
+| MESSAGES_SET | OFF | Nao usado |
+| REMOVE_INSTANCE | OFF | Nao usado |
+| TYPEBOT_CHANGE_STATUS | OFF | Nao usado |
+| TYPEBOT_START | OFF | Nao usado |
 
-A abordagem mais segura e eficiente: **rejeitar eventos inuteis nos primeiros milissegundos**, antes de fazer qualquer consulta ao banco.
+## No seu screenshot especifico
 
-### O que muda
+Voce ja tem quase tudo certo! Somente o **SEND_MESSAGE** (destacado em amarelo) precisa ser desligado. Ele gera ~519 invocacoes/dia inuteis porque nosso sistema nao processa esse evento.
 
-No inicio da funcao `evolution-webhook`, ANTES de buscar a instancia no banco, adicionar um filtro que retorna 200 imediatamente para eventos que nao precisam de processamento:
+## Complemento automatizado (no codigo)
 
-```text
-Eventos MANTIDOS (processamento completo):
-  - messages.upsert     (mensagens reais)
-  - messages.update      (ACK - status entrega/leitura)
-  - messages.ack         (formato alternativo de ACK)
-  - connection.update    (status de conexao)
-  - qrcode.updated       (QR code)
-  - messages.delete      (exclusao de mensagem)
-  - messages.reaction    (reacoes de clientes)
-  - contacts.update      (resolucao de nomes)
+Alem da acao manual, vou fazer duas mudanas no codigo para que **novas instancias** ja sejam criadas com a config correta e para que voce possa reaplicar em todas de uma vez sem entrar instancia por instancia:
 
-Eventos DESCARTADOS (retorno 200 imediato):
-  - chats.update         (12.5% - nao faz nada)
-  - chats.upsert         (3.1% - nao faz nada)
-  - presence.update      (8.0% - nao faz nada)
-  - send.message         (3.5% - nao faz nada)
-  - contacts.upsert      (0.5% - nao faz nada)
-  - messages.edited      (1.0% - nao faz nada)
-  - call                 (0.3% - nao faz nada)
-```
+### 1. Corrigir `buildWebhookConfig` no `evolution-api/index.ts`
 
-### Reducao estimada
+A funcao que configura o webhook ao criar instancias atualmente inclui `SEND_MESSAGE` e nao inclui `CONTACTS_UPDATE`. Vou corrigir:
 
 ```text
-Eventos descartados por dia: ~4.243 (29% do total)
-Invocacoes restantes:       ~10.417
-Economia mensal:            ~127.000 invocacoes
-
-Com contacts.update otimizado (debounce): economia adicional de ~100.000/mes
-Total economizado: ~227.000 invocacoes/mes (51% de reducao)
+ANTES:  CONNECTION_UPDATE, QRCODE_UPDATED, MESSAGES_UPSERT, MESSAGES_UPDATE, MESSAGES_DELETE, SEND_MESSAGE
+DEPOIS: CONNECTION_UPDATE, QRCODE_UPDATED, MESSAGES_UPSERT, MESSAGES_UPDATE, MESSAGES_DELETE, CONTACTS_UPDATE
 ```
 
-### Seguranca
+### 2. Adicionar acao `reapply_webhook` no `evolution-api/index.ts`
 
-- Nenhuma logica existente e alterada
-- Eventos que JA tem handler continuam funcionando normalmente
-- Apenas eventos que caem no `default: "Unhandled event"` sao filtrados antes
-- O retorno e sempre HTTP 200 para a Evolution API (evita retries)
-- O filtro fica ANTES da consulta ao banco, economizando tambem tempo de execucao
+Nova acao que permite reaplicar a configuracao de webhook em uma instancia existente via API, sem precisar entrar no painel da Evolution. Util para:
+- Aplicar a config atualizada em instancias antigas
+- Corrigir instancias que tiveram a config sobreescrita
 
-## Otimizacao extra: Configurar Evolution API
+### 3. Adicionar acao `reapply_all_webhooks` (batch)
 
-Alem do filtro no codigo, e possivel configurar a Evolution API para parar de enviar eventos desnecessarios. Isso eliminaria as invocacoes na ORIGEM (a Evolution nem faria o request HTTP), economizando ainda mais. Mas isso depende de acesso ao painel da Evolution e e uma acao manual sua.
+Busca todas as instancias ativas no banco e reaplica a config em cada uma de uma vez. Assim voce nao precisa entrar instancia por instancia.
+
+## Seguranca
+
+- O filtro rapido no `evolution-webhook` (ja implementado) continua ativo como rede de seguranca -- mesmo que a Evolution envie um evento inesperado, ele sera descartado nos primeiros milissegundos
+- Novas instancias ja serao criadas com a lista correta
+- A acao de reapply pode ser executada a qualquer momento sem afetar o funcionamento
+
+## Resumo da acao
+
+| Acao | Quem faz | Quando |
+|------|----------|--------|
+| Desligar SEND_MESSAGE nas instancias atuais | Voce (manual no painel) | Agora |
+| Corrigir buildWebhookConfig | Codigo (automatico) | No deploy |
+| Acao reapply_all_webhooks | Voce via painel admin ou API | Apos deploy, uma vez |
 
 ## Arquivo alterado
 
-1. `supabase/functions/evolution-webhook/index.ts` -- Adicionar filtro de eventos no inicio (antes da linha de lookup de instancia), redeploy automatico
+`supabase/functions/evolution-api/index.ts` -- Corrigir lista de eventos + adicionar acoes reapply_webhook e reapply_all_webhooks
 
-## Resultado final esperado
-
-```text
-ANTES:  ~440k invocacoes/mes (7 empresas) -- 88% do limite
-DEPOIS: ~213k invocacoes/mes (7 empresas) -- 43% do limite
-Capacidade: de 30-35 empresas para 60-70 empresas no mesmo plano
-```
