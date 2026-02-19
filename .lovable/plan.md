@@ -1,53 +1,57 @@
 
 
-# Corrigir Botao "Reaplicar Webhooks" (Bug Encontrado)
+# Corrigir formato do body no global_configure_webhook
 
-## O que aconteceu
+## Problema
 
-O botao "Reaplicar Webhooks" **falhou em todas as instancias**. Confirmei nos logs que todas as 7 chamadas retornaram o erro:
+O botao "Reaplicar Webhooks" esta enviando o body correto (com `instanceName`), mas a Evolution API do servidor global rejeita o formato. O erro:
 
 ```text
-Error: instanceName is required
+instance requires property "webhook"
 ```
 
-**Causa:** O frontend envia `instanceId` (o UUID do banco de dados), mas a Edge Function espera `instanceName` (o nome da instancia na Evolution API). Sao campos diferentes.
+A Evolution API neste servidor espera o corpo encapsulado numa chave `webhook`:
 
-## Sobre novas instancias
+```json
+{ "webhook": { "enabled": true, "url": "...", "events": [...] } }
+```
 
-**Sim** -- qualquer instancia nova criada ou reconectada ja vira automaticamente sem `MESSAGES_UPDATE`, porque o `buildWebhookConfig` ja foi atualizado. O problema e apenas com as instancias existentes que precisam ser atualizadas.
+Mas o codigo atual envia sem wrapper:
+
+```json
+{ "enabled": true, "url": "...", "events": [...] }
+```
+
+## Sobre desligar manualmente
+
+Sim, funciona! Ao desconectar e reconectar uma instancia, o `buildWebhookConfig` e chamado com a API key da propria instancia, e a nova configuracao (sem `MESSAGES_UPDATE`) e aplicada automaticamente.
 
 ## Correcao
 
-### Arquivo 1: `src/hooks/useGlobalAdminInstances.tsx`
+### Arquivo: `supabase/functions/evolution-api/index.ts`
 
-Na mutation `reapplyAllWebhooks` (linha 474), trocar:
-
-```text
-instanceId: instance.id
-```
-
-por:
+Na action `global_configure_webhook` (linha 3203), alterar:
 
 ```text
-instanceName: instance.instance_name
+body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
 ```
 
-Isso envia o nome correto que a Evolution API espera (ex: `fmo-whatsapp`) em vez do UUID do banco.
+para:
 
-### Arquivo 2: `supabase/functions/evolution-api/index.ts`
+```text
+body: JSON.stringify({ webhook: buildWebhookConfig(WEBHOOK_URL) }),
+```
 
-Adicionar fallback no `global_configure_webhook` (linha 3168) para que, se receber `instanceId` em vez de `instanceName`, ele busque o nome no banco automaticamente. Isso torna a acao mais robusta:
+Isso encapsula a configuracao na chave `webhook` que o servidor espera.
 
-- Se `instanceName` estiver presente, usa direto
-- Se so `instanceId` estiver presente, busca `instance_name` na tabela `whatsapp_instances`
-- Se nenhum dos dois, retorna erro
+Como fallback extra, se a chamada com wrapper falhar com 400, tentar novamente sem wrapper (para compatibilidade com versoes diferentes da Evolution API).
 
 ## Resumo
 
 | Item | Detalhe |
 |---|---|
-| Arquivos alterados | 2 |
-| Causa raiz | Frontend enviava UUID, API esperava nome |
-| Risco | Nenhum -- correcao cirurgica |
-| Apos deploy | Clicar novamente em "Reaplicar Webhooks" |
+| Arquivo alterado | 1 (evolution-api/index.ts) |
+| Causa raiz | Formato do body incompativel com versao do servidor Evolution |
+| Risco | Nenhum -- adiciona wrapper e fallback |
+| Instancias novas | Ja virao sem MESSAGES_UPDATE automaticamente |
 
