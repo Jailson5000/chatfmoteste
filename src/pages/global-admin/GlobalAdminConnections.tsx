@@ -56,6 +56,7 @@ import {
   Filter,
   History,
   Bell,
+  Settings2,
 } from "lucide-react";
 import { useGlobalAdminInstances, InstanceWithCompany, EvolutionConnection } from "@/hooks/useGlobalAdminInstances";
 import { InstanceUptimeChart } from "@/components/connections/InstanceUptimeChart";
@@ -187,6 +188,7 @@ export default function GlobalAdminConnections() {
     refreshAllStatuses,
     syncEvolutionInstances,
     fetchPhoneNumber,
+    reapplyAllWebhooks,
   } = useGlobalAdminInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -407,6 +409,22 @@ export default function GlobalAdminConnections() {
               </TooltipTrigger>
               <TooltipContent>
                 <p>Buscar todas as instâncias reais do Evolution API e sincronizar com o banco</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => reapplyAllWebhooks.mutate()}
+                  disabled={reapplyAllWebhooks.isPending}
+                >
+                  <Settings2 className={`h-4 w-4 mr-2 ${reapplyAllWebhooks.isPending ? "animate-spin" : ""}`} />
+                  Reaplicar Webhooks
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Reconfigurar webhooks em todas as instâncias conectadas (aplica filtros atualizados)</p>
               </TooltipContent>
             </Tooltip>
             <Tooltip>

@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 const TOKEN_REFRESH_MARGIN_SECONDS = 300;
 
 // Timeout de segurança: evita loading infinito caso o SDK trave na inicialização
-const AUTH_INIT_TIMEOUT_MS = 10000;
+const AUTH_INIT_TIMEOUT_MS = 20000;
 
 interface AuthContextType {
   user: User | null;
@@ -140,11 +140,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const statusCode = error?.status || error?.code;
     if (
       statusCode === 401 ||
-      statusCode === 403 ||
       errorMessage.includes('JWT') ||
-      errorMessage.includes('token') ||
-      errorMessage.includes('session') ||
-      errorMessage.includes('unauthorized')
+      errorMessage.includes('bad_jwt') ||
+      errorMessage.includes('invalid_grant') ||
+      errorMessage.includes('refresh_token')
     ) {
       console.log("[useAuth] API retornou erro de auth:", errorMessage);
       try {
@@ -184,10 +183,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     initTimeout = setTimeout(() => {
       if (finished) return;
-      console.warn("[useAuth] Timeout na inicialização de auth - liberando UI");
-      setSession(null);
-      setUser(null);
-      setMustChangePassword(false);
+      console.warn("[useAuth] Timeout na inicialização de auth - liberando UI (mantendo sessão existente)");
+      // NÃO limpar sessão no timeout — apenas liberar loading
+      // A sessão existente no localStorage pode ser válida e será processada quando o SDK responder
       finishLoading();
     }, AUTH_INIT_TIMEOUT_MS);
 
