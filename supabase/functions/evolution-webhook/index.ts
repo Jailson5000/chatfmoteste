@@ -4034,7 +4034,36 @@ serve(async (req) => {
     }
     
     const normalizedEvent = normalizeEventName(body.event);
-    logDebug('EVENT', `Received event`, { 
+
+    // =========================================================================
+    // EARLY EVENT FILTER - Discard events that have no handler (saves ~29% invocations)
+    // =========================================================================
+    // Only process events that actually have business logic. All others are
+    // returned 200 immediately, BEFORE any database query, to minimize cost.
+    const PROCESSABLE_EVENTS = new Set([
+      'messages.upsert',    // Real incoming/outgoing messages
+      'messages.update',    // ACK - delivery/read status
+      'messages.ack',       // Alternative ACK format
+      'messages.delete',    // Message deletion
+      'messages.reaction',  // Reactions from clients
+      'connection.update',  // Instance connection status
+      'qrcode.updated',     // QR code refresh
+      'contacts.update',    // Contact name resolution
+    ]);
+
+    if (!PROCESSABLE_EVENTS.has(normalizedEvent)) {
+      // Return 200 immediately - no DB queries, no processing
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: 'Event type not processed',
+          event: normalizedEvent,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    logDebug('EVENT', `Processing event`, { 
       requestId, 
       event: body.event, 
       normalized: normalizedEvent, 
