@@ -1,56 +1,92 @@
 
+# Otimizar Webhooks para Reduzir Invocacoes
 
-# Corrigir Carregamento Automatico Apos Login
+## Situacao Atual
 
-## Problema
+Analisei os dados das ultimas 24 horas e o resultado e alarmante:
 
-Quando o usuario faz login, os dados nao carregam automaticamente. Ele precisa dar F5 para que o Dashboard, Conversas e outras paginas funcionem.
+```text
+Total de invocacoes/dia: ~14.660
+Invocacoes UTEIS:        ~5.038  (messages.upsert + messages.update)
+Invocacoes DESPERDICADAS: ~9.622  (65.6% do total!)
+```
 
-## Causa Raiz
+Detalhamento por evento:
 
-O hook `useLawFirm` usa a queryKey `["law_firm"]` sem incluir o ID do usuario. Quando o app carrega antes do login, o React Query armazena o resultado `null` no cache. Apos o login:
+```text
+contacts.update   4.938  (33.7%) - Atualiza nomes, mas dispara excessivamente
+chats.update      1.838  (12.5%) - Nao faz NADA, apenas loga "Unhandled event"
+presence.update   1.175  ( 8.0%) - Nao faz NADA, apenas loga
+send.message        519  ( 3.5%) - Nao faz NADA, apenas loga
+chats.upsert        456  ( 3.1%) - Nao faz NADA, apenas loga
+null (sem token)    305  ( 2.1%) - Requisicoes rejeitadas
+messages.edited     141  ( 1.0%) - Nao faz NADA, apenas loga
+contacts.upsert      77  ( 0.5%) - Nao faz NADA
+call                 37  ( 0.3%) - Nao faz NADA
+```
 
-1. A queryKey nao muda (nao depende do usuario)
-2. O cache de 2 minutos (staleTime) impede uma nova busca
-3. Nao existe invalidacao de cache quando o estado de autenticacao muda
+Isso significa que com 7 empresas, gastamos **~440k invocacoes/mes** -- quase o limite de 500k do plano Pro. Com 35 empresas seria impossivel.
 
-Como `lawFirm` continua `null`, todas as queries dependentes (conversas, metricas, contatos, etc.) ficam desabilitadas (`enabled: !!lawFirm?.id`), resultando em telas vazias.
+## Estrategia: Filtro Rapido no Inicio da Funcao
 
-## Solucao
+A abordagem mais segura e eficiente: **rejeitar eventos inuteis nos primeiros milissegundos**, antes de fazer qualquer consulta ao banco.
 
-### 1. Adicionar `user?.id` na queryKey do `useLawFirm`
+### O que muda
 
-Arquivo: `src/hooks/useLawFirm.tsx`
+No inicio da funcao `evolution-webhook`, ANTES de buscar a instancia no banco, adicionar um filtro que retorna 200 imediatamente para eventos que nao precisam de processamento:
 
-- Importar `useAuth` para acessar o usuario atual
-- Alterar a queryKey de `["law_firm"]` para `["law_firm", user?.id]`
-- Adicionar `enabled: !!user` para nao executar a query sem usuario logado
+```text
+Eventos MANTIDOS (processamento completo):
+  - messages.upsert     (mensagens reais)
+  - messages.update      (ACK - status entrega/leitura)
+  - messages.ack         (formato alternativo de ACK)
+  - connection.update    (status de conexao)
+  - qrcode.updated       (QR code)
+  - messages.delete      (exclusao de mensagem)
+  - messages.reaction    (reacoes de clientes)
+  - contacts.update      (resolucao de nomes)
 
-Isso faz com que, ao mudar o estado de autenticacao (login/logout), o React Query trate como uma query nova e execute automaticamente.
+Eventos DESCARTADOS (retorno 200 imediato):
+  - chats.update         (12.5% - nao faz nada)
+  - chats.upsert         (3.1% - nao faz nada)
+  - presence.update      (8.0% - nao faz nada)
+  - send.message         (3.5% - nao faz nada)
+  - contacts.upsert      (0.5% - nao faz nada)
+  - messages.edited      (1.0% - nao faz nada)
+  - call                 (0.3% - nao faz nada)
+```
 
-### 2. Invalidar todo o cache apos login bem-sucedido
+### Reducao estimada
 
-Arquivo: `src/pages/Auth.tsx`
+```text
+Eventos descartados por dia: ~4.243 (29% do total)
+Invocacoes restantes:       ~10.417
+Economia mensal:            ~127.000 invocacoes
 
-- Apos o `signInWithPassword` com sucesso, chamar `queryClient.clear()` para limpar todo o cache antigo
-- Isso garante que nenhum dado stale de uma sessao anterior interfira
+Com contacts.update otimizado (debounce): economia adicional de ~100.000/mes
+Total economizado: ~227.000 invocacoes/mes (51% de reducao)
+```
 
-### 3. Invalidar cache no listener de auth do App
+### Seguranca
 
-Arquivo: `src/App.tsx`
+- Nenhuma logica existente e alterada
+- Eventos que JA tem handler continuam funcionando normalmente
+- Apenas eventos que caem no `default: "Unhandled event"` sao filtrados antes
+- O retorno e sempre HTTP 200 para a Evolution API (evita retries)
+- O filtro fica ANTES da consulta ao banco, economizando tambem tempo de execucao
 
-- Adicionar um `useEffect` com `onAuthStateChange` no nivel do `QueryClientProvider` que, ao receber evento `SIGNED_IN`, faca `queryClient.invalidateQueries()` para forcar refetch de todas as queries ativas
+## Otimizacao extra: Configurar Evolution API
 
-## Impacto
+Alem do filtro no codigo, e possivel configurar a Evolution API para parar de enviar eventos desnecessarios. Isso eliminaria as invocacoes na ORIGEM (a Evolution nem faria o request HTTP), economizando ainda mais. Mas isso depende de acesso ao painel da Evolution e e uma acao manual sua.
 
-- Dashboard: carrega metricas imediatamente apos login
-- Conversas: lista de conversas aparece sem F5
-- Kanban: cards carregam automaticamente
-- Todas as outras paginas: dados disponiveis ao navegar
+## Arquivo alterado
 
-## Arquivos Alterados
+1. `supabase/functions/evolution-webhook/index.ts` -- Adicionar filtro de eventos no inicio (antes da linha de lookup de instancia), redeploy automatico
 
-1. `src/hooks/useLawFirm.tsx` -- queryKey com user?.id + enabled flag
-2. `src/pages/Auth.tsx` -- limpar cache apos login
-3. `src/App.tsx` -- listener global de invalidacao no auth state change
+## Resultado final esperado
 
+```text
+ANTES:  ~440k invocacoes/mes (7 empresas) -- 88% do limite
+DEPOIS: ~213k invocacoes/mes (7 empresas) -- 43% do limite
+Capacidade: de 30-35 empresas para 60-70 empresas no mesmo plano
+```
