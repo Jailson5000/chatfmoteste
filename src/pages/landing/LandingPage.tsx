@@ -910,7 +910,7 @@ export function LandingPage() {
                     {plan.description}
                   </p>
                 </div>
-                <div className="mt-3 mb-3 min-h-[60px] flex flex-col justify-end">
+                <div className="mt-1 mb-3 min-h-[80px] flex flex-col justify-end">
                   {plan.startingFrom && (
                     <span className="text-white/40 text-xs">A partir de </span>
                   )}
@@ -920,12 +920,13 @@ export function LandingPage() {
                     </div>
                   )}
                   {!plan.isBasic && plan.originalPrice && (
-                    <span className="text-white/40 text-sm line-through mr-1">R$ {plan.originalPrice}</span>
+                    <div className="text-white/40 text-sm line-through mb-1">R$ {plan.originalPrice}</div>
                   )}
-                  {!plan.isBasic && <br className={plan.originalPrice ? "" : "hidden"} />}
-                  <span className="text-white/40 text-xs">R$</span>
-                  <span className="text-2xl font-bold">{plan.price}</span>
-                  <span className="text-white/40 text-xs"> / mês</span>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-white/40 text-xs">R$</span>
+                    <span className="text-2xl font-bold">{plan.price}</span>
+                    <span className="text-white/40 text-xs">/ mês</span>
+                  </div>
                 </div>
                 <ul className="space-y-2 mb-6 flex-1">
                   {plan.items.map((item) => (
