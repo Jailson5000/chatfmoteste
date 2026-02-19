@@ -154,16 +154,21 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
       // Clear previous tracking
       activeTabsRef.current.clear();
       
-      // Send PING to check for existing tabs
-      channelRef.current.postMessage({
-        type: "PING",
-        tabId: tabIdRef.current,
-        userId: user.id,
-        timestamp: tabCreatedAtRef.current,
-      } as TabMessage);
+      // Delay PING by 1s to avoid false-positive on F5/reload
+      // (the old tab's BroadcastChannel needs time to close via beforeunload)
+      setTimeout(() => {
+        if (!channelRef.current) return;
+        
+        // Send PING to check for existing tabs
+        channelRef.current.postMessage({
+          type: "PING",
+          tabId: tabIdRef.current,
+          userId: user.id,
+          timestamp: tabCreatedAtRef.current,
+        } as TabMessage);
       
-      // Set timeout - count PONGs received and decide
-      pingTimeoutRef.current = setTimeout(() => {
+        // Set timeout - count PONGs received and decide
+        pingTimeoutRef.current = setTimeout(() => {
         pingTimeoutRef.current = null;
         const tabCount = activeTabsRef.current.size;
         
@@ -175,6 +180,7 @@ export function TabSessionProvider({ children }: TabSessionProviderProps) {
           setIsPrimaryTab(true);
         }
       }, PING_TIMEOUT_MS);
+      }, 1000); // 1s delay before PING
     };
     
     initChannel();

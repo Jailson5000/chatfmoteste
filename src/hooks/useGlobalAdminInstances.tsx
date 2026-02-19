@@ -459,6 +459,53 @@ export function useGlobalAdminInstances() {
     },
   });
 
+  // Reapply webhooks on all connected instances
+  const reapplyAllWebhooks = useMutation({
+    mutationFn: async () => {
+      const connectedInstances = instances.filter((i) => i.status === "connected");
+      console.log("[useGlobalAdminInstances] Reapplying webhooks on", connectedInstances.length, "instances");
+
+      let success = 0;
+      let failed = 0;
+
+      // Sequential to avoid overloading
+      for (const instance of connectedInstances) {
+        try {
+          const { data, error } = await supabase.functions.invoke("evolution-api", {
+            body: {
+              action: "global_configure_webhook",
+              instanceId: instance.id,
+            },
+          });
+          if (error || !data?.success) {
+            console.error("[reapplyAllWebhooks] Failed for", instance.instance_name, error || data?.error);
+            failed++;
+          } else {
+            success++;
+          }
+        } catch (err) {
+          console.error("[reapplyAllWebhooks] Exception for", instance.instance_name, err);
+          failed++;
+        }
+      }
+
+      return { success, failed, total: connectedInstances.length };
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Webhooks reaplicados",
+        description: `${data.success} de ${data.total} instâncias configuradas${data.failed > 0 ? `. ${data.failed} falha(s).` : "."}`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao reaplicar webhooks",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Group instances by Evolution connection
   const instancesByConnection = instances.reduce((acc, instance) => {
     const connectionId = instance.evolution_connection_id || "unknown";
@@ -492,5 +539,6 @@ export function useGlobalAdminInstances() {
     refreshAllStatuses,
     syncEvolutionInstances,
     fetchPhoneNumber,
+    reapplyAllWebhooks,
   };
 }
