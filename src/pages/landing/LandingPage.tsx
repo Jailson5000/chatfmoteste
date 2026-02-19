@@ -152,6 +152,12 @@ export function LandingPage() {
       const isEnterprise = plan.name.toUpperCase() === "ENTERPRISE";
       const isProfessional = plan.name.toUpperCase() === "PROFESSIONAL";
       const isPrime = plan.name.toUpperCase() === "PRIME";
+      const isBasic = plan.name.toUpperCase() === "BASIC";
+      
+      // Promotional original prices (crossed out)
+      let originalPrice: string | null = null;
+      if (isBasic) originalPrice = "297";
+      if (isEnterprise) originalPrice = "1.697";
       
       return {
         name: plan.name.toUpperCase(),
@@ -167,6 +173,8 @@ export function LandingPage() {
         isEnterprise,
         startingFrom: isEnterprise,
         isPrime,
+        isBasic,
+        originalPrice,
       };
     });
   }, [dbPlans]);
@@ -880,15 +888,20 @@ export function LandingPage() {
             {plans.map((plan) => (
               <div
                 key={plan.name}
-                className={`relative p-4 rounded-2xl border transition-all duration-300 flex flex-col ${
-                  plan.popular || plan.isPrime
+            className={`relative p-4 rounded-2xl border transition-all duration-300 flex flex-col ${
+                  plan.popular || plan.isPrime || plan.isBasic
                     ? "border-red-500/40 bg-gradient-to-b from-red-500/10 to-transparent shadow-xl shadow-red-500/5"
                     : "border-white/[0.06] bg-white/[0.02] hover:border-white/10"
                 }`}
               >
-                {plan.popular && (
+              {plan.popular && (
                   <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
                     ⭐ Mais Escolhido
+                  </div>
+                )}
+                {plan.isBasic && (
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
+                    🚀 Comece aqui
                   </div>
                 )}
                 <div>
@@ -901,6 +914,10 @@ export function LandingPage() {
                   {plan.startingFrom && (
                     <span className="text-white/40 text-xs">A partir de </span>
                   )}
+                  {plan.originalPrice && (
+                    <span className="text-white/40 text-sm line-through mr-1">R$ {plan.originalPrice}</span>
+                  )}
+                  <br className={plan.originalPrice ? "" : "hidden"} />
                   <span className="text-white/40 text-xs">R$</span>
                   <span className="text-2xl font-bold">{plan.price}</span>
                   <span className="text-white/40 text-xs"> / mês</span>
