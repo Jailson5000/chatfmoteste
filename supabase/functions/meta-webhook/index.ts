@@ -66,6 +66,38 @@ function getExtFromMime(mime: string): string {
   return MIME_TO_EXT[mime] || mime.split("/").pop()?.split(";")[0] || "bin";
 }
 
+/**
+ * Detect real media type by inspecting magic bytes of the buffer.
+ * Story mentions/replies can be either images or videos.
+ */
+function detectMediaType(buffer: ArrayBuffer): { messageType: string; mediaMimeType: string } | null {
+  const bytes = new Uint8Array(buffer);
+  if (bytes.length < 8) return null;
+
+  // JPEG: starts with FF D8 FF
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
+    return { messageType: "image", mediaMimeType: "image/jpeg" };
+  }
+
+  // PNG: starts with 89 50 4E 47
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+    return { messageType: "image", mediaMimeType: "image/png" };
+  }
+
+  // MP4/MOV: "ftyp" at bytes 4-7
+  if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+    return { messageType: "video", mediaMimeType: "video/mp4" };
+  }
+
+  // WebP: "RIFF" at 0-3 and "WEBP" at 8-11
+  if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes.length > 11 && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+    return { messageType: "image", mediaMimeType: "image/webp" };
+  }
+
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -337,14 +369,15 @@ async function processMessagingEntry(
       } else if (att.type === "file") {
         messageType = "document";
         mediaMimeType = "application/octet-stream";
-      } else if (att.type === "story_mention") {
-        messageType = "image";
-        mediaMimeType = "image/jpeg";
-        if (!content) content = "📢 Mencionou você em um story";
-      } else if (att.type === "story_reply") {
-        messageType = "image";
-        mediaMimeType = "image/jpeg";
-        if (!content) content = "💬 Respondeu ao seu story";
+    } else if (att.type === "story_mention" || att.type === "story_reply") {
+        // Type will be detected after download (can be image or video)
+        messageType = "image"; // fallback
+        mediaMimeType = null;  // will be detected from magic bytes
+        if (!content) {
+          content = att.type === "story_mention"
+            ? "📢 Mencionou você em um story"
+            : "💬 Respondeu ao seu story";
+        }
       }
       if (!content) content = `[${messageType}]`;
     }
@@ -579,7 +612,21 @@ async function processMessagingEntry(
       try {
         const mediaRes = await fetch(mediaUrl);
         if (mediaRes.ok) {
-          const mediaBuffer = await mediaRes.arrayBuffer();
+        const mediaBuffer = await mediaRes.arrayBuffer();
+
+          // Detect real media type from magic bytes (critical for story mentions which can be video)
+          if (!mediaMimeType) {
+            const detected = detectMediaType(mediaBuffer);
+            if (detected) {
+              messageType = detected.messageType;
+              mediaMimeType = detected.mediaMimeType;
+              console.log("[meta-webhook] Media type detected from magic bytes:", detected.messageType, detected.mediaMimeType);
+            } else {
+              console.warn("[meta-webhook] Could not detect media type from magic bytes, falling back to image/jpeg");
+              mediaMimeType = "image/jpeg";
+            }
+          }
+
           const ext = getExtFromMime(mediaMimeType || "image/jpeg");
           const msgId = message.mid || crypto.randomUUID();
           // Sanitize msgId for storage path (remove dots/special chars)
