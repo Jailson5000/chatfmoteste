@@ -1,85 +1,39 @@
 
+# Corrigir "Iniciar Conversa" para Abrir na Conexao Correta
 
-# Configurar Eventos na Evolution API -- Manual + Automatizado
+## Problema
 
-## Sim, funciona! Mas com cuidados.
+Na pagina de Contatos, o botao "Iniciar conversa" navega para a pagina de Conversas passando apenas `phone` e `name` na URL. Como nao envia o `connectionId`, a pagina de Conversas abre na conexao padrao (primeira disponivel) em vez da conexao vinculada ao contato.
 
-Entrar instancia por instancia no painel da Evolution (como voce mostrou no screenshot) e desligar os eventos desnecessarios **funciona perfeitamente** e e a forma mais imediata de resolver.
+Exemplo: O contato "Contato 2752" esta na conexao 6064, mas ao clicar "Iniciar conversa", abre na conexao 9089.
 
-## O que deixar LIGADO (ON) em cada instancia
+## Solucao
 
-| Evento | Status | Motivo |
-|--------|--------|--------|
-| CONNECTION_UPDATE | ON | Detecta conexao/desconexao |
-| MESSAGES_DELETE | ON | Exclusao de mensagens |
-| MESSAGES_UPDATE | ON | ACK (entrega/leitura) |
-| MESSAGES_UPSERT | ON | Mensagens recebidas (PRINCIPAL) |
-| QRCODE_UPDATED | ON | QR Code para conectar |
-| CONTACTS_UPDATE | ON | Resolucao de nomes de contatos |
+Alterar a navegacao do botao "Iniciar conversa" para incluir o `connectionId` baseado na instancia vinculada ao contato.
 
-## O que DESLIGAR (OFF) em cada instancia
+### Arquivo: `src/pages/Contacts.tsx`
 
-| Evento | Status | Economia/dia |
-|--------|--------|-------------|
-| SEND_MESSAGE | OFF | ~519 invocacoes (esta ligado no seu screenshot!) |
-| PRESENCE_UPDATE | OFF | ~1.175 invocacoes |
-| CHATS_UPDATE | OFF | ~1.838 invocacoes (nao aparece no screenshot, talvez ja OFF) |
-| CHATS_UPSERT | OFF | ~456 invocacoes |
-| CONTACTS_UPSERT | OFF | ~77 invocacoes |
-| MESSAGES_EDITED | OFF | ~141 invocacoes (pode nao aparecer dependendo da versao) |
-| CALL | OFF | ~37 invocacoes |
-| GROUP_UPDATE | OFF | Nao usado |
-| GROUPS_UPSERT | OFF | Nao usado |
-| LABELS_ASSOCIATION | OFF | Nao usado |
-| LABELS_EDIT | OFF | Nao usado |
-| LOGOUT_INSTANCE | OFF | Nao usado |
-| MESSAGES_SET | OFF | Nao usado |
-| REMOVE_INSTANCE | OFF | Nao usado |
-| TYPEBOT_CHANGE_STATUS | OFF | Nao usado |
-| TYPEBOT_START | OFF | Nao usado |
-
-## No seu screenshot especifico
-
-Voce ja tem quase tudo certo! Somente o **SEND_MESSAGE** (destacado em amarelo) precisa ser desligado. Ele gera ~519 invocacoes/dia inuteis porque nosso sistema nao processa esse evento.
-
-## Complemento automatizado (no codigo)
-
-Alem da acao manual, vou fazer duas mudanas no codigo para que **novas instancias** ja sejam criadas com a config correta e para que voce possa reaplicar em todas de uma vez sem entrar instancia por instancia:
-
-### 1. Corrigir `buildWebhookConfig` no `evolution-api/index.ts`
-
-A funcao que configura o webhook ao criar instancias atualmente inclui `SEND_MESSAGE` e nao inclui `CONTACTS_UPDATE`. Vou corrigir:
+Na linha 522, onde o navigate e chamado:
 
 ```text
-ANTES:  CONNECTION_UPDATE, QRCODE_UPDATED, MESSAGES_UPSERT, MESSAGES_UPDATE, MESSAGES_DELETE, SEND_MESSAGE
-DEPOIS: CONNECTION_UPDATE, QRCODE_UPDATED, MESSAGES_UPSERT, MESSAGES_UPDATE, MESSAGES_DELETE, CONTACTS_UPDATE
+ANTES:
+navigate(`/conversations?phone=${...}&name=${...}`)
+
+DEPOIS:
+navigate(`/conversations?phone=${...}&name=${...}&connectionId=${client.whatsapp_instance_id || client.conversations?.[0]?.whatsapp_instance_id || ''}`)
 ```
 
-### 2. Adicionar acao `reapply_webhook` no `evolution-api/index.ts`
+A logica de fallback segue a mesma prioridade ja usada no sistema:
+1. `client.whatsapp_instance_id` (conexao direta do contato)
+2. `client.conversations[0].whatsapp_instance_id` (conexao da ultima conversa)
+3. Sem connectionId (fallback para comportamento padrao)
 
-Nova acao que permite reaplicar a configuracao de webhook em uma instancia existente via API, sem precisar entrar no painel da Evolution. Util para:
-- Aplicar a config atualizada em instancias antigas
-- Corrigir instancias que tiveram a config sobreescrita
+## Status dos Webhooks
 
-### 3. Adicionar acao `reapply_all_webhooks` (batch)
+Os webhooks estao funcionando corretamente apos a configuracao manual. Nenhum evento desnecessario (presence.update, chats.update, etc.) esta aparecendo nos logs recentes, confirmando que a Evolution API parou de enviar esses eventos.
 
-Busca todas as instancias ativas no banco e reaplica a config em cada uma de uma vez. Assim voce nao precisa entrar instancia por instancia.
+## Detalhes Tecnicos
 
-## Seguranca
-
-- O filtro rapido no `evolution-webhook` (ja implementado) continua ativo como rede de seguranca -- mesmo que a Evolution envie um evento inesperado, ele sera descartado nos primeiros milissegundos
-- Novas instancias ja serao criadas com a lista correta
-- A acao de reapply pode ser executada a qualquer momento sem afetar o funcionamento
-
-## Resumo da acao
-
-| Acao | Quem faz | Quando |
-|------|----------|--------|
-| Desligar SEND_MESSAGE nas instancias atuais | Voce (manual no painel) | Agora |
-| Corrigir buildWebhookConfig | Codigo (automatico) | No deploy |
-| Acao reapply_all_webhooks | Voce via painel admin ou API | Apos deploy, uma vez |
-
-## Arquivo alterado
-
-`supabase/functions/evolution-api/index.ts` -- Corrigir lista de eventos + adicionar acoes reapply_webhook e reapply_all_webhooks
-
+- Alteracao em 1 arquivo: `src/pages/Contacts.tsx` (linha 522)
+- A pagina de Conversas ja possui logica para ler o parametro `connectionId` da URL e selecionar a conexao correta
+- Nenhuma alteracao necessaria no backend ou nos webhooks
