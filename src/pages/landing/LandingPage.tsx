@@ -895,12 +895,12 @@ export function LandingPage() {
                 }`}
               >
               {plan.popular && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center justify-center gap-1">
                     ⭐ Mais Escolhido
                   </div>
                 )}
                 {plan.isBasic && (
-                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
+                  <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap px-3 py-0.5 bg-red-600 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center justify-center gap-1">
                     🚀 Comece aqui
                   </div>
                 )}
@@ -914,10 +914,15 @@ export function LandingPage() {
                   {plan.startingFrom && (
                     <span className="text-white/40 text-xs">A partir de </span>
                   )}
-                  {plan.originalPrice && (
+                  {plan.isBasic && plan.originalPrice && (
+                    <div className="text-white/40 text-xs mb-1">
+                      De <span className="line-through">R$ {plan.originalPrice}</span> por
+                    </div>
+                  )}
+                  {!plan.isBasic && plan.originalPrice && (
                     <span className="text-white/40 text-sm line-through mr-1">R$ {plan.originalPrice}</span>
                   )}
-                  <br className={plan.originalPrice ? "" : "hidden"} />
+                  {!plan.isBasic && <br className={plan.originalPrice ? "" : "hidden"} />}
                   <span className="text-white/40 text-xs">R$</span>
                   <span className="text-2xl font-bold">{plan.price}</span>
                   <span className="text-white/40 text-xs"> / mês</span>
