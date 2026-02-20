@@ -60,7 +60,10 @@ import { OrphanLawFirmsTab } from "@/components/global-admin/OrphanLawFirmsTab";
 import { useOrphanLawFirms } from "@/hooks/useOrphanLawFirms";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { generateCompanyReportPDF, exportCompanyReportToExcel, CompanyReportData } from "@/lib/companyReportGenerator";
-import { differenceInDays } from "date-fns";
+import { differenceInDays, formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Separator } from "@/components/ui/separator";
 
 export default function GlobalAdminCompanies() {
   const { companies, pendingApprovalCompanies, isLoading, createCompany, updateCompany, deleteCompany, retryN8nWorkflow, runHealthCheck, retryAllFailedWorkflows, resendInitialAccess, approveCompany, rejectCompany, suspendCompany, unsuspendCompany } = useCompanies();
@@ -85,6 +88,7 @@ export default function GlobalAdminCompanies() {
   const [suspendingCompany, setSuspendingCompany] = useState<typeof companies[0] | null>(null);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [billingDetailCompany, setBillingDetailCompany] = useState<typeof companies[0] | null>(null);
 
   // Effect to detect edit param from URL and open correct tab + dialog
   const editCompanyId = searchParams.get("edit");
@@ -1444,14 +1448,22 @@ export default function GlobalAdminCompanies() {
                               
                               if (!sub || !sub.stripe_subscription_id) {
                                 return (
-                                  <Badge variant="outline" className="text-muted-foreground">
-                                    Sem assinatura
-                                  </Badge>
+                                  <div className="flex flex-col gap-0.5">
+                                    <Badge variant="outline" className="text-muted-foreground w-fit">
+                                      Sem assinatura
+                                    </Badge>
+                                    {company.trial_ends_at && (
+                                      <span className="text-xs text-muted-foreground">
+                                        Trial até {new Date(company.trial_ends_at).toLocaleDateString('pt-BR')}
+                                      </span>
+                                    )}
+                                  </div>
                                 );
                               }
                               
                               const status = sub.status;
                               const periodEnd = sub.current_period_end ? new Date(sub.current_period_end) : null;
+                              const lastPayment = sub.last_payment_at ? new Date(sub.last_payment_at) : null;
                               const now = new Date();
                               const daysUntilDue = periodEnd ? Math.ceil((periodEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
                               
@@ -1461,7 +1473,7 @@ export default function GlobalAdminCompanies() {
                               
                               if (status === 'active') {
                                 badgeClass = "bg-green-50 text-green-700 border-green-300 dark:bg-green-900/20 dark:text-green-400";
-                                label = periodEnd ? `Em dia (${periodEnd.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })})` : "Em dia";
+                                label = "Em dia";
                                 icon = <CheckCircle2 className="h-3 w-3" />;
                               } else if (status === 'trialing') {
                                 badgeClass = "bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-900/20 dark:text-blue-400";
@@ -1489,10 +1501,22 @@ export default function GlobalAdminCompanies() {
                                 <TooltipProvider>
                                   <Tooltip>
                                     <TooltipTrigger asChild>
-                                      <Badge variant="outline" className={`text-xs gap-1 cursor-pointer ${badgeClass}`}>
-                                        {icon}
-                                        {label}
-                                      </Badge>
+                                      <div className="flex flex-col gap-0.5 cursor-pointer group">
+                                        <Badge variant="outline" className={`text-xs gap-1 w-fit ${badgeClass}`}>
+                                          {icon}
+                                          {label}
+                                        </Badge>
+                                        {lastPayment && (
+                                          <span className="text-xs text-muted-foreground">
+                                            Pgto: {lastPayment.toLocaleDateString('pt-BR')}
+                                          </span>
+                                        )}
+                                        {periodEnd && (
+                                          <span className={`text-xs font-medium ${daysUntilDue !== null && daysUntilDue <= 5 && daysUntilDue >= 0 ? 'text-orange-600 dark:text-orange-400' : 'text-muted-foreground'}`}>
+                                            Venc: {periodEnd.toLocaleDateString('pt-BR')}
+                                          </span>
+                                        )}
+                                      </div>
                                     </TooltipTrigger>
                                     <TooltipContent side="right" className="w-56 p-0">
                                       <div className="p-3 space-y-2">
@@ -1502,16 +1526,22 @@ export default function GlobalAdminCompanies() {
                                             <span className="text-muted-foreground">Status:</span>
                                             <span className="font-medium capitalize">{status}</span>
                                           </div>
-                                          {sub.last_payment_at && (
+                                          {lastPayment && (
                                             <div className="flex justify-between">
                                               <span className="text-muted-foreground">Último pgto:</span>
-                                              <span>{new Date(sub.last_payment_at).toLocaleDateString('pt-BR')}</span>
+                                              <span>{lastPayment.toLocaleDateString('pt-BR')}</span>
                                             </div>
                                           )}
                                           {periodEnd && (
                                             <div className="flex justify-between">
                                               <span className="text-muted-foreground">Próx. venc:</span>
-                                              <span>{periodEnd.toLocaleDateString('pt-BR')}</span>
+                                              <span className={daysUntilDue !== null && daysUntilDue <= 5 && daysUntilDue >= 0 ? 'text-orange-600 font-medium' : ''}>{periodEnd.toLocaleDateString('pt-BR')}</span>
+                                            </div>
+                                          )}
+                                          {daysUntilDue !== null && daysUntilDue >= 0 && (
+                                            <div className="flex justify-between">
+                                              <span className="text-muted-foreground">Faltam:</span>
+                                              <span>{daysUntilDue} dias</span>
                                             </div>
                                           )}
                                           {company.plan && (
@@ -1697,7 +1727,12 @@ export default function GlobalAdminCompanies() {
                           <TableCell>{company.max_users}</TableCell>
                           <TableCell>{company.max_instances}</TableCell>
                           <TableCell>
-                            {new Date(company.created_at).toLocaleDateString("pt-BR")}
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-sm">{new Date(company.created_at).toLocaleDateString("pt-BR")}</span>
+                              <span className="text-xs text-muted-foreground">
+                                {formatDistanceToNow(new Date(company.created_at), { locale: ptBR, addSuffix: true })}
+                              </span>
+                            </div>
                           </TableCell>
                           <TableCell>
                             <DropdownMenu>
@@ -1730,18 +1765,22 @@ export default function GlobalAdminCompanies() {
                                   <KeyRound className="mr-2 h-4 w-4" />
                                   {resettingPassword === company.id ? "Resetando..." : "Resetar Senha Admin"}
                                 </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setBillingCompany(company);
-                                    setBillingType("monthly");
-                                  }}
-                                  disabled={!company.plan_id}
-                                  className="text-green-600 focus:text-green-600"
-                                >
-                                  <CreditCard className="mr-2 h-4 w-4" />
-                                  Gerar Cobrança Stripe
-                                </DropdownMenuItem>
+                                 <DropdownMenuSeparator />
+                                 <DropdownMenuItem onClick={() => setBillingDetailCompany(company)}>
+                                   <FileText className="mr-2 h-4 w-4" />
+                                   Ver Detalhe Financeiro
+                                 </DropdownMenuItem>
+                                 <DropdownMenuItem
+                                   onClick={() => {
+                                     setBillingCompany(company);
+                                     setBillingType("monthly");
+                                   }}
+                                   disabled={!company.plan_id}
+                                   className="text-green-600 focus:text-green-600"
+                                 >
+                                   <CreditCard className="mr-2 h-4 w-4" />
+                                   Gerar Cobrança Stripe
+                                 </DropdownMenuItem>
                                 {company.status !== 'suspended' ? (
                                   <DropdownMenuItem
                                     onClick={() => setSuspendingCompany(company)}
@@ -2167,6 +2206,174 @@ export default function GlobalAdminCompanies() {
         }}
         isLoading={suspendCompany.isPending}
       />
+
+      {/* Billing Detail Sheet */}
+      <Sheet open={!!billingDetailCompany} onOpenChange={(open) => !open && setBillingDetailCompany(null)}>
+        <SheetContent className="w-[420px] sm:max-w-[420px] overflow-y-auto">
+          {billingDetailCompany && (() => {
+            const sub = Array.isArray(billingDetailCompany.subscription) ? billingDetailCompany.subscription[0] : billingDetailCompany.subscription;
+            const createdAt = new Date(billingDetailCompany.created_at);
+            const lifeTime = formatDistanceToNow(createdAt, { locale: ptBR, addSuffix: false });
+            const periodEnd = sub?.current_period_end ? new Date(sub.current_period_end) : null;
+            const lastPayment = sub?.last_payment_at ? new Date(sub.last_payment_at) : null;
+            const trialStart = billingDetailCompany.trial_started_at ? new Date(billingDetailCompany.trial_started_at) : null;
+            const trialEnd = billingDetailCompany.trial_ends_at ? new Date(billingDetailCompany.trial_ends_at) : null;
+            const daysUntilDue = periodEnd ? Math.ceil((periodEnd.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+
+            const statusLabelsMap: Record<string, string> = {
+              active: 'Em dia',
+              trialing: 'Trial',
+              past_due: 'Vencido',
+              canceled: 'Cancelada',
+              unpaid: 'Inadimplente',
+            };
+
+            return (
+              <>
+                <SheetHeader className="pb-4">
+                  <SheetTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Detalhe Financeiro
+                  </SheetTitle>
+                  <SheetDescription>
+                    {billingDetailCompany.name}
+                  </SheetDescription>
+                </SheetHeader>
+
+                {/* Empresa */}
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Empresa</p>
+                    <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Criada em:</span>
+                        <span className="font-medium">{createdAt.toLocaleDateString('pt-BR')}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Tempo como cliente:</span>
+                        <span className="font-medium">{lifeTime}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Plano:</span>
+                        <span className="font-medium">{billingDetailCompany.plan?.name || '-'}</span>
+                      </div>
+                      {billingDetailCompany.plan?.price && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Valor/mês:</span>
+                          <span className="font-medium text-green-600">
+                            R$ {billingDetailCompany.plan.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {/* Assinatura */}
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Assinatura Stripe</p>
+                    {sub?.stripe_subscription_id ? (
+                      <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm">
+                        <div className="flex justify-between items-center">
+                          <span className="text-muted-foreground">Status:</span>
+                          <Badge variant="outline" className={`text-xs ${
+                            sub.status === 'active' ? 'bg-green-50 text-green-700 border-green-300 dark:bg-green-900/20 dark:text-green-400' :
+                            sub.status === 'past_due' || sub.status === 'unpaid' ? 'bg-red-50 text-red-700 border-red-300 dark:bg-red-900/20 dark:text-red-400' :
+                            sub.status === 'canceled' ? 'bg-gray-50 text-gray-600 border-gray-300' :
+                            'bg-blue-50 text-blue-700 border-blue-300 dark:bg-blue-900/20 dark:text-blue-400'
+                          }`}>
+                            {statusLabelsMap[sub.status] || sub.status}
+                          </Badge>
+                        </div>
+                        {lastPayment && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Último pagamento:</span>
+                            <span className="font-medium">{lastPayment.toLocaleDateString('pt-BR')}</span>
+                          </div>
+                        )}
+                        {periodEnd && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Próximo vencimento:</span>
+                            <span className={`font-medium ${daysUntilDue !== null && daysUntilDue <= 5 && daysUntilDue >= 0 ? 'text-orange-600' : ''}`}>
+                              {periodEnd.toLocaleDateString('pt-BR')}
+                              {daysUntilDue !== null && daysUntilDue >= 0 && (
+                                <span className="ml-1 text-muted-foreground font-normal">({daysUntilDue}d)</span>
+                              )}
+                            </span>
+                          </div>
+                        )}
+                        {sub.stripe_subscription_id && (
+                          <div className="flex justify-between items-center pt-1 border-t">
+                            <span className="text-muted-foreground text-xs">ID Stripe:</span>
+                            <code className="text-xs bg-muted px-1 rounded">{sub.stripe_subscription_id}</code>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                        Nenhuma assinatura ativa no Stripe.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Trial */}
+                  {billingDetailCompany.trial_type && billingDetailCompany.trial_type !== 'none' && (
+                    <>
+                      <Separator />
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Histórico de Trial</p>
+                        <div className="rounded-lg border bg-muted/30 p-3 space-y-2 text-sm">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Tipo:</span>
+                            <span className="font-medium capitalize">
+                              {billingDetailCompany.trial_type === 'manual' ? 'Manual' : 'Automático'}
+                            </span>
+                          </div>
+                          {trialStart && (
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Início:</span>
+                              <span className="font-medium">{trialStart.toLocaleDateString('pt-BR')}</span>
+                            </div>
+                          )}
+                          {trialEnd && (
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Término:</span>
+                              <span className={`font-medium ${trialEnd < new Date() ? 'text-red-600' : 'text-blue-600'}`}>
+                                {trialEnd.toLocaleDateString('pt-BR')}
+                                {trialEnd < new Date() ? ' (expirado)' : ''}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <Separator />
+
+                  {/* Ações */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Ações</p>
+                    <Button
+                      className="w-full bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => {
+                        setBillingDetailCompany(null);
+                        setBillingCompany(billingDetailCompany);
+                        setBillingType("monthly");
+                      }}
+                      disabled={!billingDetailCompany.plan_id}
+                    >
+                      <CreditCard className="mr-2 h-4 w-4" />
+                      Gerar Cobrança Stripe
+                    </Button>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
