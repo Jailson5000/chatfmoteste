@@ -104,7 +104,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         convQuery = convQuery.in("whatsapp_instance_id", filters.connectionIds);
       }
 
-      const { data: lawFirmConvs } = await convQuery;
+      const { data: lawFirmConvs } = await convQuery.limit(10000);
       const convIds = lawFirmConvs?.map(c => c.id) || [];
       
       // If no conversations for this law_firm, return zeros
@@ -125,23 +125,41 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         };
       }
 
-      // Build message query - ONLY for conversations belonging to this law_firm
+      // Use count queries to bypass 1000-row default limit
+      const [receivedResult, sentResult] = await Promise.all([
+        supabase
+          .from("messages")
+          .select("*", { count: "exact", head: true })
+          .in("conversation_id", convIds)
+          .eq("is_from_me", false)
+          .gte("created_at", startDate.toISOString())
+          .lte("created_at", endDate.toISOString()),
+        supabase
+          .from("messages")
+          .select("*", { count: "exact", head: true })
+          .in("conversation_id", convIds)
+          .eq("is_from_me", true)
+          .gte("created_at", startDate.toISOString())
+          .lte("created_at", endDate.toISOString()),
+      ]);
+
+      const received = receivedResult.count || 0;
+      const sent = sentResult.count || 0;
+
+      // Fetch messages for avg response time calculation (with explicit limit)
       const { data: messages, error } = await supabase
         .from("messages")
         .select("is_from_me, created_at, conversation_id")
         .in("conversation_id", convIds)
         .gte("created_at", startDate.toISOString())
         .lte("created_at", endDate.toISOString())
-        .order("created_at", { ascending: true });
+        .order("created_at", { ascending: true })
+        .limit(5000);
       
       if (error) {
         console.error("[useDashboardMetrics] Error fetching messages:", error);
         return { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, avgResponseTime: 0 };
       }
-
-      // is_from_me: true = sent, false = received
-      const received = messages?.filter(m => m.is_from_me === false).length || 0;
-      const sent = messages?.filter(m => m.is_from_me === true).length || 0;
 
       // Count total conversations with activity in the period directly from conversations table
       let totalConvQuery = supabase
@@ -276,7 +294,8 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         .select("conversation_id, is_from_me")
         .in("conversation_id", lawFirmConvIds)
         .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString());
+        .lte("created_at", endDate.toISOString())
+        .limit(5000);
 
       // Build attendant metrics
       const metricsMap = new Map<string, AttendantMetrics>();
@@ -345,7 +364,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         convQuery = convQuery.in("whatsapp_instance_id", filters.connectionIds);
       }
 
-      const { data: lawFirmConvs } = await convQuery;
+      const { data: lawFirmConvs } = await convQuery.limit(10000);
       const convIds = lawFirmConvs?.map(c => c.id) || [];
       
       // If no conversations, return empty buckets
@@ -365,7 +384,8 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         .select("is_from_me, created_at, conversation_id")
         .in("conversation_id", convIds)
         .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString());
+        .lte("created_at", endDate.toISOString())
+        .limit(5000);
 
       // Aggregate by bucket
       return buckets.map(bucket => {
