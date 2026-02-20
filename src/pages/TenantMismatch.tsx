@@ -1,8 +1,5 @@
 import { AlertTriangle, LogOut, ExternalLink } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { useNavigate } from "react-router-dom";
 
 interface TenantMismatchProps {
   expectedSubdomain: string;
@@ -14,15 +11,17 @@ interface TenantMismatchProps {
  * 
  * CRITICAL SECURITY: Each client can only access their own subdomain.
  * Attempts to access other subdomains are blocked and this page is displayed.
+ * 
+ * NOTE: This page uses plain HTML elements instead of Radix-based components
+ * to avoid the React 19 + @radix-ui/react-compose-refs infinite ref loop bug
+ * (GitHub: radix-ui/primitives#3799)
  */
 export default function TenantMismatch({ expectedSubdomain, currentSubdomain }: TenantMismatchProps) {
-  const navigate = useNavigate();
-  
   const correctUrl = `https://${expectedSubdomain}.miauchat.com.br`;
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    navigate('/auth');
+    window.location.href = '/auth';
   };
 
   const handleGoToCorrectSubdomain = () => {
@@ -31,17 +30,17 @@ export default function TenantMismatch({ expectedSubdomain, currentSubdomain }: 
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="max-w-md w-full">
-        <CardHeader className="text-center">
+      <div className="max-w-md w-full rounded-lg border bg-card text-card-foreground shadow-sm">
+        <div className="flex flex-col space-y-1.5 p-6 text-center">
           <div className="mx-auto w-16 h-16 bg-destructive/10 rounded-full flex items-center justify-center mb-4">
             <AlertTriangle className="w-8 h-8 text-destructive" />
           </div>
-          <CardTitle className="text-xl">Acesso não permitido</CardTitle>
-          <CardDescription>
+          <h3 className="text-xl font-semibold leading-none tracking-tight">Acesso não permitido</h3>
+          <p className="text-sm text-muted-foreground">
             Você está tentando acessar uma plataforma que não corresponde à sua empresa.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
+          </p>
+        </div>
+        <div className="p-6 pt-0 space-y-6">
           <div className="bg-muted/50 rounded-lg p-4 space-y-3">
             <div>
               <p className="text-sm text-muted-foreground">Subdomínio atual:</p>
@@ -64,14 +63,20 @@ export default function TenantMismatch({ expectedSubdomain, currentSubdomain }: 
           </div>
 
           <div className="flex flex-col gap-3">
-            <Button onClick={handleGoToCorrectSubdomain} className="w-full">
-              <ExternalLink className="w-4 h-4 mr-2" />
+            <button
+              onClick={handleGoToCorrectSubdomain}
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium h-10 px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors w-full"
+            >
+              <ExternalLink className="w-4 h-4" />
               Ir para minha plataforma
-            </Button>
-            <Button variant="outline" onClick={handleLogout} className="w-full">
-              <LogOut className="w-4 h-4 mr-2" />
+            </button>
+            <button
+              onClick={handleLogout}
+              className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium h-10 px-4 py-2 border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors w-full"
+            >
+              <LogOut className="w-4 h-4" />
               Sair
-            </Button>
+            </button>
           </div>
 
           <p className="text-center text-xs text-muted-foreground">
@@ -80,8 +85,8 @@ export default function TenantMismatch({ expectedSubdomain, currentSubdomain }: 
               suporte@miauchat.com.br
             </a>
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
