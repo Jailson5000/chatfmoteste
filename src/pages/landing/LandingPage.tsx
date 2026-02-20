@@ -448,7 +448,7 @@ export function LandingPage() {
           <div className="relative rounded-2xl overflow-hidden border border-white/[0.06] bg-black/50">
             <div className="aspect-video">
               <iframe
-                src="https://www.youtube.com/embed/q9VESHWqHBQ"
+                src="https://www.youtube.com/embed/Phh-e9ijZ7o"
                 title="Como criar conta no MiauChat"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
