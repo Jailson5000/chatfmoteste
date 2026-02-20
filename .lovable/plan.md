@@ -1,47 +1,63 @@
 
 
-## Corrigir erro "Maximum update depth exceeded" (React 19 + Radix UI)
+## Corrigir definitivamente o erro de tela branca (React 19 + Radix UI)
 
-### O que e esse erro
+### Problema
 
-E um bug **conhecido** entre o React 19 e a biblioteca `@radix-ui/react-compose-refs` (versao 1.1.2). Quando o React 19 chama callbacks de ref, a funcao `setRef` dentro do compose-refs entra em loop infinito, causando tela branca.
+As correcoes anteriores adicionaram `@radix-ui/react-compose-refs: "^1.1.1"` como dependencia direta, porem:
 
-Esse erro pode acontecer em **qualquer pagina** que use componentes Radix (Button, Dialog, DropdownMenu, Select, etc.) - nao so no Global Admin. A correcao anterior no TenantMismatch foi um paliativo local; precisamos de uma correcao global.
-
-### Causa raiz
-
-O React 19 mudou o comportamento de ref callbacks (agora podem retornar funcoes de cleanup). O `compose-refs@1.1.2` usa `setState` dentro de refs, o que no React 19 causa re-renders infinitos.
+1. O caret (`^`) permite resolucao para 1.1.2
+2. O bloco `overrides` **nunca foi efetivamente adicionado** ao package.json — ele nao existe no arquivo atual
+3. Sem o `overrides`, cada pacote Radix (Dialog, Select, Tooltip, Progress, Avatar, etc.) traz sua propria copia do compose-refs 1.1.2 como dependencia transitiva
+4. Resultado: tela branca em qualquer pagina que renderize componentes Radix (Dashboard, Global Admin, etc.)
 
 ### Solucao
 
-Adicionar um **override** no `package.json` para forcar a resolucao do `@radix-ui/react-compose-refs` para a versao `1.1.1`, que nao tem esse bug com React 19. Isso corrige o problema em **todas as paginas** de uma vez, sem precisar trocar componentes Radix por HTML puro.
+Duas alteracoes no `package.json`:
+
+1. **Fixar a versao direta sem caret** — trocar `"^1.1.1"` por `"1.1.1"` na linha 24
+2. **Adicionar bloco `overrides`** ao final do package.json — isso forca TODAS as dependencias transitivas dos ~25 pacotes Radix a usar compose-refs 1.1.1
 
 ### Detalhes Tecnicos
 
 **Arquivo: `package.json`**
 
-Adicionar a secao `overrides` para fixar a versao do compose-refs:
-
+Linha 24 — trocar:
 ```json
-{
-  "overrides": {
-    "@radix-ui/react-compose-refs": "1.1.1"
-  }
+"@radix-ui/react-compose-refs": "^1.1.1",
+```
+por:
+```json
+"@radix-ui/react-compose-refs": "1.1.1",
+```
+
+Adicionar antes do ultimo `}` do arquivo:
+```json
+"overrides": {
+  "@radix-ui/react-compose-refs": "1.1.1"
 }
 ```
 
-Isso forca **todos** os pacotes Radix que dependem de `compose-refs` a usar a versao 1.1.1, que e compativel com React 19.
+O bloco `overrides` e um recurso nativo do npm que forca a resolucao de dependencias transitivas. Quando o pacote `@radix-ui/react-dialog` pede `compose-refs@^1.1.0`, o npm normalmente resolve para 1.1.2 (a mais recente). Com o override, ele e forcado a usar 1.1.1 em **todos** os casos.
 
-**Arquivo: `src/pages/TenantMismatch.tsx`** (opcional)
+### Por que as correcoes anteriores nao funcionaram
 
-Reverter a pagina TenantMismatch para usar os componentes Radix normais (Button, Card) novamente, ja que o override global resolve o problema. Isso mantem consistencia no projeto.
+| Tentativa | O que foi feito | Por que nao resolveu |
+|-----------|----------------|---------------------|
+| 1a - TenantMismatch | Trocou componentes Radix por HTML puro | Corrigiu so 1 pagina, nao o problema raiz |
+| 2a - compose-refs ^1.1.1 | Adicionou dependencia direta com caret | O caret permite 1.1.2; e o bloco overrides nao foi adicionado ao arquivo |
+
+### Impacto
+
+- Corrige tela branca em **todas** as paginas (Dashboard, Global Admin, Conversations, etc.)
+- Nao altera nenhum componente, hook, edge function ou logica de negocio
+- Correcao imediata para os clientes afetados
+- Nenhuma alteracao em banco de dados ou RLS
 
 ### Risco
 
-| Alteracao | Risco | Justificativa |
-|-----------|-------|---------------|
-| Override do compose-refs para 1.1.1 | **Baixo** | Versao 1.1.1 e estavel e usada amplamente. A unica diferenca e que nao tem o bug de React 19 |
-| Reverter TenantMismatch (opcional) | **Muito Baixo** | Volta a usar os mesmos componentes do resto do app |
-
-Nenhuma alteracao em banco de dados, edge functions ou logica de negocio.
+| Alteracao | Risco |
+|-----------|-------|
+| Pin compose-refs 1.1.1 sem caret | **Muito Baixo** — versao estavel e amplamente usada |
+| Bloco overrides | **Muito Baixo** — mecanismo padrao do npm |
 
