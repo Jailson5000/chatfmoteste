@@ -1,63 +1,44 @@
 
+## Corrigir erro "Produto inativo" ao gerar cobrança ENTERPRISE
 
-## Corrigir definitivamente o erro de tela branca (React 19 + Radix UI)
+### Causa raiz identificada
 
-### Problema
+Ao clicar em "Gerar Link de Pagamento" no Global Admin, a função `admin-create-stripe-subscription` é chamada. Essa função tem um mapeamento de price IDs diferente do `generate-payment-link`, usando um price ID antigo e inativo para o plano ENTERPRISE:
 
-As correcoes anteriores adicionaram `@radix-ui/react-compose-refs: "^1.1.1"` como dependencia direta, porem:
+| Função | ENTERPRISE monthly | ENTERPRISE yearly |
+|---|---|---|
+| `admin-create-stripe-subscription` | `price_1SwAzXPssGNUXxgnfHklx8Qx` ❌ **INATIVO** | `price_1SwAzuPssGNUXxgn3SbEka4n` ❌ provavelmente inativo |
+| `generate-payment-link` | `price_1SxTGxPssGNUXxgnSxQdCPRA` ✅ | `price_1SxTHhPssGNUXxgnYdCD8656` ✅ |
 
-1. O caret (`^`) permite resolucao para 1.1.2
-2. O bloco `overrides` **nunca foi efetivamente adicionado** ao package.json — ele nao existe no arquivo atual
-3. Sem o `overrides`, cada pacote Radix (Dialog, Select, Tooltip, Progress, Avatar, etc.) traz sua propria copia do compose-refs 1.1.2 como dependencia transitiva
-4. Resultado: tela branca em qualquer pagina que renderize componentes Radix (Dashboard, Global Admin, etc.)
+O Stripe retornou explicitamente: *"The product prod_TtyxisfziVJVcJ is marked as inactive, and thus no new subscriptions can be created"*.
 
-### Solucao
+### Solução
 
-Duas alteracoes no `package.json`:
+Atualizar os price IDs na função `admin-create-stripe-subscription` para usar os mesmos IDs ativos que já estão em `generate-payment-link`.
 
-1. **Fixar a versao direta sem caret** — trocar `"^1.1.1"` por `"1.1.1"` na linha 24
-2. **Adicionar bloco `overrides`** ao final do package.json — isso forca TODAS as dependencias transitivas dos ~25 pacotes Radix a usar compose-refs 1.1.1
+Os price IDs corretos (ativos no Stripe) são:
 
-### Detalhes Tecnicos
-
-**Arquivo: `package.json`**
-
-Linha 24 — trocar:
-```json
-"@radix-ui/react-compose-refs": "^1.1.1",
 ```
-por:
-```json
-"@radix-ui/react-compose-refs": "1.1.1",
-```
-
-Adicionar antes do ultimo `}` do arquivo:
-```json
-"overrides": {
-  "@radix-ui/react-compose-refs": "1.1.1"
-}
+PRIME:        monthly: price_1SxTPmPssGNUXxgnznft9KJf
+              yearly:  price_1SxTGcPssGNUXxgnpCeUC2OV
+BASIC:        monthly: price_1SwDgnPssGNUXxgnH6kyepNO
+              yearly:  price_1SwAujPssGNUXxgnEFJL0T6l
+STARTER:      monthly: price_1SwAvUPssGNUXxgnT3lrWG6S
+              yearly:  price_1SwAwNPssGNUXxgnnMMSemHz
+PROFESSIONAL: monthly: price_1SwAyyPssGNUXxgn8mzTO9gC
+              yearly:  price_1SwAyyPssGNUXxgnNEbvcWuw
+ENTERPRISE:   monthly: price_1SxTGxPssGNUXxgnSxQdCPRA  ← corrigido
+              yearly:  price_1SxTHhPssGNUXxgnYdCD8656   ← corrigido
 ```
 
-O bloco `overrides` e um recurso nativo do npm que forca a resolucao de dependencias transitivas. Quando o pacote `@radix-ui/react-dialog` pede `compose-refs@^1.1.0`, o npm normalmente resolve para 1.1.2 (a mais recente). Com o override, ele e forcado a usar 1.1.1 em **todos** os casos.
+### Detalhe técnico
 
-### Por que as correcoes anteriores nao funcionaram
+**Arquivo: `supabase/functions/admin-create-stripe-subscription/index.ts`**
 
-| Tentativa | O que foi feito | Por que nao resolveu |
-|-----------|----------------|---------------------|
-| 1a - TenantMismatch | Trocou componentes Radix por HTML puro | Corrigiu so 1 pagina, nao o problema raiz |
-| 2a - compose-refs ^1.1.1 | Adicionou dependencia direta com caret | O caret permite 1.1.2; e o bloco overrides nao foi adicionado ao arquivo |
+Substituir o bloco `PLAN_PRICES` (linhas 18-35) com os price IDs corretos, unificados com os que já funcionam no `generate-payment-link`. Também adicionar o plano PRIME que estava faltando.
 
 ### Impacto
 
-- Corrige tela branca em **todas** as paginas (Dashboard, Global Admin, Conversations, etc.)
-- Nao altera nenhum componente, hook, edge function ou logica de negocio
-- Correcao imediata para os clientes afetados
-- Nenhuma alteracao em banco de dados ou RLS
-
-### Risco
-
-| Alteracao | Risco |
-|-----------|-------|
-| Pin compose-refs 1.1.1 sem caret | **Muito Baixo** — versao estavel e amplamente usada |
-| Bloco overrides | **Muito Baixo** — mecanismo padrao do npm |
-
+- Corrige imediatamente o erro "Produto inativo" ao gerar cobrança para ENTERPRISE
+- Garante consistência entre as duas funções que geram cobranças
+- Sem alteração em banco de dados, RLS ou qualquer outra lógica
