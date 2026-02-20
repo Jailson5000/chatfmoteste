@@ -89,6 +89,7 @@ export default function GlobalAdminCompanies() {
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [billingDetailCompany, setBillingDetailCompany] = useState<typeof companies[0] | null>(null);
+  const [isSyncingStripe, setIsSyncingStripe] = useState(false);
 
   // Effect to detect edit param from URL and open correct tab + dialog
   const editCompanyId = searchParams.get("edit");
@@ -231,6 +232,24 @@ export default function GlobalAdminCompanies() {
       toast.error(`Erro ao gerar cobrança: ${error.message}`);
     } finally {
       setIsGeneratingBilling(false);
+    }
+  };
+
+  const handleSyncStripe = async () => {
+    setIsSyncingStripe(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("sync-stripe-subscriptions");
+      if (error) throw error;
+      toast.success(
+        `Stripe sincronizado! ${data.synced} assinatura(s) atualizadas${data.failed > 0 ? `, ${data.failed} falharam` : ""}.`,
+        { duration: 7000 }
+      );
+      // Refresh companies data
+      window.location.reload();
+    } catch (err: any) {
+      toast.error(`Erro ao sincronizar Stripe: ${err.message}`);
+    } finally {
+      setIsSyncingStripe(false);
     }
   };
   
@@ -780,6 +799,23 @@ export default function GlobalAdminCompanies() {
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Verificar saúde de todos os tenants</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          {/* Sync Stripe Button */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  onClick={handleSyncStripe}
+                  disabled={isSyncingStripe}
+                >
+                  <RefreshCw className={`mr-2 h-4 w-4 ${isSyncingStripe ? 'animate-spin' : ''}`} />
+                  {isSyncingStripe ? 'Sincronizando...' : 'Sincronizar Stripe'}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Atualizar datas de vencimento das assinaturas via Stripe API</TooltipContent>
             </Tooltip>
           </TooltipProvider>
 

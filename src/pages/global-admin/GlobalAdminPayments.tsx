@@ -5,6 +5,9 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { 
   CreditCard, 
   DollarSign, 
@@ -15,10 +18,12 @@ import {
   XCircle,
   Clock,
   AlertCircle,
-  Calendar
+  Calendar,
+  Search,
+  ArrowUpDown
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import { BillingSummaryCards } from "@/components/global-admin/BillingSummaryCards";
@@ -78,6 +83,9 @@ interface PaymentRecord {
 }
 
 export default function GlobalAdminPayments() {
+  const [subscriptionSearch, setSubscriptionSearch] = useState("");
+  const [subscriptionStatusFilter, setSubscriptionStatusFilter] = useState("all");
+
   const { data: metrics, isLoading: metricsLoading, refetch: refetchMetrics, isFetching: metricsFetching } = useQuery({
     queryKey: ["payment-metrics"],
     queryFn: async () => {
@@ -98,12 +106,71 @@ export default function GlobalAdminPayments() {
     refetchInterval: 60000,
   });
 
+  // Query subscriptions from DB directly (company_subscriptions + companies + plans)
+  const { data: subscriptions, isLoading: subscriptionsLoading, refetch: refetchSubscriptions } = useQuery({
+    queryKey: ["admin-subscriptions-list"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("company_subscriptions")
+        .select(`
+          id,
+          status,
+          stripe_subscription_id,
+          stripe_customer_id,
+          current_period_start,
+          current_period_end,
+          next_payment_at,
+          last_payment_at,
+          created_at,
+          companies (
+            id,
+            name,
+            email,
+            subdomain
+          ),
+          plans (
+            id,
+            name,
+            price
+          )
+        `)
+        .order("current_period_end", { ascending: true, nullsFirst: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+    refetchInterval: 120000,
+  });
+
   const isLoading = metricsLoading || billingLoading;
   const isFetching = metricsFetching || billingFetching;
 
   const handleRefresh = () => {
     refetchMetrics();
     refetchBilling();
+    refetchSubscriptions();
+  };
+
+  // Filter subscriptions
+  const filteredSubscriptions = (subscriptions ?? []).filter((sub) => {
+    const company = sub.companies as any;
+    const plan = sub.plans as any;
+    const nameMatch = !subscriptionSearch ||
+      company?.name?.toLowerCase().includes(subscriptionSearch.toLowerCase()) ||
+      company?.email?.toLowerCase().includes(subscriptionSearch.toLowerCase());
+    const statusMatch = subscriptionStatusFilter === "all" || sub.status === subscriptionStatusFilter;
+    return nameMatch && statusMatch;
+  });
+
+  const getSubStatusBadge = (status: string) => {
+    const map: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+      active: { label: "Ativo", variant: "default" },
+      trial: { label: "Trial", variant: "secondary" },
+      past_due: { label: "Vencido", variant: "destructive" },
+      canceled: { label: "Cancelado", variant: "outline" },
+      incomplete: { label: "Incompleto", variant: "outline" },
+    };
+    const cfg = map[status] ?? { label: status, variant: "outline" as const };
+    return <Badge variant={cfg.variant}>{cfg.label}</Badge>;
   };
 
   const formatCurrency = (value: number, currency = "BRL") => {
@@ -355,10 +422,19 @@ export default function GlobalAdminPayments() {
 
       {/* Main Tabs */}
       <Tabs defaultValue="overview" className="space-y-6">
-        <TabsList className="grid w-full max-w-lg grid-cols-3">
+        <TabsList className="grid w-full max-w-2xl grid-cols-4">
           <TabsTrigger value="overview" className="flex items-center gap-2">
             <TrendingUp className="h-4 w-4" />
             Visão Geral
+          </TabsTrigger>
+          <TabsTrigger value="subscriptions" className="flex items-center gap-2">
+            <CreditCard className="h-4 w-4" />
+            Assinaturas
+            {subscriptions && (
+              <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-xs">
+                {subscriptions.length}
+              </Badge>
+            )}
           </TabsTrigger>
           <TabsTrigger value="delinquency" className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4" />
@@ -394,6 +470,140 @@ export default function GlobalAdminPayments() {
           )}
         </TabsContent>
 
+        {/* Subscriptions Tab */}
+        <TabsContent value="subscriptions" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Todas as Assinaturas</CardTitle>
+              <CardDescription>
+                Lista consolidada de assinaturas ordenada por próximo vencimento
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Filters */}
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Buscar empresa ou email..."
+                    value={subscriptionSearch}
+                    onChange={(e) => setSubscriptionSearch(e.target.value)}
+                  />
+                </div>
+                <Select value={subscriptionStatusFilter} onValueChange={setSubscriptionStatusFilter}>
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os status</SelectItem>
+                    <SelectItem value="active">Ativo</SelectItem>
+                    <SelectItem value="trial">Trial</SelectItem>
+                    <SelectItem value="past_due">Vencido</SelectItem>
+                    <SelectItem value="canceled">Cancelado</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  {filteredSubscriptions.length} resultado(s)
+                </span>
+              </div>
+
+              {/* Table */}
+              {subscriptionsLoading ? (
+                <div className="flex items-center justify-center py-10">
+                  <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : filteredSubscriptions.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center">
+                  <CreditCard className="h-10 w-10 text-muted-foreground mb-3" />
+                  <p className="text-muted-foreground">Nenhuma assinatura encontrada</p>
+                </div>
+              ) : (
+                <div className="rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Empresa</TableHead>
+                        <TableHead>Plano</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>
+                          <div className="flex items-center gap-1">
+                            <ArrowUpDown className="h-3 w-3" />
+                            Último Pgto
+                          </div>
+                        </TableHead>
+                        <TableHead>
+                          <div className="flex items-center gap-1">
+                            <ArrowUpDown className="h-3 w-3" />
+                            Próx. Vencimento
+                          </div>
+                        </TableHead>
+                        <TableHead>Stripe ID</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredSubscriptions.map((sub) => {
+                        const company = sub.companies as any;
+                        const plan = sub.plans as any;
+                        const nextDue = sub.current_period_end ? new Date(sub.current_period_end) : null;
+                        const isOverdue = nextDue && nextDue < new Date();
+                        const isDueSoon = nextDue && !isOverdue && (nextDue.getTime() - Date.now()) < 7 * 24 * 60 * 60 * 1000;
+                        return (
+                          <TableRow key={sub.id}>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium">{company?.name ?? "—"}</p>
+                                <p className="text-xs text-muted-foreground">{company?.email ?? ""}</p>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <div>
+                                <p className="font-medium">{plan?.name ?? "—"}</p>
+                                {plan?.price && (
+                                  <p className="text-xs text-muted-foreground">
+                                    {formatCurrency(plan.price)}/mês
+                                  </p>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>{getSubStatusBadge(sub.status)}</TableCell>
+                            <TableCell className="text-sm">
+                              {sub.last_payment_at
+                                ? format(new Date(sub.last_payment_at), "dd/MM/yyyy", { locale: ptBR })
+                                : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell>
+                              {nextDue ? (
+                                <div>
+                                  <p className={`text-sm font-medium ${isOverdue ? "text-destructive" : isDueSoon ? "text-orange-500" : ""}`}>
+                                    {format(nextDue, "dd/MM/yyyy", { locale: ptBR })}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {formatDistanceToNow(nextDue, { locale: ptBR, addSuffix: true })}
+                                  </p>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-sm">Não sincronizado</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-xs text-muted-foreground font-mono">
+                                {sub.stripe_subscription_id
+                                  ? sub.stripe_subscription_id.slice(0, 20) + "…"
+                                  : "—"}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Delinquency Tab */}
         <TabsContent value="delinquency" className="space-y-6">
           {billingStatus && (
@@ -423,3 +633,4 @@ export default function GlobalAdminPayments() {
     </div>
   );
 }
+
