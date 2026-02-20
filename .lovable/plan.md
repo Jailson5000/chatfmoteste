@@ -1,108 +1,99 @@
 
-## Melhorias na Tela de Empresas (Global Admin)
+## Melhorias: Próxima Fatura em Empresas + Aba Pagamentos
 
-### O que existe hoje
+### Diagnóstico dos Dois Problemas
 
-A tabela "Aprovadas" em `/global-admin/companies` já mostra:
-- Nome/email da empresa
-- Subdomínio com link
-- Plano + valor/mês
-- Status (Ativo, Trial, Suspensa…)
-- Faturamento: badge do Stripe (Em dia, Vencido, Trial, Cancelada) com tooltip mostrando último pagamento e próximo vencimento
-- Provisionamento, Email de Acesso, Usuários/Conexões, Data de criação
-- Ações no menu dropdown (Editar, Cobrança, Suspender…)
+---
 
-### O que falta ou está difícil de ver
+### Problema 1 — "Próxima fatura" nula na tela de Empresas
 
-| Informação | Situação atual |
+**Causa raiz confirmada pelo banco de dados:**
+`current_period_end` está `NULL` em 100% das assinaturas existentes. O webhook do Stripe (`invoice.paid`) já tem o código correto para preencher esse campo, mas:
+- Assinaturas antigas foram criadas antes dessa lógica existir
+- A função `admin-create-stripe-subscription` (usada para gerar links) não salva `current_period_end` após criar a assinatura
+
+**Solução:** Criar uma nova edge function `sync-stripe-subscriptions` que busca cada assinatura ativa do Stripe pela API e atualiza `current_period_end` no banco. Adicionar um botão "Sincronizar Stripe" na tela de Empresas para disparar isso manualmente.
+
+---
+
+### Problema 2 — Aba Pagamentos incompleta
+
+O que falta comparado ao que seria útil:
+
+| O que falta | Causa |
 |---|---|
-| Data de criação da empresa | Só aparece como coluna de texto `dd/mm/aaaa`, sem destaque |
-| Histórico de trial (início + fim + tipo) | Só aparece no tooltip do badge de status se tiver trial ativo |
-| Data da última fatura paga | Só no tooltip do badge de Faturamento (escondido) |
-| Próxima fatura | Só no tooltip do badge de Faturamento (escondido) |
-| Status da assinatura de forma clara | Badge pequeno com nome abreviado, difícil de escanear |
-| Histórico de faturas | Não existe na UI |
-| Tempo de vida do cliente | Não existe (quantos meses/dias desde criação) |
+| Lista de todas assinaturas ativas com próximo vencimento | Não existe essa aba/view |
+| Agrupamento por plano incorreto (mostra "Outro" para todos) | Lógica usa substring no `productId` que não funciona com IDs reais do Stripe (`prod_xxx`) |
+| Valor do MRR não bate com realidade | `subscriptionsByPlan` está tudo como "Outro" |
+| Não tem aba "Todas as Assinaturas" para visão consolidada | Não implementado |
 
-### Solução proposta
+**Solução:** 
+1. Corrigir o `get-payment-metrics` para buscar o nome do produto diretamente da API do Stripe (em vez de tentar inferir pelo ID)
+2. Adicionar uma nova aba "Assinaturas" em `GlobalAdminPayments.tsx` que mostra uma tabela com todas as assinaturas ativas, usando os dados já disponíveis na tabela `company_subscriptions` do banco (sem nova edge function)
 
-Sem criar novas telas ou edge functions, reorganizar e enriquecer as informações visíveis diretamente na tabela e no tooltip expandido da coluna "Faturamento".
+---
 
-#### 1. Coluna "Faturamento" — Reescrita completa
+### Implementação Detalhada
 
-Transformar o badge simples em um bloco informativo compacto com 3 linhas visíveis:
-```
-[badge: Em dia / Vencido / Sem assinatura]
-Último pgto: 15/01/2026
-Próx. venc:  15/02/2026
-```
-O tooltip vai continuar existindo com informações adicionais do Stripe (valor, ID).
+#### 1. Nova Edge Function: `sync-stripe-subscriptions`
 
-#### 2. Coluna "Criada em" — Adicionar tempo de vida
+Cria `supabase/functions/sync-stripe-subscriptions/index.ts`:
+- Requer autenticação de admin global
+- Itera por todas as assinaturas em `company_subscriptions` que têm `stripe_subscription_id`
+- Para cada uma, chama `stripe.subscriptions.retrieve(id)` no Stripe
+- Atualiza `current_period_end`, `current_period_start`, `next_payment_at` e `status` no banco
+- Retorna resumo: quantas foram sincronizadas, quantas falharam
 
-Mostrar:
-```
-15/01/2025
-há 13 meses
-```
-Usando `formatDistanceToNow` do `date-fns`, já instalado no projeto.
+#### 2. Botão "Sincronizar" na tela de Empresas
 
-#### 3. Coluna "Status" — Mostrar trial com datas completas no tooltip
+Em `GlobalAdminCompanies.tsx`:
+- Adicionar botão "Sincronizar Stripe" no cabeçalho da aba "Aprovadas" (ao lado dos botões de exportar)
+- Chama a nova edge function e invalida o cache `["companies"]`
+- Mostra toast com resultado da sincronização
 
-O trial badge já existe, mas o tooltip mostra as datas somente em hover. Adicionar na própria célula, quando em trial, o texto com data de fim:
-```
-[Ativa]
-[Trial até 20/02/2026]
-```
+#### 3. Corrigir agrupamento por plano no `get-payment-metrics`
 
-#### 4. Nova seção "Faturamento Detalhado" no dropdown de ações
+Em `supabase/functions/get-payment-metrics/index.ts`:
+- Substituir a lógica de substring `productId.includes("starter")` pela busca real do nome do produto via `stripe.products.retrieve(productId)` (ou buscar em batch)
+- Mapear pelo nome do produto do Stripe em vez de tentar inferir pelo ID
 
-No menu de ações (⋯) de cada empresa, adicionar item "Ver Faturas" que abre um `Sheet` lateral com:
-- Resumo da assinatura (status, valor, ciclo)
-- Data de criação da empresa + tempo como cliente
-- Histórico de trial (início, fim, tipo)
-- Botão "Gerar Cobrança Stripe" (já existe como DropdownMenuItem)
-- Botão "Abrir Portal Stripe" (link externo para o painel)
+#### 4. Nova aba "Assinaturas" em Pagamentos
 
-O Sheet vai buscar os dados já presentes em `company.subscription` — sem nova chamada de API.
+Em `GlobalAdminPayments.tsx`:
+- Adicionar 4ª aba "Assinaturas" no `TabsList`
+- Fazer query direta ao banco (`company_subscriptions` + `companies` + `plans`) — sem nova edge function
+- Mostrar tabela com colunas: Empresa, Plano, Status, Último Pagamento, Próximo Vencimento, Ação (Ver Detalhe)
+- Filtros por status (Ativo, Vencido, Trial, Cancelado)
+- Ordenar por próximo vencimento (mais próximo primeiro)
 
-### Detalhes Técnicos
+---
 
-**Arquivo modificado:** `src/pages/global-admin/GlobalAdminCompanies.tsx`
+### Arquivos Modificados
 
-- **Coluna "Faturamento"** (linhas ~1440–1531): substituir o `{(() => {...})()}` por um componente inline `BillingCell` que mostra badge + 2 linhas de data visíveis.
+| Arquivo | Alteração |
+|---|---|
+| `supabase/functions/sync-stripe-subscriptions/index.ts` | NOVO — sincroniza dados do Stripe para o banco |
+| `supabase/functions/get-payment-metrics/index.ts` | Corrigir agrupamento de planos |
+| `src/pages/global-admin/GlobalAdminCompanies.tsx` | Adicionar botão "Sincronizar Stripe" |
+| `src/pages/global-admin/GlobalAdminPayments.tsx` | Adicionar aba "Assinaturas" |
 
-- **Coluna "Criada em"** (linha ~1700): adicionar `formatDistanceToNow(new Date(company.created_at), { locale: ptBR, addSuffix: true })` abaixo da data.
+---
 
-- **Coluna "Status"** (linhas ~1390–1438): manter como está, o badge de trial já funciona bem.
+### Fluxo da Sincronização
 
-- **Sheet lateral "Detalhe de Faturamento"**: novo estado `billingDetailCompany`, renderizado como `<Sheet>` no final do componente, usando dados já disponíveis em `company.subscription` e `company.trial_*`.
+Tela Empresas → Botão "Sincronizar Stripe" → edge function → Stripe API (busca cada sub) → Atualiza banco → Tela exibe "Venc: 20/03/2026"
 
-- **Menu de ações** (linhas ~1702–1760): adicionar item "Ver Detalhe Financeiro" que seta `billingDetailCompany`.
+Após a sincronização, os webhooks futuros do Stripe continuam mantendo os dados atualizados automaticamente via `invoice.paid`.
 
-### Importações necessárias
-
-```typescript
-import { formatDistanceToNow } from "date-fns";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-```
-
-Ambas já disponíveis no projeto (`date-fns` instalado, `Sheet` em `@/components/ui/sheet`).
+---
 
 ### Risco e Impacto
 
 | Item | Risco |
 |---|---|
-| Reescrever coluna Faturamento | Baixo — só muda apresentação visual, dados são os mesmos |
-| Adicionar distância temporal | Muito baixo — `formatDistanceToNow` é função pura |
-| Sheet de detalhe | Baixo — usa dados já carregados, sem nova query |
+| Nova edge function de sincronização | Baixo — só leitura do Stripe + update no banco |
+| Botão de sincronização | Muito baixo — ação manual sob demanda |
+| Corrigir agrupamento de planos | Baixo — adiciona chamadas de API mas melhora precisão |
+| Nova aba "Assinaturas" | Baixo — query ao banco, dados já existem |
 
-Nenhuma alteração em banco de dados, edge functions ou lógica de negócio.
-
-### Resultado esperado
-
-Ao abrir a aba "Aprovadas", você verá de relance, por empresa, sem precisar fazer hover:
-- **Quando foi criada** e há quanto tempo é cliente
-- **Status da assinatura** com data do próximo vencimento visível
-- **Data do último pagamento** confirmado
-- No menu de ações → "Ver Detalhe Financeiro" → Sheet com histórico completo de trial e assinatura
+Nenhuma alteração em tabelas ou RLS. A coluna `current_period_end` já existe no banco (confirmado), só precisa ser preenchida.
