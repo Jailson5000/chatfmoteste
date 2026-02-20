@@ -1,33 +1,42 @@
 
-## Corrigir textos de WhatsApp nos planos BASIC e STARTER
+## Corrigir suporte a `pre_message` na edge function `agenda-pro-notification`
 
 ### Problema
-O banco de dados ja tem `max_instances` correto (BASIC=2, STARTER=3), mas o campo `features` (array de textos exibido na Landing Page) ainda mostra os valores antigos:
-- **BASIC**: "1 WhatsApp conectado" (deveria ser "2 WhatsApps conectados")
-- **STARTER**: "2 WhatsApps conectados" (deveria ser "3 WhatsApps conectados")
+A funcao `process-scheduled-messages` envia notificacoes com `type: "pre_message"`, mas a funcao `agenda-pro-notification` so aceita: `created`, `reminder`, `cancelled`, `updated`, `no_show`. Resultado: pre-messages falham com erro 400 e sao marcadas como `failed` apos 3 tentativas.
 
-Alem disso, o formulario de criacao de plano no Global Admin tem valor padrao hardcoded de `max_instances: 1`.
+### Correcao
+Adicionar um bloco `else if (type === "pre_message")` na funcao `agenda-pro-notification/index.ts` (antes do `else` da linha 314) com:
 
-### Alteracoes necessarias
+- **Mensagem WhatsApp**: Texto amigavel de preparacao para o atendimento (ex: "Seu atendimento esta chegando! Aqui estao os detalhes...")
+- **Assunto de e-mail**: "Preparacao para seu atendimento"
+- **HTML do e-mail**: Template visual consistente com os demais tipos
 
-**1. Atualizar textos no banco de dados (SQL)**
+### Detalhes tecnicos
 
-Substituir as strings no array `features` da tabela `plans`:
+**Arquivo**: `supabase/functions/agenda-pro-notification/index.ts`
 
-```text
-BASIC:   "1 WhatsApp conectado"    ->  "2 WhatsApps conectados"
-STARTER: "2 WhatsApps conectados"  ->  "3 WhatsApps conectados"
+Inserir entre a linha 313 (fim do bloco `no_show`) e a linha 314 (inicio do `else`):
+
+```typescript
+} else if (type === "pre_message") {
+  whatsappMessage = `Ola ${clientName}! \n\n` +
+    `Seu atendimento esta chegando! Confira os detalhes:\n\n` +
+    `Data: ${dateStr}\n` +
+    `Horario: ${timeRangeStr}\n` +
+    `Servico: ${serviceName}\n` +
+    (professionalName ? `Profissional: ${professionalName}\n` : "") +
+    `Local: ${companyName}\n\n` +
+    `Confirme sua presenca:\n${confirmationLink}\n\n` +
+    `Nos vemos em breve!\n${companyName}`;
+
+  emailSubject = `Preparacao para seu atendimento - ${companyName}`;
+  emailHtml = `...`; // Template visual similar aos demais
 ```
 
-**2. Atualizar defaults no GlobalAdminPlans.tsx**
+Tambem atualizar a mensagem de erro do `else` para incluir `pre_message` na lista de tipos validos.
 
-Arquivo: `src/pages/global-admin/GlobalAdminPlans.tsx`
-- Linha 32: `max_instances: 1` -> `max_instances: 2`
-- Linha 84: `max_instances: 1` -> `max_instances: 2`
+### Risco
+**Zero**. E uma adicao pura a um bloco `if/else`. Nenhuma logica existente e alterada. Os tipos `created`, `reminder`, `cancelled`, `updated` e `no_show` continuam identicos.
 
-Isso garante que ao criar um novo plano pelo painel, o valor padrao de conexoes WhatsApp ja venha como 2 (compativel com o BASIC atualizado).
-
-### Resultado esperado
-- Landing Page exibira "2 WhatsApps conectados" no BASIC e "3 WhatsApps conectados" no STARTER
-- Global Admin refletira os valores corretos em todos os locais (ja dinamico via banco)
-- Nenhuma outra alteracao de codigo necessaria, pois a LP e o admin ja renderizam features e max_instances direto do banco
+### Resultado
+Pre-messages agendadas serao processadas com sucesso, enviando WhatsApp e/ou e-mail ao cliente antes do atendimento.
