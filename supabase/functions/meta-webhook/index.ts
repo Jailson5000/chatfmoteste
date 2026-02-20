@@ -401,7 +401,7 @@ async function processMessagingEntry(
 
     const { data: existingClient } = await supabase
       .from("clients")
-      .select("id, name")
+      .select("id, name, avatar_url")
       .eq("law_firm_id", lawFirmId)
       .eq("phone", remoteJid)
       .maybeSingle();
@@ -410,7 +410,7 @@ async function processMessagingEntry(
       clientId = existingClient.id;
       // Check if name is still generic (e.g. "INSTAGRAM 5644", "FACEBOOK 2589")
       const genericPattern = /^(INSTAGRAM|FACEBOOK|WHATSAPP_CLOUD)\s+\w{2,6}$/i;
-      if (genericPattern.test(existingClient.name?.trim() || "")) {
+      if (genericPattern.test(existingClient.name?.trim() || "") || !existingClient.avatar_url) {
         clientNeedsNameUpdate = true;
       }
     } else {
@@ -527,10 +527,16 @@ async function processMessagingEntry(
 
           if (resolvedName || avatarUrl) {
             const updateData: Record<string, any> = {};
-            if (resolvedName) updateData.name = resolvedName;
+            const nameGenericPattern = /^(INSTAGRAM|FACEBOOK|WHATSAPP_CLOUD)\s+\w{2,6}$/i;
+            // Only update name if it's generic/empty — preserve manually corrected names
+            if (resolvedName && (!existingClient?.name || nameGenericPattern.test(existingClient.name.trim()))) {
+              updateData.name = resolvedName;
+            }
             if (avatarUrl) updateData.avatar_url = avatarUrl;
-            await supabase.from("clients").update(updateData).eq("id", clientId);
-            console.log("[meta-webhook] Profile resolved:", { name: resolvedName, hasAvatar: !!avatarUrl });
+            if (Object.keys(updateData).length > 0) {
+              await supabase.from("clients").update(updateData).eq("id", clientId);
+              console.log("[meta-webhook] Profile updated:", { name: updateData.name || "(preserved)", hasAvatar: !!avatarUrl });
+            }
           }
         }
       } catch (profileErr) {
