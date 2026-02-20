@@ -7,7 +7,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from "recharts";
 import { TrendingUp } from "lucide-react";
 import { TimeSeriesData } from "@/hooks/useDashboardMetrics";
@@ -16,6 +15,12 @@ interface MessageVolumeChartProps {
   data: TimeSeriesData[];
   isLoading?: boolean;
 }
+
+const TOOLTIP_LABELS: Record<string, string> = {
+  received: "Recebidas",
+  sent: "Enviadas",
+  conversations: "Conversas",
+};
 
 export function MessageVolumeChart({ data, isLoading }: MessageVolumeChartProps) {
   if (isLoading) {
@@ -75,6 +80,10 @@ export function MessageVolumeChart({ data, isLoading }: MessageVolumeChartProps)
                   <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
                   <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
                 </linearGradient>
+                <linearGradient id="colorConversations" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.05} />
+                </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/50" />
               <XAxis
@@ -99,15 +108,7 @@ export function MessageVolumeChart({ data, isLoading }: MessageVolumeChartProps)
                   boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
                 }}
                 labelStyle={{ color: "hsl(var(--foreground))" }}
-              />
-              <Legend 
-                verticalAlign="top" 
-                height={36}
-                formatter={(value) => (
-                  <span className="text-xs text-muted-foreground">
-                    {value === "received" ? "Recebidas" : "Enviadas"}
-                  </span>
-                )}
+                formatter={(value: number, name: string) => [value, TOOLTIP_LABELS[name] || name]}
               />
               <Area
                 type="monotone"
@@ -127,6 +128,15 @@ export function MessageVolumeChart({ data, isLoading }: MessageVolumeChartProps)
                 dot={false}
                 name="sent"
               />
+              <Area
+                type="monotone"
+                dataKey="conversations"
+                stroke="#8b5cf6"
+                fill="url(#colorConversations)"
+                strokeWidth={2}
+                dot={false}
+                name="conversations"
+              />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -138,6 +148,10 @@ export function MessageVolumeChart({ data, isLoading }: MessageVolumeChartProps)
           <div className="flex items-center gap-2 text-xs">
             <div className="w-3 h-3 rounded-full bg-green-500" />
             <span className="text-muted-foreground">Enviadas</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <div className="w-3 h-3 rounded-full bg-purple-500" />
+            <span className="text-muted-foreground">Conversas</span>
           </div>
         </div>
       </CardContent>

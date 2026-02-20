@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import {
   MessageSquare,
   Users,
@@ -30,6 +30,7 @@ import { useDepartments } from "@/hooks/useDepartments";
 import { useClients } from "@/hooks/useClients";
 import { useTeamMembers } from "@/hooks/useTeamMembers";
 import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
+import { useTags } from "@/hooks/useTags";
 import { useDashboardMetrics, type DateFilter, type DashboardFilters } from "@/hooks/useDashboardMetrics";
 import {
   AreaChart,
@@ -58,6 +59,7 @@ import { OnboardingProgressCard } from "@/components/onboarding/OnboardingProgre
 import { useOnboarding } from "@/hooks/useOnboarding";
 import { DateRange } from "react-day-picker";
 import { getStateFromPhone } from "@/lib/dddToState";
+import { supabase } from "@/integrations/supabase/client";
 
 const CHART_COLORS = [
   "#3b82f6", "#f59e0b", "#22c55e", "#ef4444", "#8b5cf6",
@@ -76,6 +78,7 @@ export default function Dashboard() {
   const { clients, isLoading: clientsLoading } = useClients();
   const { members: teamMembers } = useTeamMembers();
   const { instances: connections } = useWhatsAppInstances();
+  const { tags: availableTags } = useTags();
 
   // Build filters object for metrics hook
   const dashboardFilters: DashboardFilters = useMemo(() => ({
@@ -327,6 +330,49 @@ export default function Dashboard() {
 
     return result;
   }, [departments, filteredClients]);
+
+  // Clients by tags - query client_tags table for real tag distribution
+  const [clientTagCounts, setClientTagCounts] = useState<{ name: string; value: number; color: string }[]>([]);
+
+  useEffect(() => {
+    const fetchTagCounts = async () => {
+      if (availableTags.length === 0 || filteredClients.length === 0) {
+        setClientTagCounts([]);
+        return;
+      }
+
+      const clientIds = filteredClients.map(c => c.id);
+      // Fetch client_tags for filtered clients
+      const { data: clientTags } = await supabase
+        .from("client_tags")
+        .select("tag_id")
+        .in("client_id", clientIds);
+
+      if (!clientTags || clientTags.length === 0) {
+        setClientTagCounts([]);
+        return;
+      }
+
+      // Count by tag
+      const tagCountMap: Record<string, number> = {};
+      clientTags.forEach(ct => {
+        tagCountMap[ct.tag_id] = (tagCountMap[ct.tag_id] || 0) + 1;
+      });
+
+      const result = availableTags
+        .map((tag, index) => ({
+          name: tag.name,
+          value: tagCountMap[tag.id] || 0,
+          color: tag.color || CHART_COLORS[index % CHART_COLORS.length],
+        }))
+        .filter(t => t.value > 0)
+        .sort((a, b) => b.value - a.value);
+
+      setClientTagCounts(result);
+    };
+
+    fetchTagCounts();
+  }, [availableTags, filteredClients]);
 
   // Team members activity - Uses real metrics from attendantMetrics
   const TEAM_METRICS_ENABLED = true;
@@ -651,12 +697,12 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {clientsByStatus.length > 0 ? (
+            {clientTagCounts.length > 0 ? (
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={clientsByStatus}
+                      data={clientTagCounts}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
@@ -664,21 +710,28 @@ export default function Dashboard() {
                       paddingAngle={2}
                       dataKey="value"
                     >
-                      {clientsByStatus.map((entry, index) => (
+                      {clientTagCounts.map((entry, index) => (
                         <Cell key={`cell-${index}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'hsl(var(--popover))', 
+                        border: '1px solid hsl(var(--border))',
+                        borderRadius: '8px',
+                      }}
+                      formatter={(value: number, name: string) => [`${value} clientes`, name]}
+                    />
                   </PieChart>
                 </ResponsiveContainer>
               </div>
             ) : (
               <div className="h-64 flex items-center justify-center text-muted-foreground">
-                Nenhum dado disponível
+                Nenhuma etiqueta atribuída
               </div>
             )}
             <div className="flex flex-wrap gap-3 mt-4 justify-center">
-              {clientsByStatus.slice(0, 5).map((item) => (
+              {clientTagCounts.slice(0, 8).map((item) => (
                 <div key={item.name} className="flex items-center gap-1 text-xs">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
                   <span className="text-muted-foreground">{item.name} - {item.value}</span>
