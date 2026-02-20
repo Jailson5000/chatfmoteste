@@ -608,7 +608,7 @@ export function LandingPage() {
               <br />
               <span className="text-red-500">WhatsApp, Instagram, Facebook e Site</span>
             </h2>
-            <p className="mt-5 text-base md:text-lg text-white/50 max-w-2xl mx-auto leading-relaxed">
+            <p className="mt-5 text-sm md:text-base text-white/50 max-w-2xl mx-auto leading-relaxed">
               Unifique todos os seus canais de atendimento em uma única plataforma inteligente.
             </p>
           </div>
@@ -771,7 +771,7 @@ export function LandingPage() {
               {[
                 { icon: CalendarClock, title: "Múltiplas visualizações", desc: "Dia, semana e mês por profissional" },
                 { icon: UserCheck, title: "Gestão de Profissionais", desc: "Horários individuais e especialidades" },
-                { icon: Bell, title: "Lembretes automáticos", desc: "WhatsApp, e-mail e SMS" },
+                { icon: Bell, title: "Lembretes automáticos", desc: "WhatsApp e e-mail" },
                 { icon: Link2, title: "Link público", desc: "Clientes agendam online 24/7" },
                 { icon: Calendar, title: "Google Calendar", desc: "Sincronização automática" },
                 { icon: Palette, title: "Personalizável", desc: "Cores e identidade visual" },
