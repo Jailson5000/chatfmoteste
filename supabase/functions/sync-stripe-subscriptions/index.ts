@@ -88,9 +88,14 @@ serve(async (req) => {
       try {
         const stripeSub = await stripe.subscriptions.retrieve(sub.stripe_subscription_id!);
 
-        console.log(`[SYNC-STRIPE] Raw values: start=${stripeSub.current_period_start} (${typeof stripeSub.current_period_start}), end=${stripeSub.current_period_end} (${typeof stripeSub.current_period_end})`);
-        const currentPeriodStart = toISODate(stripeSub.current_period_start);
-        const currentPeriodEnd = toISODate(stripeSub.current_period_end);
+        const firstItem = stripeSub.items?.data?.[0];
+        if (!firstItem) {
+          throw new Error("Subscription has no items");
+        }
+
+        console.log(`[SYNC-STRIPE] Raw values: start=${firstItem.current_period_start} (${typeof firstItem.current_period_start}), end=${firstItem.current_period_end} (${typeof firstItem.current_period_end})`);
+        const currentPeriodStart = toISODate(firstItem.current_period_start);
+        const currentPeriodEnd = toISODate(firstItem.current_period_end);
 
         const { error: updateError } = await supabase
           .from("company_subscriptions")
