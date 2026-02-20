@@ -1,85 +1,68 @@
 
 
-## Correcao e Melhoria do Dashboard - Analise Completa
+## Melhorar Botao "Reconectar" na Tela de Conversas
 
-### Problemas Identificados
+### Problema Atual
 
-**1. Limite de 1000 linhas nas mensagens (BUG CRITICO)**
-Nas queries do `useDashboardMetrics.tsx`, as mensagens sao buscadas sem `.limit()` explicito, o que aplica o limite padrao de 1000 linhas do banco. Para tenants com mais de 1000 mensagens no periodo, os cards "Mensagens Recebidas" e "Mensagens Enviadas" e o grafico de volume ficam truncados e incorretos.
+Quando uma instancia WhatsApp cai, o banner vermelho na area de chat mostra o botao "Reconectar" que apenas abre `/connections` em uma **nova aba** (`window.open("/connections", "_blank")`). Isso:
 
-Afeta:
-- Linha 129: query de mensagens para `messageMetrics` (cards)
-- Linha 274: query de mensagens para `attendantMetrics`
-- Linha 363: query de mensagens para `timeSeriesData` (grafico)
-- Linha 107: query de conversation IDs (tambem limitada a 1000)
+1. Nao atualiza o status da instancia (nao chama `refreshStatus`)
+2. Abre em nova aba, tirando o usuario do contexto
+3. Na pagina de conexoes, o usuario precisa manualmente clicar em "Atualizar status" - e geralmente isso ja resolve
 
-**2. Grafico de Volume sem linha de Conversas**
-O hook ja calcula `conversations` por dia (linha 382), mas o componente `MessageVolumeChart.tsx` so renderiza "Recebidas" e "Enviadas". A linha de conversas nao aparece no grafico.
+### Solucao
 
-**3. Graficos "Etiquetas" e "Status" sao identicos (linhas 644-735)**
-Os dois graficos de pizza na secao inferior usam exatamente os mesmos dados (`clientsByStatus`) - um se chama "Etiquetas" e o outro "Status", mas mostram a mesma coisa. O grafico de "Etiquetas" deveria usar dados de tags reais dos clientes.
+Alterar o botao "Reconectar" para:
 
-**4. Legenda duplicada no grafico de Volume**
-O `MessageVolumeChart.tsx` tem uma `<Legend>` do Recharts E uma legenda manual em HTML abaixo. Isso gera redundancia visual.
+1. **Chamar `refreshStatus`** na instancia desconectada (forcar verificacao no Evolution API)
+2. **Aguardar o resultado** - se reconectou, mostrar feedback positivo e fechar o banner
+3. **Se nao reconectou**, navegar para `/connections` na mesma aba para o usuario resolver manualmente
 
----
+### Detalhes Tecnicos
 
-### Plano de Correcao
+**Arquivo: `src/pages/Conversations.tsx`**
 
-#### Arquivo 1: `src/hooks/useDashboardMetrics.tsx`
+- O `instanceDisconnectedInfo` ja contem o `instanceId` da instancia desconectada (linha 504)
+- Importar `useWhatsAppInstances` (ja disponivel no contexto do componente, verificar se ja esta importado)
+- Verificar se o hook `useWhatsAppInstances` ja esta sendo usado - caso contrario, usar `supabase.functions.invoke` diretamente para chamar o `refreshStatus` sem importar o hook completo (evitar carregar toda a logica de instancias)
 
-**Correcao do limite de 1000 linhas:**
+**Abordagem escolhida**: Chamar a edge function `evolution-api` diretamente com action `refresh_status`, pois o componente de Conversations ja e muito grande e importar o hook inteiro adicionaria peso desnecessario.
 
-- **Cards de mensagens (messageMetrics)**: Substituir a query que busca todas as mensagens por duas queries de contagem separadas com `count: "exact", head: true`:
-  - Uma para `is_from_me = false` (recebidas)
-  - Uma para `is_from_me = true` (enviadas)
-  - Isso elimina o limite de 1000 pois nao busca linhas, so conta
+**Fluxo do botao:**
 
-- **Query de conversation IDs**: Adicionar `.limit(10000)` para cobrir tenants maiores. Se o tenant tiver mais de 10.000 conversas, usar paginacao.
+```text
+[Clique em "Reconectar"]
+    |
+    v
+[Mostrar loading "Reconectando..."]
+    |
+    v
+[Chamar evolution-api { action: "refresh_status", instanceId }]
+    |
+    +---> Status = connected --> Toast "Reconectado!" + invalidar queries
+    |
+    +---> Status != connected --> navigate("/connections") na mesma aba
+```
 
-- **Time series (grafico)**: Adicionar `.limit(5000)` na query de mensagens para o grafico. Isso cobre a maioria dos cenarios (5000 mensagens em 60 dias).
+**Mudancas no codigo (linha ~4394-4413):**
 
-- **Attendant metrics**: Adicionar `.limit(5000)` na query de mensagens.
+1. Adicionar estado `isReconnecting` local (useState)
+2. Criar funcao `handleReconnect` que:
+   - Seta `isReconnecting = true`
+   - Chama `supabase.functions.invoke("evolution-api", { body: { action: "refresh_status", instanceId } })`
+   - Se sucesso e status voltou para connected: invalidar query `whatsapp-instances`, mostrar toast de sucesso
+   - Se falhou ou nao conectou: navegar para `/connections` com `navigate("/connections")`
+3. Alterar o botao para chamar `handleReconnect` em vez de `window.open`
+4. Mostrar spinner no botao durante o processo
 
-- **Manter calculo de avgResponseTime**: Continuar usando a abordagem atual de buscar mensagens para calcular tempo de resposta, mas apenas na query de time series que ja busca as mensagens.
+**Icone do botao**: Trocar `ExternalLink` por `RefreshCw` (ja importado) para indicar que e uma acao de reconexao, nao um link externo.
 
-#### Arquivo 2: `src/components/dashboard/MessageVolumeChart.tsx`
-
-**Adicionar linha de Conversas no grafico:**
-
-- Adicionar gradiente roxo `colorConversations` (#8b5cf6) nas `<defs>`
-- Adicionar terceiro `<Area>` com `dataKey="conversations"`
-- Remover a `<Legend>` duplicada do Recharts (manter apenas a legenda HTML manual)
-- Adicionar item "Conversas" (roxo) na legenda manual
-- Atualizar o Tooltip para traduzir os nomes das series
-
-#### Arquivo 3: `src/pages/Dashboard.tsx`
-
-**Corrigir grafico "Etiquetas" duplicado:**
-
-- O grafico "Etiquetas" (linhas 644-688) deve mostrar dados reais de tags dos clientes usando o hook `useTags` (ja importado em outros componentes)
-- Criar um `useMemo` que agrupa `filteredClients` por suas tags reais (da tabela `client_tags`)
-- Caso nao haja dados de tags disponiveis no hook `useClients`, buscar diretamente via query
-
----
-
-### Analise de Risco
+### Risco
 
 | Alteracao | Risco | Justificativa |
 |-----------|-------|---------------|
-| Contagem com `count: "exact"` | **Baixo** | Operacao padrao do banco, nao altera dados |
-| Adicionar Area no grafico | **Muito Baixo** | Apenas adiciona elemento visual, dados ja existem |
-| Remover Legend duplicada | **Muito Baixo** | Correcao visual apenas |
-| Corrigir grafico Etiquetas | **Baixo** | Usa dados ja disponiveis no sistema, nao modifica estrutura |
-| Aumentar `.limit()` | **Baixo** | Pode aumentar levemente o tempo de resposta para tenants grandes, mas resolve dados incorretos |
+| Chamar refresh_status | **Baixo** | Ja e uma operacao existente, apenas chamada de outro ponto |
+| Navegar na mesma aba | **Muito Baixo** | Usa react-router navigate, padrao do projeto |
+| Estado local isReconnecting | **Muito Baixo** | Estado isolado, nao afeta outros componentes |
 
-Nenhuma alteracao modifica o banco de dados, tabelas, RLS ou edge functions. Todas as mudancas sao exclusivamente no frontend (hooks e componentes React).
-
-### Resumo das Alteracoes
-
-| Arquivo | O que muda |
-|---------|------------|
-| `src/hooks/useDashboardMetrics.tsx` | Usar `count: "exact"` para totais de mensagens; adicionar `.limit()` explicito nas queries de mensagens |
-| `src/components/dashboard/MessageVolumeChart.tsx` | Adicionar linha roxa de Conversas; remover Legend duplicada; traduzir tooltip |
-| `src/pages/Dashboard.tsx` | Corrigir grafico "Etiquetas" para usar dados reais de tags em vez de duplicar o grafico de Status |
-
+Nenhuma alteracao em banco de dados, edge functions ou RLS. Apenas logica frontend no componente de Conversas.
