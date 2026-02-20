@@ -311,9 +311,49 @@ serve(async (req) => {
         </div>
       `;
 
+    } else if (type === "pre_message") {
+      whatsappMessage = `Olá ${clientName}! 🔔\n\n` +
+        `Seu atendimento está chegando! Confira os detalhes:\n\n` +
+        `📅 *${dateStr}*\n` +
+        `🕐 *${timeRangeStr}*\n` +
+        `📋 *${serviceName}*\n` +
+        (professionalName ? `👤 *${professionalName}*\n` : "") +
+        `📍 *${companyName}*\n\n` +
+        `🔗 *Confirme sua presença:*\n${confirmationLink}\n\n` +
+        `Nos vemos em breve! 😊\n${companyName}`;
+
+      emailSubject = `🔔 Preparação para seu atendimento - ${companyName}`;
+      emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h1 style="color: #8b5cf6;">Seu atendimento está chegando! 🔔</h1>
+          <p>Olá <strong>${clientName}</strong>,</p>
+          <p>Estamos preparando tudo para o seu atendimento!</p>
+          <div style="background-color: #f5f3ff; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 8px 0;"><strong>📅 Data:</strong> ${dateStr}</p>
+            <p style="margin: 8px 0;"><strong>🕐 Horário:</strong> ${timeRangeStr}</p>
+            <p style="margin: 8px 0;"><strong>📋 Serviço:</strong> ${serviceName}</p>
+            ${professionalName ? `<p style="margin: 8px 0;"><strong>👤 Profissional:</strong> ${professionalName}</p>` : ""}
+            <p style="margin: 8px 0;"><strong>📍 Local:</strong> ${companyName}</p>
+          </div>
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="${confirmationLink}" style="background-color: #8b5cf6; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">
+              Confirmar Presença
+            </a>
+          </div>
+          <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+          <p style="color: #6b7280; font-size: 14px;">${companyName}</p>
+        </div>
+      `;
+
+      // Update appointment to mark pre_message as sent
+      await supabase
+        .from("agenda_pro_appointments")
+        .update({ pre_message_sent_at: new Date().toISOString() })
+        .eq("id", appointment_id);
+
     } else {
       return new Response(
-        JSON.stringify({ error: "Invalid notification type. Use: created, reminder, cancelled, updated, no_show" }),
+        JSON.stringify({ error: "Invalid notification type. Use: created, reminder, cancelled, updated, no_show, pre_message" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
