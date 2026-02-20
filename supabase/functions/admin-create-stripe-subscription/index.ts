@@ -14,23 +14,27 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Price IDs from Stripe Dashboard (LIVE MODE) - must match billing-config.ts plans
+// Price IDs from Stripe Dashboard (LIVE MODE) - unified with generate-payment-link
 const PLAN_PRICES: Record<string, { monthly: string; yearly: string }> = {
+  "PRIME": {
+    monthly: "price_1SxTPmPssGNUXxgnznft9KJf",
+    yearly: "price_1SxTGcPssGNUXxgnpCeUC2OV",
+  },
   "BASIC": {
-    monthly: "price_1SwDgnPssGNUXxgnH6kyepNO", // R$ 197 recurring monthly
-    yearly: "price_1SwAujPssGNUXxgnEFJL0T6l",  // R$ 2.167
+    monthly: "price_1SwDgnPssGNUXxgnH6kyepNO",
+    yearly: "price_1SwAujPssGNUXxgnEFJL0T6l",
   },
   "STARTER": {
-    monthly: "price_1SwAvUPssGNUXxgnT3lrWG6S", // R$ 497
-    yearly: "price_1SwAwNPssGNUXxgnnMMSemHz",  // R$ 5.467
+    monthly: "price_1SwAvUPssGNUXxgnT3lrWG6S",
+    yearly: "price_1SwAwNPssGNUXxgnnMMSemHz",
   },
   "PROFESSIONAL": {
-    monthly: "price_1SwAyyPssGNUXxgn8mzTO9gC", // R$ 897
-    yearly: "price_1SwAyyPssGNUXxgnNEbvcWuw",  // R$ 9.867
+    monthly: "price_1SwAyyPssGNUXxgn8mzTO9gC",
+    yearly: "price_1SwAyyPssGNUXxgnNEbvcWuw",
   },
   "ENTERPRISE": {
-    monthly: "price_1SwAzXPssGNUXxgnfHklx8Qx", // R$ 1.697
-    yearly: "price_1SwAzuPssGNUXxgn3SbEka4n",  // R$ 18.667
+    monthly: "price_1SxTGxPssGNUXxgnSxQdCPRA", // ✅ corrigido (era inativo)
+    yearly: "price_1SxTHhPssGNUXxgnYdCD8656",  // ✅ corrigido (era inativo)
   },
 };
 
