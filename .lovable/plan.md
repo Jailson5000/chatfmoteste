@@ -1,68 +1,47 @@
 
 
-## Melhorar Botao "Reconectar" na Tela de Conversas
+## Corrigir erro "Maximum update depth exceeded" (React 19 + Radix UI)
 
-### Problema Atual
+### O que e esse erro
 
-Quando uma instancia WhatsApp cai, o banner vermelho na area de chat mostra o botao "Reconectar" que apenas abre `/connections` em uma **nova aba** (`window.open("/connections", "_blank")`). Isso:
+E um bug **conhecido** entre o React 19 e a biblioteca `@radix-ui/react-compose-refs` (versao 1.1.2). Quando o React 19 chama callbacks de ref, a funcao `setRef` dentro do compose-refs entra em loop infinito, causando tela branca.
 
-1. Nao atualiza o status da instancia (nao chama `refreshStatus`)
-2. Abre em nova aba, tirando o usuario do contexto
-3. Na pagina de conexoes, o usuario precisa manualmente clicar em "Atualizar status" - e geralmente isso ja resolve
+Esse erro pode acontecer em **qualquer pagina** que use componentes Radix (Button, Dialog, DropdownMenu, Select, etc.) - nao so no Global Admin. A correcao anterior no TenantMismatch foi um paliativo local; precisamos de uma correcao global.
+
+### Causa raiz
+
+O React 19 mudou o comportamento de ref callbacks (agora podem retornar funcoes de cleanup). O `compose-refs@1.1.2` usa `setState` dentro de refs, o que no React 19 causa re-renders infinitos.
 
 ### Solucao
 
-Alterar o botao "Reconectar" para:
-
-1. **Chamar `refreshStatus`** na instancia desconectada (forcar verificacao no Evolution API)
-2. **Aguardar o resultado** - se reconectou, mostrar feedback positivo e fechar o banner
-3. **Se nao reconectou**, navegar para `/connections` na mesma aba para o usuario resolver manualmente
+Adicionar um **override** no `package.json` para forcar a resolucao do `@radix-ui/react-compose-refs` para a versao `1.1.1`, que nao tem esse bug com React 19. Isso corrige o problema em **todas as paginas** de uma vez, sem precisar trocar componentes Radix por HTML puro.
 
 ### Detalhes Tecnicos
 
-**Arquivo: `src/pages/Conversations.tsx`**
+**Arquivo: `package.json`**
 
-- O `instanceDisconnectedInfo` ja contem o `instanceId` da instancia desconectada (linha 504)
-- Importar `useWhatsAppInstances` (ja disponivel no contexto do componente, verificar se ja esta importado)
-- Verificar se o hook `useWhatsAppInstances` ja esta sendo usado - caso contrario, usar `supabase.functions.invoke` diretamente para chamar o `refreshStatus` sem importar o hook completo (evitar carregar toda a logica de instancias)
+Adicionar a secao `overrides` para fixar a versao do compose-refs:
 
-**Abordagem escolhida**: Chamar a edge function `evolution-api` diretamente com action `refresh_status`, pois o componente de Conversations ja e muito grande e importar o hook inteiro adicionaria peso desnecessario.
-
-**Fluxo do botao:**
-
-```text
-[Clique em "Reconectar"]
-    |
-    v
-[Mostrar loading "Reconectando..."]
-    |
-    v
-[Chamar evolution-api { action: "refresh_status", instanceId }]
-    |
-    +---> Status = connected --> Toast "Reconectado!" + invalidar queries
-    |
-    +---> Status != connected --> navigate("/connections") na mesma aba
+```json
+{
+  "overrides": {
+    "@radix-ui/react-compose-refs": "1.1.1"
+  }
+}
 ```
 
-**Mudancas no codigo (linha ~4394-4413):**
+Isso forca **todos** os pacotes Radix que dependem de `compose-refs` a usar a versao 1.1.1, que e compativel com React 19.
 
-1. Adicionar estado `isReconnecting` local (useState)
-2. Criar funcao `handleReconnect` que:
-   - Seta `isReconnecting = true`
-   - Chama `supabase.functions.invoke("evolution-api", { body: { action: "refresh_status", instanceId } })`
-   - Se sucesso e status voltou para connected: invalidar query `whatsapp-instances`, mostrar toast de sucesso
-   - Se falhou ou nao conectou: navegar para `/connections` com `navigate("/connections")`
-3. Alterar o botao para chamar `handleReconnect` em vez de `window.open`
-4. Mostrar spinner no botao durante o processo
+**Arquivo: `src/pages/TenantMismatch.tsx`** (opcional)
 
-**Icone do botao**: Trocar `ExternalLink` por `RefreshCw` (ja importado) para indicar que e uma acao de reconexao, nao um link externo.
+Reverter a pagina TenantMismatch para usar os componentes Radix normais (Button, Card) novamente, ja que o override global resolve o problema. Isso mantem consistencia no projeto.
 
 ### Risco
 
 | Alteracao | Risco | Justificativa |
 |-----------|-------|---------------|
-| Chamar refresh_status | **Baixo** | Ja e uma operacao existente, apenas chamada de outro ponto |
-| Navegar na mesma aba | **Muito Baixo** | Usa react-router navigate, padrao do projeto |
-| Estado local isReconnecting | **Muito Baixo** | Estado isolado, nao afeta outros componentes |
+| Override do compose-refs para 1.1.1 | **Baixo** | Versao 1.1.1 e estavel e usada amplamente. A unica diferenca e que nao tem o bug de React 19 |
+| Reverter TenantMismatch (opcional) | **Muito Baixo** | Volta a usar os mesmos componentes do resto do app |
 
-Nenhuma alteracao em banco de dados, edge functions ou RLS. Apenas logica frontend no componente de Conversas.
+Nenhuma alteracao em banco de dados, edge functions ou logica de negocio.
+
