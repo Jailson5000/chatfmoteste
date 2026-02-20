@@ -240,10 +240,17 @@ export default function GlobalAdminCompanies() {
     try {
       const { data, error } = await supabase.functions.invoke("sync-stripe-subscriptions");
       if (error) throw error;
-      toast.success(
-        `Stripe sincronizado! ${data.synced} assinatura(s) atualizadas${data.failed > 0 ? `, ${data.failed} falharam` : ""}.`,
-        { duration: 7000 }
-      );
+      if (data.synced === 0 && data.failed > 0) {
+        toast.error(
+          `Sincronização falhou para todas as ${data.failed} assinatura(s). Erro: ${data.errors?.[0] || "desconhecido"}`,
+          { duration: 10000 }
+        );
+      } else {
+        toast.success(
+          `Stripe sincronizado! ${data.synced} assinatura(s) atualizadas${data.failed > 0 ? `, ${data.failed} falharam` : ""}.`,
+          { duration: 7000 }
+        );
+      }
       // Refresh companies data
       window.location.reload();
     } catch (err: any) {

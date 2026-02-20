@@ -2,6 +2,18 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import Stripe from "https://esm.sh/stripe@18.5.0";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
+function toISODate(value: any): string {
+  if (typeof value === "number") {
+    return new Date(value * 1000).toISOString();
+  }
+  if (typeof value === "string") {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) throw new Error(`Invalid date string: ${value}`);
+    return d.toISOString();
+  }
+  throw new Error(`Unexpected date format: ${typeof value} = ${value}`);
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -76,8 +88,9 @@ serve(async (req) => {
       try {
         const stripeSub = await stripe.subscriptions.retrieve(sub.stripe_subscription_id!);
 
-        const currentPeriodStart = new Date(stripeSub.current_period_start * 1000).toISOString();
-        const currentPeriodEnd = new Date(stripeSub.current_period_end * 1000).toISOString();
+        console.log(`[SYNC-STRIPE] Raw values: start=${stripeSub.current_period_start} (${typeof stripeSub.current_period_start}), end=${stripeSub.current_period_end} (${typeof stripeSub.current_period_end})`);
+        const currentPeriodStart = toISODate(stripeSub.current_period_start);
+        const currentPeriodEnd = toISODate(stripeSub.current_period_end);
 
         const { error: updateError } = await supabase
           .from("company_subscriptions")
