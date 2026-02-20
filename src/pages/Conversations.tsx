@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useMessagesWithPagination, PaginatedMessage } from "@/hooks/useMessagesWithPagination";
 import { useMessageQueue } from "@/hooks/useMessageQueue";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 import { useAuth } from "@/hooks/useAuth";
 import {
@@ -38,7 +38,8 @@ import {
   Sparkles,
   Filter,
   WifiOff,
-  ExternalLink,
+  RefreshCw,
+  Loader2,
   Check,
   X,
 } from "lucide-react";
@@ -211,6 +212,7 @@ export default function Conversations() {
   const { toast } = useToast();
   
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { lawFirm } = useLawFirm();
   const { followUpsByConversation } = useScheduledFollowUps();
@@ -344,6 +346,7 @@ export default function Conversations() {
   
   // Pontual intervention mode (send message without changing handler)
   const [isPontualMode, setIsPontualMode] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   
   // Internal chat mode (messages only visible to team, not sent to WhatsApp)
   const [isInternalMode, setIsInternalMode] = useState(false);
@@ -4405,10 +4408,32 @@ export default function Conversations() {
                       variant="default"
                       size="sm" 
                       className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white"
-                      onClick={() => window.open("/connections", "_blank")}
+                      disabled={isReconnecting}
+                      onClick={async () => {
+                        setIsReconnecting(true);
+                        try {
+                          const { data, error } = await supabase.functions.invoke("evolution-api", {
+                            body: { action: "refresh_status", instanceId: instanceDisconnectedInfo.instanceId }
+                          });
+                          if (!error && data?.status === "connected") {
+                            await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+                            toast({ title: "WhatsApp reconectado com sucesso!" });
+                          } else {
+                            navigate("/connections");
+                          }
+                        } catch {
+                          navigate("/connections");
+                        } finally {
+                          setIsReconnecting(false);
+                        }
+                      }}
                     >
-                      <ExternalLink className="h-3 w-3 mr-1" />
-                      Reconectar
+                      {isReconnecting ? (
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3 w-3 mr-1" />
+                      )}
+                      {isReconnecting ? "Reconectando..." : "Reconectar"}
                     </Button>
                   )}
                 </div>
