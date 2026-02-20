@@ -49,7 +49,26 @@ serve(async (req) => {
 
         metrics.stripe.activeSubscriptions = subscriptions.data.length;
 
-        // Calculate MRR
+        // Calculate MRR — fetch product names in batch to avoid N+1
+        const productIds = new Set<string>();
+        for (const sub of subscriptions.data) {
+          for (const item of sub.items.data) {
+            const pid = typeof item.price.product === "string" ? item.price.product : item.price.product?.id;
+            if (pid) productIds.add(pid);
+          }
+        }
+
+        // Fetch all product names at once
+        const productNameMap: Record<string, string> = {};
+        for (const pid of productIds) {
+          try {
+            const product = await stripe.products.retrieve(pid);
+            productNameMap[pid] = product.name || "Outro";
+          } catch {
+            productNameMap[pid] = "Outro";
+          }
+        }
+
         let monthlyRevenue = 0;
         for (const sub of subscriptions.data) {
           for (const item of sub.items.data) {
@@ -66,13 +85,10 @@ serve(async (req) => {
             
             monthlyRevenue += amount;
 
-            // Count by plan
+            // Count by real product name from Stripe
             const productId = typeof price.product === "string" ? price.product : price.product?.id;
             if (productId) {
-              const planName = productId.includes("starter") ? "Starter" :
-                             productId.includes("professional") ? "Professional" :
-                             productId.includes("enterprise") ? "Enterprise" : 
-                             productId.includes("basic") ? "Basic" : "Outro";
+              const planName = productNameMap[productId] || "Outro";
               metrics.stripe.subscriptionsByPlan[planName] = (metrics.stripe.subscriptionsByPlan[planName] || 0) + 1;
             }
           }
