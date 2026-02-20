@@ -29,7 +29,7 @@ export default function GlobalAdminPlans() {
     price: 0,
     billing_period: "monthly",
     max_users: 3, // Default: Basic plan (2026)
-    max_instances: 1,
+    max_instances: 2,
     max_messages: 0,
     max_ai_conversations: 200,
     max_tts_minutes: 10,
@@ -81,7 +81,7 @@ export default function GlobalAdminPlans() {
       price: 0,
       billing_period: "monthly",
       max_users: 3, // Default: Basic plan (2026)
-      max_instances: 1,
+      max_instances: 2,
       max_messages: 0,
       max_ai_conversations: 200,
       max_tts_minutes: 10,
