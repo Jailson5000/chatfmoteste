@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Volume2, VolumeX } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
@@ -18,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { getVoiceName } from "@/lib/voiceConfig";
 
 interface AudioModeIndicatorProps {
   isAudioEnabled: boolean;
@@ -25,15 +25,6 @@ interface AudioModeIndicatorProps {
   onDisable?: () => void;
   className?: string;
 }
-
-const VOICE_NAMES: Record<string, string> = {
-  shimmer: "Shimmer",
-  onyx: "Onyx",
-  echo: "Echo",
-  alloy: "Alloy",
-  fable: "Fable",
-  nova: "Nova",
-};
 
 export function AudioModeIndicator({
   isAudioEnabled,
@@ -45,7 +36,7 @@ export function AudioModeIndicator({
 
   if (!isAudioEnabled) return null;
 
-  const voiceName = voiceId ? VOICE_NAMES[voiceId] || voiceId : "Padrão";
+  const voiceName = voiceId ? getVoiceName(voiceId) : null;
 
   const handleDisableClick = () => {
     setShowConfirmDialog(true);
@@ -71,10 +62,9 @@ export function AudioModeIndicator({
             onClick={handleDisableClick}
           >
             <Volume2 className="h-3 w-3 animate-pulse flex-shrink-0" />
-            <span className="min-w-0 truncate text-xs">Áudio ativo</span>
-            {voiceId && (
-              <span className="min-w-0 truncate text-xs opacity-70 hidden lg:inline">• {voiceName}</span>
-            )}
+            <span className="min-w-0 truncate text-xs">
+              Áudio ativo{voiceName ? ` • ${voiceName}` : ""}
+            </span>
           </Badge>
         </TooltipTrigger>
         <TooltipContent side="bottom">
