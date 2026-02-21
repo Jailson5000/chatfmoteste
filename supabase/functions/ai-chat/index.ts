@@ -3833,6 +3833,18 @@ INSTRUÇÃO CRÍTICA: Use esses service_ids DIRETAMENTE ao chamar book_appointme
           { type: "text", text: wrapUserInput(imgMsg) },
         ] as any,
       });
+    } else if (context?.messageType === 'image' && !context?.documentBase64) {
+      // Image was sent but base64 download failed - inform AI to ask for resend
+      console.log(`[AI Chat] ⚠️ Image message detected but no base64 available - asking AI to request resend`);
+      messages.push({
+        role: "user",
+        content: wrapUserInput(
+          (message ? message + '\n\n' : '') +
+          '[NOTA DO SISTEMA: O cliente enviou uma imagem, mas ocorreu um erro técnico e não foi possível processar o conteúdo visual. ' +
+          'Informe educadamente ao cliente que não foi possível visualizar a imagem enviada e peça para que ele reenvie a imagem. ' +
+          'NÃO diga que você não consegue ver imagens - você consegue, mas houve uma falha temporária.]'
+        ),
+      });
     } else {
       messages.push({ role: "user", content: wrapUserInput(message) });
     }

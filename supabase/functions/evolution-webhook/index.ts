@@ -1478,8 +1478,14 @@ async function processQueuedMessages(
       ? messages.map((m, i) => m.content).join('\n\n')
       : messages[0]?.content || '';
     
-    // Get the primary message type (prioritize text if any text exists)
-    const primaryType = messages.some(m => m.type === 'text') ? 'text' : messages[0]?.type || 'text';
+    // Get the primary message type (prioritize media over text so image download happens)
+    const mediaTypes = ['image', 'video', 'audio', 'document', 'sticker'];
+    const mediaMessage = messages.find(m => mediaTypes.includes(m.type));
+    const primaryType = mediaMessage?.type || messages[0]?.type || 'text';
+    
+    if (mediaMessage) {
+      logDebug('QUEUE_PROCESSOR', `Media type prioritized over text`, { requestId, primaryType, messageTypes: messages.map(m => m.type) });
+    }
 
     const metadata = queueItem.metadata as Record<string, any>;
     
@@ -1564,11 +1570,18 @@ async function processQueuedMessages(
           }
         }
       } catch (mediaError) {
-        logDebug(mediaLabel, `Error/timeout in on-demand ${mediaLabel} download (AI will process without content)`, { 
+        logDebug(mediaLabel, `⚠️ Error/timeout in on-demand ${mediaLabel} download - AI will NOT see the image`, { 
           requestId, 
           error: mediaError instanceof Error ? mediaError.message : String(mediaError)
         });
       }
+    } else if (primaryType === 'image') {
+      logDebug('QUEUE_PROCESSOR', `⚠️ Image detected but missing mimeType or messageKey - cannot download`, { 
+        requestId, 
+        hasMimeType: !!documentMimeType, 
+        hasMessageKey: !!whatsappMessageKey,
+        primaryType
+      });
     }
     
     const context: AutomationContext = {
