@@ -67,7 +67,7 @@ const CHART_COLORS = [
 ];
 
 export default function Dashboard() {
-  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [dateFilter, setDateFilter] = useState<DateFilter>("month");
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>(undefined);
   const [selectedAttendants, setSelectedAttendants] = useState<string[]>([]);
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
@@ -446,7 +446,7 @@ export default function Dashboard() {
                 <SelectItem value="7days">Últimos 7 dias</SelectItem>
                 <SelectItem value="30days">Últimos 30 dias</SelectItem>
                 <SelectItem value="month">Este mês</SelectItem>
-                <SelectItem value="all">Todo período</SelectItem>
+                
                 <SelectItem value="custom">Personalizado</SelectItem>
               </SelectContent>
             </Select>
