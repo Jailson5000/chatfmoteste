@@ -1,57 +1,47 @@
 
 
-## Diagnóstico: IA não reconhece imagens recebidas
+## Correção: Voz da IA em inglês
 
-### O que já existe
+### Causa raiz
 
-O sistema **já possui** toda a infraestrutura para reconhecimento de imagens:
+O ElevenLabs **atualizou os nomes dos formatos de áudio**. O código usa `ogg_opus` que agora é inválido — o formato correto é `opus_48000_128`.
 
-1. `evolution-webhook` detecta `imageMessage` e salva o `mimeType` + `whatsappMessageKey`
-2. O processador da fila de debounce faz download do base64 da imagem via Evolution API
-3. `ai-chat` monta mensagem multimodal com `image_url` para o modelo Gemini (que suporta visão)
-4. Existe fallback: se multimodal falha (erro 400), a IA recebe apenas texto
+O fluxo atual:
+1. Tenta ElevenLabs com formato `ogg_opus` -> **403 Forbidden** (formato inválido)
+2. O código trata 403 como erro fatal (só tenta o próximo formato em caso de 400/422)
+3. **Pula o formato MP3** e cai direto no fallback OpenAI
+4. OpenAI TTS usa voz `shimmer` (inglesa) -> **áudio em inglês**
 
-### Causa raiz identificada
+### Solução
 
-O problema está na **linha 1482** do `evolution-webhook`:
+**Arquivo: `supabase/functions/ai-text-to-speech/index.ts`**
+
+1. **Corrigir formatos do ElevenLabs**: Atualizar `ogg_opus` para `opus_48000_128` (formato válido atual)
+2. **Tratar 403 como erro de formato**: Adicionar 403 na lista de status que tentam o próximo formato, garantindo que o MP3 seja tentado antes de pular para OpenAI
+3. **Corrigir formatos no `elevenlabs-tts/index.ts`**: Mesmo problema existe na outra edge function de TTS (usada pelo frontend)
+
+### Detalhes técnicos
 
 ```text
-const primaryType = messages.some(m => m.type === 'text') ? 'text' : messages[0]?.type || 'text';
+// ANTES (quebrado):
+{ format: 'ogg_opus', mimeType: 'audio/ogg; codecs=opus' }
+// Status 403 -> pula direto para OpenAI (shimmer/inglês)
+
+// DEPOIS (correto):
+{ format: 'opus_48000_128', mimeType: 'audio/ogg; codecs=opus' }
+// + tratar 403 como retry para próximo formato
 ```
 
-Quando o cliente envia uma imagem (mesmo sozinha, sem texto), a fila de debounce agrupa mensagens por 10 segundos. Se qualquer mensagem de texto existir (inclusive uma anterior no mesmo lote), `primaryType` vira `'text'`. Isso causa uma cascata:
+Arquivos modificados:
 
-- `primaryType = 'text'` e passado como `messageType` para o contexto
-- Na condição de download (linha 1503), `documentMimeType` pode estar correto, mas...
-- Quando `metadata.document_mime_type` se perde na sobrescrita de debounce (texto substitui imagem), o download **nunca acontece**
-- A IA recebe `[Cliente enviou uma imagem]` como texto puro, sem ver o conteudo
-
-Alem disso, ha um segundo problema: quando o download do base64 **falha** (timeout de 15s, Evolution offline, imagem muito grande), o erro e silencioso e a IA processa sem a imagem, respondendo "Nao consigo identificar imagens".
-
-### Solucao
-
-Tres correcoes no `evolution-webhook` (processador da fila):
-
-1. **Priorizar tipo 'image'**: Inverter a logica de `primaryType` para priorizar midias sobre texto, permitindo que o download de imagem aconteca
-2. **Recuperar metadata de imagem de mensagens individuais**: Ja existe fallback parcial (linha 1492-1501), mas precisa cobrir o cenario onde `primaryType` sobrescreve o tipo
-3. **Log mais claro quando download falha**: Adicionar log explicito quando a imagem nao e baixada para facilitar debug futuro
-
-E uma correcao no `ai-chat`:
-
-4. **Melhorar mensagem quando imagem nao esta disponivel**: Em vez de enviar `[Cliente enviou uma imagem]` sem contexto, informar a IA que ela **deveria** ter visto a imagem mas houve um erro tecnico, e pedir para solicitar que o cliente reenvie
-
-### Arquivos modificados
-
-| Arquivo | Alteracao |
+| Arquivo | Alteração |
 |---|---|
-| `supabase/functions/evolution-webhook/index.ts` | Corrigir logica de `primaryType` para priorizar imagem; melhorar logs |
-| `supabase/functions/ai-chat/index.ts` | Melhorar tratamento quando imagem nao esta disponivel (fallback mais inteligente) |
+| `supabase/functions/ai-text-to-speech/index.ts` | Corrigir formato `ogg_opus` para `opus_48000_128`; tratar 403 como tentativa de próximo formato |
+| `supabase/functions/elevenlabs-tts/index.ts` | Mesmo fix no formato (consistência) |
 
 ### Impacto
 
-- Sem alteracao em banco de dados ou RLS
-- Sem risco de quebrar fluxo de texto existente
-- A IA passa a receber imagens reais quando o download funciona
-- Quando o download falha, a IA pede ao cliente para reenviar (em vez de dizer "nao consigo")
-- O modelo `google/gemini-2.5-flash` usado ja suporta visao/multimodal nativamente
-
+- ElevenLabs volta a funcionar com voz Felipe (português)
+- Sem alteração em banco de dados ou RLS
+- Fallback para OpenAI continua existindo, mas só será usado se ElevenLabs realmente falhar em todos os formatos
+- Sem risco de quebrar outros fluxos
