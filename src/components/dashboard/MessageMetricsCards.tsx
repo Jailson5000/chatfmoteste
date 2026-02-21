@@ -1,10 +1,10 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { 
-  MessageSquare, 
   ArrowDownLeft, 
   ArrowUpRight, 
   MessagesSquare,
   Activity,
+  Archive,
 } from "lucide-react";
 import { MessageMetrics } from "@/hooks/useDashboardMetrics";
 
@@ -43,10 +43,17 @@ export function MessageMetricsCards({ metrics, isLoading }: MessageMetricsCardsP
       color: "text-orange-500",
       bgColor: "bg-orange-500/10",
     },
+    {
+      label: "Conversas Arquivadas",
+      value: metrics.archivedConversations,
+      icon: Archive,
+      color: "text-gray-500",
+      bgColor: "bg-gray-500/10",
+    },
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
       {cards.map((card) => (
         <Card key={card.label} className="bg-card border-border overflow-hidden">
           <CardContent className="p-4">

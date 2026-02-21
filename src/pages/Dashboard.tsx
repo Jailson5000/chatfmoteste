@@ -150,7 +150,7 @@ export default function Dashboard() {
 
   // Status cards data
   const statusCards = useMemo(() => {
-    const cards = statuses.slice(0, 6).map((status, index) => {
+    const cards = statuses.map((status, index) => {
       const count = filteredClients.filter(c => c.custom_status_id === status.id).length;
       const total = filteredClients.length;
       const percentage = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
@@ -174,7 +174,7 @@ export default function Dashboard() {
       });
     }
     
-    return cards.slice(0, 6);
+    return cards;
   }, [statuses, filteredClients]);
 
   // Timeline data - real evolution based on client creation dates
@@ -245,7 +245,7 @@ export default function Dashboard() {
     }
 
     // Build data for each period
-    const activeStatuses = statuses.slice(0, 5);
+    const activeStatuses = statuses;
     
     return periods.map(period => {
       const dataPoint: Record<string, string | number> = { time: period.label };
@@ -278,7 +278,7 @@ export default function Dashboard() {
 
   // Funnel data
   const funnelData = useMemo(() => {
-    const statusOrder = statuses.slice(0, 5);
+    const statusOrder = statuses;
     let remaining = filteredClients.length;
     
     return statusOrder.map((status, index) => {
@@ -481,7 +481,7 @@ export default function Dashboard() {
       <MessageVolumeChart data={timeSeriesData} isLoading={metricsLoading} />
 
       {/* Status Cards Row */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
         {statusCards.map((card, index) => (
           <Card key={card.name} className="bg-card border-border">
             <CardContent className="p-4">
@@ -521,10 +521,10 @@ export default function Dashboard() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={timelineData}>
                   <defs>
-                    {statuses.slice(0, 5).map((status, index) => (
+                    {statuses.map((status, index) => (
                       <linearGradient key={status.id} id={`color-${index}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={status.color || CHART_COLORS[index]} stopOpacity={0.4}/>
-                        <stop offset="95%" stopColor={status.color || CHART_COLORS[index]} stopOpacity={0.05}/>
+                        <stop offset="5%" stopColor={status.color || CHART_COLORS[index % CHART_COLORS.length]} stopOpacity={0.4}/>
+                        <stop offset="95%" stopColor={status.color || CHART_COLORS[index % CHART_COLORS.length]} stopOpacity={0.05}/>
                       </linearGradient>
                     ))}
                   </defs>
@@ -552,12 +552,12 @@ export default function Dashboard() {
                     }}
                     labelStyle={{ color: 'hsl(var(--foreground))' }}
                   />
-                  {statuses.slice(0, 5).map((status, index) => (
+                  {statuses.map((status, index) => (
                     <Area 
                       key={status.id}
                       type="monotone" 
                       dataKey={status.name} 
-                      stroke={status.color || CHART_COLORS[index]} 
+                      stroke={status.color || CHART_COLORS[index % CHART_COLORS.length]} 
                       fill={`url(#color-${index})`}
                       strokeWidth={2}
                       dot={false}
@@ -568,9 +568,9 @@ export default function Dashboard() {
             </div>
           )}
           <div className="flex flex-wrap gap-4 mt-4 justify-center">
-            {statuses.slice(0, 5).map((status, i) => (
+            {statuses.map((status, i) => (
               <div key={status.id} className="flex items-center gap-2 text-xs">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: status.color || CHART_COLORS[i] }} />
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: status.color || CHART_COLORS[i % CHART_COLORS.length] }} />
                 <span className="text-muted-foreground">{status.name}</span>
               </div>
             ))}
@@ -777,7 +777,7 @@ export default function Dashboard() {
               </div>
             )}
             <div className="flex flex-wrap gap-3 mt-4 justify-center">
-              {clientsByStatus.slice(0, 5).map((item) => (
+              {clientsByStatus.map((item) => (
                 <div key={item.name} className="flex items-center gap-1 text-xs">
                   <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
                   <span className="text-muted-foreground">{item.name} - {item.value}</span>

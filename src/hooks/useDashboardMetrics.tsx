@@ -20,6 +20,7 @@ export interface MessageMetrics {
   totalSent: number;
   totalConversations: number;
   activeConversations: number;
+  archivedConversations: number;
   avgResponseTime: number;
 }
 
@@ -41,10 +42,44 @@ export interface TimeSeriesData {
   conversations: number;
 }
 
+// Helper to chunk an array into smaller arrays
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+// Helper to count messages in chunks to avoid URL length limits
+async function countMessagesInChunks(
+  convIds: string[],
+  isFromMe: boolean,
+  startDate: string,
+  endDate: string
+): Promise<number> {
+  if (convIds.length === 0) return 0;
+  
+  const chunks = chunkArray(convIds, 500);
+  let total = 0;
+  
+  for (const chunk of chunks) {
+    const { count } = await supabase
+      .from("messages")
+      .select("*", { count: "exact", head: true })
+      .in("conversation_id", chunk)
+      .eq("is_from_me", isFromMe)
+      .gte("created_at", startDate)
+      .lte("created_at", endDate);
+    total += count || 0;
+  }
+  
+  return total;
+}
+
 export function useDashboardMetrics(filters: DashboardFilters) {
   const { lawFirm } = useLawFirm();
 
-  // Calculate date range
   const getDateRange = () => {
     const now = new Date();
     let startDate: Date;
@@ -70,7 +105,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
           startDate = startOfMonth(now);
           break;
         default:
-          startDate = startOfDay(subDays(now, 365)); // Default to last year for "all"
+          startDate = startOfDay(subDays(now, 365));
       }
     }
 
@@ -82,18 +117,17 @@ export function useDashboardMetrics(filters: DashboardFilters) {
     queryKey: ["dashboard-message-metrics", lawFirm?.id, filters],
     queryFn: async (): Promise<MessageMetrics> => {
       if (!lawFirm?.id) {
-        return { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, avgResponseTime: 0 };
+        return { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, archivedConversations: 0, avgResponseTime: 0 };
       }
 
       const { startDate, endDate } = getDateRange();
 
-      // CRITICAL: First get conversation IDs for this law_firm only (tenant isolation)
+      // Get conversation IDs for this law_firm (with filters)
       let convQuery = supabase
         .from("conversations")
         .select("id")
         .eq("law_firm_id", lawFirm.id);
 
-      // Apply additional filters
       if (filters.attendantIds.length > 0) {
         convQuery = convQuery.in("assigned_to", filters.attendantIds);
       }
@@ -106,68 +140,46 @@ export function useDashboardMetrics(filters: DashboardFilters) {
 
       const { data: lawFirmConvs } = await convQuery.limit(10000);
       const convIds = lawFirmConvs?.map(c => c.id) || [];
-      
-      // If no conversations for this law_firm, return zeros
+
       if (convIds.length === 0) {
-        // Get active conversations count (should also be 0 but check anyway)
         const { count: activeCount } = await supabase
           .from("conversations")
           .select("id", { count: "exact" })
           .eq("law_firm_id", lawFirm.id)
           .is("archived_at", null);
-          
-        return { 
-          totalReceived: 0, 
-          totalSent: 0, 
-          totalConversations: 0, 
-          activeConversations: activeCount || 0, 
-          avgResponseTime: 0 
+
+        const { count: archivedCount } = await supabase
+          .from("conversations")
+          .select("id", { count: "exact", head: true })
+          .eq("law_firm_id", lawFirm.id)
+          .not("archived_at", "is", null);
+
+        return {
+          totalReceived: 0,
+          totalSent: 0,
+          totalConversations: 0,
+          activeConversations: activeCount || 0,
+          archivedConversations: archivedCount || 0,
+          avgResponseTime: 0,
         };
       }
 
-      // Use count queries to bypass 1000-row default limit
-      const [receivedResult, sentResult] = await Promise.all([
-        supabase
-          .from("messages")
-          .select("*", { count: "exact", head: true })
-          .in("conversation_id", convIds)
-          .eq("is_from_me", false)
-          .gte("created_at", startDate.toISOString())
-          .lte("created_at", endDate.toISOString()),
-        supabase
-          .from("messages")
-          .select("*", { count: "exact", head: true })
-          .in("conversation_id", convIds)
-          .eq("is_from_me", true)
-          .gte("created_at", startDate.toISOString())
-          .lte("created_at", endDate.toISOString()),
+      const startISO = startDate.toISOString();
+      const endISO = endDate.toISOString();
+
+      // Count messages using chunked approach to avoid URL length limits
+      const [received, sent] = await Promise.all([
+        countMessagesInChunks(convIds, false, startISO, endISO),
+        countMessagesInChunks(convIds, true, startISO, endISO),
       ]);
 
-      const received = receivedResult.count || 0;
-      const sent = sentResult.count || 0;
-
-      // Fetch messages for avg response time calculation (with explicit limit)
-      const { data: messages, error } = await supabase
-        .from("messages")
-        .select("is_from_me, created_at, conversation_id")
-        .in("conversation_id", convIds)
-        .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString())
-        .order("created_at", { ascending: true })
-        .limit(5000);
-      
-      if (error) {
-        console.error("[useDashboardMetrics] Error fetching messages:", error);
-        return { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, avgResponseTime: 0 };
-      }
-
-      // Count total conversations with activity in the period directly from conversations table
+      // Count total conversations with activity in the period
       let totalConvQuery = supabase
         .from("conversations")
         .select("id", { count: "exact", head: true })
         .eq("law_firm_id", lawFirm.id)
-        .gte("last_message_at", startDate.toISOString())
-        .lte("last_message_at", endDate.toISOString());
+        .gte("last_message_at", startISO)
+        .lte("last_message_at", endISO);
 
       if (filters.attendantIds.length > 0) {
         totalConvQuery = totalConvQuery.in("assigned_to", filters.attendantIds);
@@ -181,49 +193,10 @@ export function useDashboardMetrics(filters: DashboardFilters) {
 
       const { count: totalConversationsCount } = await totalConvQuery;
 
-      // Calculate average response time
-      let totalResponseTime = 0;
-      let responseCount = 0;
-      
-      if (messages && messages.length > 0) {
-        // Group messages by conversation
-        const messagesByConv: Record<string, typeof messages> = {};
-        for (const msg of messages) {
-          if (!messagesByConv[msg.conversation_id]) {
-            messagesByConv[msg.conversation_id] = [];
-          }
-          messagesByConv[msg.conversation_id].push(msg);
-        }
-        
-        // For each conversation, calculate response times
-        for (const convId in messagesByConv) {
-          const convMessages = messagesByConv[convId];
-          for (let i = 0; i < convMessages.length - 1; i++) {
-            const current = convMessages[i];
-            const next = convMessages[i + 1];
-            
-            // If current is from client (is_from_me = false) and next is from us (is_from_me = true)
-            if (current.is_from_me === false && next.is_from_me === true) {
-              const clientTime = new Date(current.created_at).getTime();
-              const responseTime = new Date(next.created_at).getTime();
-              const diffMinutes = (responseTime - clientTime) / (1000 * 60);
-              
-              // Only count reasonable response times (< 24 hours)
-              if (diffMinutes > 0 && diffMinutes < 1440) {
-                totalResponseTime += diffMinutes;
-                responseCount++;
-              }
-            }
-          }
-        }
-      }
-      
-      const avgResponseTime = responseCount > 0 ? Math.round(totalResponseTime / responseCount) : 0;
-
       // Get active conversations count
       let activeQuery = supabase
         .from("conversations")
-        .select("id", { count: "exact" })
+        .select("id", { count: "exact", head: true })
         .eq("law_firm_id", lawFirm.id)
         .is("archived_at", null);
 
@@ -236,11 +209,75 @@ export function useDashboardMetrics(filters: DashboardFilters) {
 
       const { count: activeCount } = await activeQuery;
 
+      // Get archived conversations count
+      let archivedQuery = supabase
+        .from("conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("law_firm_id", lawFirm.id)
+        .not("archived_at", "is", null);
+
+      if (filters.attendantIds.length > 0) {
+        archivedQuery = archivedQuery.in("assigned_to", filters.attendantIds);
+      }
+      if (filters.departmentIds.length > 0) {
+        archivedQuery = archivedQuery.in("department_id", filters.departmentIds);
+      }
+
+      const { count: archivedCount } = await archivedQuery;
+
+      // Fetch messages for avg response time (limited sample)
+      const responseChunks = chunkArray(convIds.slice(0, 2000), 500);
+      let allMessages: { is_from_me: boolean; created_at: string; conversation_id: string }[] = [];
+      
+      for (const chunk of responseChunks) {
+        const { data: msgs } = await supabase
+          .from("messages")
+          .select("is_from_me, created_at, conversation_id")
+          .in("conversation_id", chunk)
+          .gte("created_at", startISO)
+          .lte("created_at", endISO)
+          .order("created_at", { ascending: true })
+          .limit(2000);
+        if (msgs) allMessages = allMessages.concat(msgs);
+      }
+
+      // Calculate average response time
+      let totalResponseTime = 0;
+      let responseCount = 0;
+
+      if (allMessages.length > 0) {
+        const messagesByConv: Record<string, typeof allMessages> = {};
+        for (const msg of allMessages) {
+          if (!messagesByConv[msg.conversation_id]) {
+            messagesByConv[msg.conversation_id] = [];
+          }
+          messagesByConv[msg.conversation_id].push(msg);
+        }
+
+        for (const convId in messagesByConv) {
+          const convMessages = messagesByConv[convId];
+          for (let i = 0; i < convMessages.length - 1; i++) {
+            const current = convMessages[i];
+            const next = convMessages[i + 1];
+            if (current.is_from_me === false && next.is_from_me === true) {
+              const diffMinutes = (new Date(next.created_at).getTime() - new Date(current.created_at).getTime()) / (1000 * 60);
+              if (diffMinutes > 0 && diffMinutes < 1440) {
+                totalResponseTime += diffMinutes;
+                responseCount++;
+              }
+            }
+          }
+        }
+      }
+
+      const avgResponseTime = responseCount > 0 ? Math.round(totalResponseTime / responseCount) : 0;
+
       return {
         totalReceived: received,
         totalSent: sent,
         totalConversations: totalConversationsCount || 0,
         activeConversations: activeCount || 0,
+        archivedConversations: archivedCount || 0,
         avgResponseTime,
       };
     },
@@ -256,7 +293,6 @@ export function useDashboardMetrics(filters: DashboardFilters) {
 
       const { startDate, endDate } = getDateRange();
 
-      // Get all team members
       const { data: profiles } = await supabase
         .from("profiles")
         .select("id, full_name, avatar_url")
@@ -264,7 +300,6 @@ export function useDashboardMetrics(filters: DashboardFilters) {
 
       if (!profiles || profiles.length === 0) return [];
 
-      // Get conversations with their messages - already tenant-filtered
       const { data: conversations } = await supabase
         .from("conversations")
         .select("id, assigned_to")
@@ -272,10 +307,8 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         .gte("updated_at", startDate.toISOString())
         .lte("updated_at", endDate.toISOString());
 
-      // CRITICAL: Get conversation IDs first to filter messages by tenant
       const lawFirmConvIds = conversations?.map(c => c.id) || [];
-      
-      // If no conversations, return empty metrics for all profiles
+
       if (lawFirmConvIds.length === 0) {
         return profiles.map(profile => ({
           id: profile.id,
@@ -288,38 +321,42 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         })).sort((a, b) => b.conversationsHandled - a.conversationsHandled);
       }
 
-      // Get message counts ONLY for conversations belonging to this law_firm
-      const { data: messages } = await supabase
-        .from("messages")
-        .select("conversation_id, is_from_me")
-        .in("conversation_id", lawFirmConvIds)
-        .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString())
-        .limit(5000);
+      // Fetch messages in chunks
+      const chunks = chunkArray(lawFirmConvIds, 500);
+      let allMessages: { conversation_id: string; is_from_me: boolean }[] = [];
+      
+      for (const chunk of chunks) {
+        const { data: msgs } = await supabase
+          .from("messages")
+          .select("conversation_id, is_from_me")
+          .in("conversation_id", chunk)
+          .gte("created_at", startDate.toISOString())
+          .lte("created_at", endDate.toISOString())
+          .limit(5000);
+        if (msgs) allMessages = allMessages.concat(msgs);
+      }
 
-      // Build attendant metrics
       const metricsMap = new Map<string, AttendantMetrics>();
 
       for (const profile of profiles) {
         const assignedConvs = conversations?.filter(c => c.assigned_to === profile.id) || [];
         const convIds = new Set(assignedConvs.map(c => c.id));
-        
-        const relatedMessages = messages?.filter(m => convIds.has(m.conversation_id)) || [];
-        const received = relatedMessages.filter(m => m.is_from_me === false).length;
-        const sent = relatedMessages.filter(m => m.is_from_me === true).length;
+
+        const relatedMessages = allMessages.filter(m => convIds.has(m.conversation_id));
+        const receivedCount = relatedMessages.filter(m => m.is_from_me === false).length;
+        const sentCount = relatedMessages.filter(m => m.is_from_me === true).length;
 
         metricsMap.set(profile.id, {
           id: profile.id,
           name: profile.full_name || "Sem nome",
           avatarUrl: profile.avatar_url,
           conversationsHandled: assignedConvs.length,
-          messagesSent: sent,
-          messagesReceived: received,
+          messagesSent: sentCount,
+          messagesReceived: receivedCount,
           avgResponseTime: 0,
         });
       }
 
-      // Sort by conversations handled
       return Array.from(metricsMap.values())
         .sort((a, b) => b.conversationsHandled - a.conversationsHandled);
     },
@@ -337,7 +374,6 @@ export function useDashboardMetrics(filters: DashboardFilters) {
       const days = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
       const maxDays = Math.min(days, 60);
 
-      // Generate date buckets
       const buckets: { start: Date; end: Date; label: string }[] = [];
       for (let i = 0; i < maxDays; i++) {
         const day = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
@@ -348,7 +384,6 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         });
       }
 
-      // CRITICAL: First get conversation IDs for this law_firm only (tenant isolation)
       let convQuery = supabase
         .from("conversations")
         .select("id")
@@ -366,8 +401,7 @@ export function useDashboardMetrics(filters: DashboardFilters) {
 
       const { data: lawFirmConvs } = await convQuery.limit(10000);
       const convIds = lawFirmConvs?.map(c => c.id) || [];
-      
-      // If no conversations, return empty buckets
+
       if (convIds.length === 0) {
         return buckets.map(bucket => ({
           date: bucket.label,
@@ -378,21 +412,26 @@ export function useDashboardMetrics(filters: DashboardFilters) {
         }));
       }
 
-      // Get messages ONLY for conversations belonging to this law_firm
-      const { data: messages } = await supabase
-        .from("messages")
-        .select("is_from_me, created_at, conversation_id")
-        .in("conversation_id", convIds)
-        .gte("created_at", startDate.toISOString())
-        .lte("created_at", endDate.toISOString())
-        .limit(5000);
+      // Fetch messages in chunks
+      const chunks = chunkArray(convIds, 500);
+      let allMessages: { is_from_me: boolean; created_at: string; conversation_id: string }[] = [];
+      
+      for (const chunk of chunks) {
+        const { data: msgs } = await supabase
+          .from("messages")
+          .select("is_from_me, created_at, conversation_id")
+          .in("conversation_id", chunk)
+          .gte("created_at", startDate.toISOString())
+          .lte("created_at", endDate.toISOString())
+          .limit(5000);
+        if (msgs) allMessages = allMessages.concat(msgs);
+      }
 
-      // Aggregate by bucket
       return buckets.map(bucket => {
-        const bucketMessages = messages?.filter(m => {
+        const bucketMessages = allMessages.filter(m => {
           const msgDate = parseISO(m.created_at);
           return msgDate >= bucket.start && msgDate <= bucket.end;
-        }) || [];
+        });
 
         return {
           date: bucket.label,
@@ -407,10 +446,8 @@ export function useDashboardMetrics(filters: DashboardFilters) {
     staleTime: 30000,
   });
 
-  // Real-time subscription removed - now handled by centralized useRealtimeSync
-
   return {
-    messageMetrics: messageMetrics || { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, avgResponseTime: 0 },
+    messageMetrics: messageMetrics || { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, archivedConversations: 0, avgResponseTime: 0 },
     attendantMetrics: attendantMetrics || [],
     timeSeriesData: timeSeriesData || [],
     isLoading: metricsLoading || attendantLoading || timeSeriesLoading,
