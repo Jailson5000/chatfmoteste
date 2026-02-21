@@ -1,47 +1,64 @@
 
 
-## Correção: Voz da IA em inglês
+## Correção: Voz OpenAI em português
 
-### Causa raiz
+### Contexto
 
-O ElevenLabs **atualizou os nomes dos formatos de áudio**. O código usa `ogg_opus` que agora é inválido — o formato correto é `opus_48000_128`.
+As vozes da OpenAI TTS (shimmer, nova, alloy, etc.) são **multilíngues** -- falam em português automaticamente quando o texto de entrada é em português. Não existe um parâmetro "idioma" na API.
 
-O fluxo atual:
-1. Tenta ElevenLabs com formato `ogg_opus` -> **403 Forbidden** (formato inválido)
-2. O código trata 403 como erro fatal (só tenta o próximo formato em caso de 400/422)
-3. **Pula o formato MP3** e cai direto no fallback OpenAI
-4. OpenAI TTS usa voz `shimmer` (inglesa) -> **áudio em inglês**
+Porém, a voz `nova` tem melhor pronúncia e naturalidade em português do que `shimmer`. O código atual tem uma **inconsistência**: em um lugar usa `nova`, em outros usa `shimmer` como fallback.
 
-### Solução
+### Problema identificado
 
-**Arquivo: `supabase/functions/ai-text-to-speech/index.ts`**
+No arquivo `supabase/functions/ai-text-to-speech/index.ts`:
 
-1. **Corrigir formatos do ElevenLabs**: Atualizar `ogg_opus` para `opus_48000_128` (formato válido atual)
-2. **Tratar 403 como erro de formato**: Adicionar 403 na lista de status que tentam o próximo formato, garantindo que o MP3 seja tentado antes de pular para OpenAI
-3. **Corrigir formatos no `elevenlabs-tts/index.ts`**: Mesmo problema existe na outra edge function de TTS (usada pelo frontend)
+| Cenário | Voz usada | Linha |
+|---|---|---|
+| Voz OpenAI selecionada explicitamente | `nova` | 375 |
+| Fallback quando ElevenLabs falha | `shimmer` | 431 |
+| ElevenLabs desativado | `shimmer` | 469 |
+
+A voz `shimmer` tem pronúncia menos natural em português. A `nova` é a melhor opção da OpenAI para PT-BR.
+
+### Solucao
+
+1. **Padronizar todas as chamadas OpenAI para usar `nova`** no `ai-text-to-speech` (linhas 431 e 469: trocar `shimmer` por `nova`)
+
+2. **Atualizar `voiceConfig.ts`** para refletir que a voz OpenAI disponivel é `nova` (não shimmer):
+   - Trocar `openai_shimmer` por `openai_nova`
+   - Atualizar nome e descrição para "Nova - Voz feminina multilíngue (PT-BR)"
+
+3. **Atualizar `elevenlabs-tts/index.ts`** se tiver referências a shimmer no fallback
 
 ### Detalhes técnicos
 
 ```text
-// ANTES (quebrado):
-{ format: 'ogg_opus', mimeType: 'audio/ogg; codecs=opus' }
-// Status 403 -> pula direto para OpenAI (shimmer/inglês)
+// voiceConfig.ts - ANTES:
+{ id: "openai_shimmer", name: "Shimmer", description: "Voz feminina padrão", externalId: "shimmer" }
 
-// DEPOIS (correto):
-{ format: 'opus_48000_128', mimeType: 'audio/ogg; codecs=opus' }
-// + tratar 403 como retry para próximo formato
+// voiceConfig.ts - DEPOIS:
+{ id: "openai_nova", name: "Nova", description: "Voz feminina multilíngue (PT-BR)", externalId: "nova" }
+
+// ai-text-to-speech - Linha 431 e 469:
+// ANTES: generateOpenAIAudio(text, 'shimmer')
+// DEPOIS: generateOpenAIAudio(text, 'nova')
+
+// ai-text-to-speech - Linha 25 (isOpenAIVoice):
+// Adicionar 'openai_nova' na verificação
 ```
 
-Arquivos modificados:
+### Arquivos modificados
 
 | Arquivo | Alteração |
 |---|---|
-| `supabase/functions/ai-text-to-speech/index.ts` | Corrigir formato `ogg_opus` para `opus_48000_128`; tratar 403 como tentativa de próximo formato |
-| `supabase/functions/elevenlabs-tts/index.ts` | Mesmo fix no formato (consistência) |
+| `src/lib/voiceConfig.ts` | Trocar openai_shimmer por openai_nova com descrição PT-BR |
+| `supabase/functions/ai-text-to-speech/index.ts` | Padronizar fallback para `nova`; atualizar `isOpenAIVoice` |
+| `supabase/functions/elevenlabs-tts/index.ts` | Atualizar referências se houver |
 
 ### Impacto
 
-- ElevenLabs volta a funcionar com voz Felipe (português)
-- Sem alteração em banco de dados ou RLS
-- Fallback para OpenAI continua existindo, mas só será usado se ElevenLabs realmente falhar em todos os formatos
-- Sem risco de quebrar outros fluxos
+- A voz OpenAI passa a usar `nova` (melhor pronúncia PT-BR) em todos os cenários
+- Sem alteração em banco de dados
+- Sem risco de quebrar fluxo ElevenLabs existente
+- Tenants que tinham `openai_shimmer` configurado serão tratados pelo fallback (nova)
+
