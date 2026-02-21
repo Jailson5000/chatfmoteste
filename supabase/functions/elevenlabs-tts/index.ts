@@ -31,6 +31,9 @@ const ELEVENLABS_VOICES: Record<string, { name: string; voiceId: string }> = {
   'el_laura': { name: 'Laura (Custom)', voiceId: 'sLEZIrFwEyhMIH1ALLIQ' },
   'el_felipe': { name: 'Felipe (Custom)', voiceId: 'GxZ0UJKPezKah8TMxZZM' },
   'el_eloisa': { name: 'Eloisa (Custom)', voiceId: '4JmPeXyyRsHSbtyiCSrt' },
+  'el_beatriz': { name: 'Beatriz (Custom)', voiceId: 'l6FLf2CbjEZfa48s6Gck' },
+  'el_jorge': { name: 'Jorge (Custom)', voiceId: 'uVjqQW6FUVXNhcTeUUb7' },
+  'el_paula': { name: 'Paula (Custom)', voiceId: 'ORLvcAP49ax15SjxlQXk' },
 };
 
 // Valid models for validation
