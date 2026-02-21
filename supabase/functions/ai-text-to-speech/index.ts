@@ -168,7 +168,7 @@ async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{
 
   // Try OGG/Opus first (preferred for WhatsApp), fallback to MP3 if fails
   const formats = [
-    { format: 'ogg_opus', mimeType: 'audio/ogg; codecs=opus' },
+    { format: 'opus_48000_128', mimeType: 'audio/ogg; codecs=opus' },
     { format: 'mp3_44100_128', mimeType: 'audio/mpeg' },
   ];
 
@@ -201,13 +201,13 @@ async function generateElevenLabsAudio(text: string, voiceId: string): Promise<{
         const errorText = await response.text();
         console.error(`[TTS-ElevenLabs] API ERROR ${response.status} for format ${format}:`, errorText);
         
-        // If 422 or format not supported, try next format
-        if (response.status === 422 || response.status === 400) {
-          console.log(`[TTS-ElevenLabs] Format ${format} not supported, trying next...`);
+        // If 400, 403, or 422 (format not supported), try next format
+        if (response.status === 400 || response.status === 403 || response.status === 422) {
+          console.log(`[TTS-ElevenLabs] Format ${format} not supported (${response.status}), trying next...`);
           continue;
         }
         
-        // For other errors (401, 403, 429), return the error
+        // For other errors (401, 429), return the error
         return { success: false, error: `ElevenLabs API error: ${response.status} - ${errorText}` };
       }
 
