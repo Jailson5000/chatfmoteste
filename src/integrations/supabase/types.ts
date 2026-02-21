@@ -2832,6 +2832,44 @@ export type Database = {
           },
         ]
       }
+      dashboard_daily_snapshots: {
+        Row: {
+          conversations_active: number
+          created_at: string
+          id: string
+          law_firm_id: string
+          messages_received: number
+          messages_sent: number
+          snapshot_date: string
+        }
+        Insert: {
+          conversations_active?: number
+          created_at?: string
+          id?: string
+          law_firm_id: string
+          messages_received?: number
+          messages_sent?: number
+          snapshot_date: string
+        }
+        Update: {
+          conversations_active?: number
+          created_at?: string
+          id?: string
+          law_firm_id?: string
+          messages_received?: number
+          messages_sent?: number
+          snapshot_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dashboard_daily_snapshots_law_firm_id_fkey"
+            columns: ["law_firm_id"]
+            isOneToOne: false
+            referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       departments: {
         Row: {
           color: string
@@ -6188,6 +6226,7 @@ export type Database = {
         }
         Returns: Json
       }
+      generate_daily_dashboard_snapshots: { Args: never; Returns: undefined }
       get_admin_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["admin_role"]
