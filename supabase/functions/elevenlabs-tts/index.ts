@@ -239,7 +239,7 @@ serve(async (req) => {
       console.log(`[ElevenLabs-TTS] Unknown voice, defaulting to Sarah`);
     }
 
-    const apiUrl = `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=mp3_44100_128`;
+    const apiUrl = `https://api.elevenlabs.io/v1/text-to-speech/${resolvedVoiceId}?output_format=opus_48000_128`;
     console.log(`[ElevenLabs-TTS] Calling API...`);
 
     const response = await fetch(apiUrl, {
