@@ -1,93 +1,86 @@
 
 
-## Auditoria Completa do Projeto MiauChat - Fevereiro 2026
+## Auditoria de Vozes: Agentes de IA vs Audio Gerado
 
----
+### Situacao Atual no Banco de Dados
 
-### 1. Inconsistencias Encontradas
-
-#### 1.1 MEDIA - Referencia residual a `openai_shimmer` no backend
-**Arquivo:** `supabase/functions/ai-text-to-speech/index.ts` (linha 25)
-**Problema:** A funcao `isOpenAIVoice()` ainda verifica `openai_shimmer`, que foi removido do `voiceConfig.ts`. Nao causa erro funcional (apenas um check redundante), mas e codigo morto que pode confundir em manutencao futura.
-**Correcao:** Remover `voiceId === 'openai_shimmer'` da funcao `isOpenAIVoice()`.
-
-#### 1.2 MEDIA - Fallback de nome padrao incorreto em `getVoiceName()`
-**Arquivo:** `src/lib/voiceConfig.ts` (linha 42)
-**Problema:** Quando o ID da voz nao e encontrado, retorna `"Sarah"` como fallback -- mas Sarah nao existe mais no catálogo de vozes. O fallback deveria ser `"Laura"` (que e a voz padrao do sistema `DEFAULT_VOICE_ID = "el_laura"`).
-**Correcao:** Trocar `return voice?.name || "Sarah"` por `return voice?.name || "Laura"`.
-
-#### 1.3 BAIXA - `elevenlabs-tts` desincronizado com `ai-text-to-speech`
-**Arquivo:** `supabase/functions/elevenlabs-tts/index.ts`
-**Problema:** O mapa de vozes `ELEVENLABS_VOICES` tem 18+ vozes genericas (Roger, Sarah, Charlie, etc.) que nao sao mais oferecidas no frontend. So 3 vozes customizadas sao usadas (Laura, Felipe, Eloisa). Nao causa bug, mas o arquivo tem codigo desnecessário.
-
-#### 1.4 BAIXA - config.toml referencia funcoes inexistentes
-**Arquivo:** `supabase/config.toml`
-**Problema:** As funcoes `process-agenda-pro-reminders`, `tray-commerce-api` e `tray-commerce-webhook` estao no config.toml com `verify_jwt = false`, mas seus diretórios nao existem em `supabase/functions/`. Isso nao causa erro em producao, mas e lixo de configuracao.
-
-#### 1.5 ALTA - Volume de 401s em Edge Functions
-**Dados:** Nos ultimos logs, uma funcao especifica (ID `1317462e...`) esta gerando dezenas de respostas 401 seguidas. Isso pode indicar:
-- Tentativas de acesso nao autenticado repetidas
-- Bot/scanner acessando endpoints
-- Algum cron job com token expirado
-
----
-
-### 2. Capacidade Atual do Sistema
-
-#### 2.1 Empresas Ativas
-| Empresa | Plano | Usuarios | Instancias WA | Conversas/30d |
+| Empresa | Agente | Voz no Agente | Voz na Empresa (tenant) | Audio Ativo |
 |---|---|---|---|---|
-| FMO Advogados | ENTERPRISE | 4/8 | 4/6 | 580 |
-| PNH Importacao | PROFESSIONAL | 1/4 | 1/4 | 557 |
-| Instituto Neves | BASIC | 2/2 | 1/2 | 96 |
-| Liz Importados | BASIC | 1/2 | 1/2 | 29 |
-| Miau test | PROFESSIONAL | 1/4 | 0/4 | 24 |
-| Suporte MiauChat | PROFESSIONAL | 2/4 | 1/4 | 17 |
-| Miau teste (x2) | STARTER | 1/3 | 0/3 | 0 |
-| Jr | ENTERPRISE | 3/8 | 0/6 | 0 |
+| FMO Advogados | Maria | `el_laura` (Laura) | `el_eloisa` (Eloisa) | Sim |
+| FMO Advogados | Caio | `el_felipe` (Felipe) | `el_eloisa` (Eloisa) | Sim |
+| FMO Advogados | Davi | `el_eloisa` (Eloisa) | `el_eloisa` (Eloisa) | Sim |
+| FMO Advogados | Ana - Proposta | `el_laura` (Laura) | `el_eloisa` (Eloisa) | Sim |
+| Suporte MiauChat | Davi | `el_felipe` (Felipe) | `el_felipe` (Felipe) | Sim |
+| Instituto Neves | Ana | `el_laura` (Laura) | `el_eloisa` (Eloisa) | Sim |
+| PNH Importacao | Triagem | *nenhuma* | `camila` (INVALIDA) | Nao |
+| PNH Importacao | Vendas 24hs | `el_laura` (Laura) | `camila` (INVALIDA) | Nao |
 
-**Total ativo:** 9 empresas, ~1.303 conversas/mes
-
-#### 2.2 Volume de Mensagens
-- **Ultimos 30 dias:** 27.725 mensagens (14.192 recebidas + 13.533 enviadas)
-- **Densidade media:** ~21 mensagens/conversa (dentro do esperado 17-25)
-
-#### 2.3 Uso de IA (Fevereiro 2026)
-- **Conversas com IA:** 492 conversas unicas
-- **Audio TTS gerado:** 66 audios (~26 minutos)
-
-#### 2.4 Estimativa de Capacidade
-
-Baseado nos dados reais e na memoria do sistema (plano Supabase Pro = 500k invocacoes/mes):
+### Fluxo de Resolucao de Voz (como funciona)
 
 ```text
-Consumo fixo (cron jobs):           ~45.000 invocacoes/mes
-Consumo atual (9 empresas):         ~55.000 invocacoes/mes (estimado)
-Total estimado:                     ~100.000 invocacoes/mes
-Capacidade restante:                ~400.000 invocacoes/mes
-
-Media por empresa ativa:            ~6.100 invocacoes/mes
-Capacidade maxima estimada:         ~75 empresas de baixo volume (< 100 conversas/mes)
-                                    ~25 empresas de volume medio (~500 conversas/mes)
-                                    ~12 empresas de alto volume (~1.000+ conversas/mes)
+1. Agente (trigger_config.voice_id)  -- prioridade maxima
+2. Empresa (law_firm_settings.ai_capabilities.elevenlabs_voice)
+3. Global (system_settings.tts_elevenlabs_voice)
+4. Fallback tecnico (el_laura)
 ```
 
-O sistema esta operando a ~20% da capacidade maxima. Ha folga confortavel para crescer ate ~25 empresas de volume medio antes de precisar considerar upgrade para o plano Team.
+O fluxo esta **correto** -- a voz do agente sempre tem prioridade. Entao:
+- **Maria com Laura**: OK, vai usar Laura (voz do agente)
+- **Caio com Felipe**: OK, vai usar Felipe (voz do agente)
+- **Davi com Eloisa**: OK, vai usar Eloisa (voz do agente)
 
----
+### Problemas Encontrados
 
-### 3. Plano de Correcoes
+#### 1. CRITICO - Voz global configurada como `openai_nova`
+A configuracao global (`system_settings.tts_elevenlabs_voice`) esta com valor `openai_nova`. Quando um agente nao tem voz configurada e a empresa tambem nao, o sistema tenta usar `openai_nova` como voz ElevenLabs -- isso nao vai funcionar no ElevenLabs, mas o codigo detecta que e OpenAI e redireciona corretamente. Nao e um bug funcional, mas e confuso ter uma voz OpenAI como "default ElevenLabs".
 
-As inconsistencias encontradas serao corrigidas em ordem de prioridade:
+#### 2. MEDIO - PNH tem voz `camila` que nao existe
+A empresa PNH Importacao tem `camila` como voz do tenant. Essa voz nao existe no mapa `ELEVENLABS_VOICES`. Se o agente "Triagem" (que nao tem voz propria) ativar audio, vai receber `camila`, que vai cair no fallback do ElevenLabs para `el_laura`. Funciona, mas nao e intencional.
 
-| # | Prioridade | Correcao | Arquivo |
+#### 3. INFO - Maria agora com Laura (corrigido pelo usuario)
+O usuario informou que alterou Maria de Heloisa para Laura. O banco confirma: `agent_voice_id = el_laura`. Esta correto.
+
+### Verificacao: Cada agente fala com a voz certa?
+
+| Agente | Voz Configurada | Voz que Realmente Fala | Correto? |
 |---|---|---|---|
-| 1 | MEDIA | Remover referencia a `openai_shimmer` em `isOpenAIVoice()` | `ai-text-to-speech/index.ts` |
-| 2 | MEDIA | Trocar fallback "Sarah" por "Laura" em `getVoiceName()` | `src/lib/voiceConfig.ts` |
-| 3 | BAIXA | Limpar config.toml (funcoes fantasma) | `supabase/config.toml` (nao editavel) |
-| 4 | INVESTIGAR | Analisar fonte dos 401s recorrentes | Logs de Edge Functions |
+| Maria (FMO) | el_laura | Laura (ElevenLabs) | SIM |
+| Caio (FMO) | el_felipe | Felipe (ElevenLabs) | SIM |
+| Davi (FMO) | el_eloisa | Eloisa (ElevenLabs) | SIM |
+| Ana Proposta (FMO) | el_laura | Laura (ElevenLabs) | SIM |
+| Davi (Suporte) | el_felipe | Felipe (ElevenLabs) | SIM |
+| Ana (Instituto) | el_laura | Laura (ElevenLabs) | SIM |
+| Triagem (PNH) | nenhuma | Cairia em `camila` -> fallback Laura | ATENCAO |
+| Vendas (PNH) | el_laura | Laura (ElevenLabs) | SIM |
 
-### 4. Resumo Geral
+**Conclusao: Todos os agentes com voz configurada estao corretos.** O unico caso de atencao e o agente "Triagem" da PNH que nao tem voz propria e herdaria `camila` (voz invalida), mas o audio esta desativado para PNH entao nao gera problema na pratica.
 
-O sistema esta **saudavel** com margem de crescimento. As inconsistencias encontradas sao de baixa/media severidade -- nenhuma causa falha em producao. O problema mais significativo que tivemos (voz em ingles) ja foi corrigido nas sessoes anteriores. A capacidade suporta crescimento de 2-3x antes de necessitar upgrade de infraestrutura.
+### Correcoes Recomendadas
+
+| # | Prioridade | Correcao |
+|---|---|---|
+| 1 | MEDIO | Atualizar voz global de `openai_nova` para `el_laura` na tabela `system_settings` (key: `tts_elevenlabs_voice`) |
+| 2 | BAIXA | Atualizar voz tenant da PNH de `camila` para `el_laura` (voz valida) |
+
+Essas correcoes sao no banco de dados (SQL simples), nao requerem alteracao de codigo.
+
+### SQL para Correcao
+
+```text
+-- 1. Corrigir voz global
+UPDATE system_settings SET value = 'el_laura' WHERE key = 'tts_elevenlabs_voice';
+
+-- 2. Corrigir voz tenant da PNH (remover 'camila' invalida)
+UPDATE law_firm_settings 
+SET ai_capabilities = jsonb_set(
+  COALESCE(ai_capabilities, '{}'::jsonb), 
+  '{elevenlabs_voice}', 
+  '"el_laura"'
+)
+WHERE law_firm_id = (SELECT id FROM law_firms WHERE name LIKE 'PNH%');
+```
+
+### Resumo
+
+As vozes dos agentes da FMO estao todas corretas apos a correcao manual da Maria. O sistema de precedencia (agente > empresa > global > fallback) funciona bem. As unicas limpezas necessarias sao dados invalidos no banco: a voz global `openai_nova` e a voz `camila` da PNH.
 
