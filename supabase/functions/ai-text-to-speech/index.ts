@@ -12,6 +12,9 @@ const ELEVENLABS_VOICES: Record<string, string> = {
   'el_laura': 'sLEZIrFwEyhMIH1ALLIQ',
   'el_felipe': 'GxZ0UJKPezKah8TMxZZM',
   'el_eloisa': '4JmPeXyyRsHSbtyiCSrt',
+  'el_beatriz': 'l6FLf2CbjEZfa48s6Gck',
+  'el_jorge': 'uVjqQW6FUVXNhcTeUUb7',
+  'el_paula': 'ORLvcAP49ax15SjxlQXk',
 };
 
 // Default fallback voice (used when no voice is configured anywhere)
