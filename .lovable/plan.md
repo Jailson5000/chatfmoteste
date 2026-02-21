@@ -1,86 +1,82 @@
 
 
-## Auditoria de Vozes: Agentes de IA vs Audio Gerado
+## Correcoes do Dashboard - Metricas e Filtros de Data
 
-### Situacao Atual no Banco de Dados
+### Problemas Identificados
 
-| Empresa | Agente | Voz no Agente | Voz na Empresa (tenant) | Audio Ativo |
-|---|---|---|---|---|
-| FMO Advogados | Maria | `el_laura` (Laura) | `el_eloisa` (Eloisa) | Sim |
-| FMO Advogados | Caio | `el_felipe` (Felipe) | `el_eloisa` (Eloisa) | Sim |
-| FMO Advogados | Davi | `el_eloisa` (Eloisa) | `el_eloisa` (Eloisa) | Sim |
-| FMO Advogados | Ana - Proposta | `el_laura` (Laura) | `el_eloisa` (Eloisa) | Sim |
-| Suporte MiauChat | Davi | `el_felipe` (Felipe) | `el_felipe` (Felipe) | Sim |
-| Instituto Neves | Ana | `el_laura` (Laura) | `el_eloisa` (Eloisa) | Sim |
-| PNH Importacao | Triagem | *nenhuma* | `camila` (INVALIDA) | Nao |
-| PNH Importacao | Vendas 24hs | `el_laura` (Laura) | `camila` (INVALIDA) | Nao |
+**1. Filtro padrao "Todo periodo" causa dados inconsistentes**
+Quando o dashboard abre, ele usa "Todo periodo" que busca 365 dias de dados. Isso sobrecarrega a consulta (limite de 5000 mensagens no time series) e mostra dados incompletos.
 
-### Fluxo de Resolucao de Voz (como funciona)
+**2. Bug de fuso horario nos filtros de data**
+O codigo calcula `subDays(now, 7)` sem normalizar para o inicio do dia. Por exemplo, se agora sao 17:00 do dia 21/02, o filtro de 7 dias comeca em 14/02 as 17:00 -- mas os buckets do grafico comecam em 14/02 as 00:00. Isso causa:
+- O primeiro dia do periodo aparece com dados parciais (faltando mensagens da manha)
+- O ultimo dia (hoje) pode nao mostrar dados porque o bucket termina as 23:59 mas a query pode nao capturar corretamente
+- O mesmo problema existe para "30 dias"
 
-```text
-1. Agente (trigger_config.voice_id)  -- prioridade maxima
-2. Empresa (law_firm_settings.ai_capabilities.elevenlabs_voice)
-3. Global (system_settings.tts_elevenlabs_voice)
-4. Fallback tecnico (el_laura)
-```
+**3. Primeiro quadro (cards de metricas) nao mostra dados sem selecionar departamento**
+Com o filtro "Todo periodo", a query busca 365 dias e pode exceder o limite de 10.000 conversas ou os 5.000 mensagens, retornando dados truncados ou zerados. Ao trocar o padrao para "Este mes", a quantidade de dados fica gerenciavel e os cards funcionam corretamente sem precisar filtrar por departamento.
 
-O fluxo esta **correto** -- a voz do agente sempre tem prioridade. Entao:
-- **Maria com Laura**: OK, vai usar Laura (voz do agente)
-- **Caio com Felipe**: OK, vai usar Felipe (voz do agente)
-- **Davi com Eloisa**: OK, vai usar Eloisa (voz do agente)
+### Solucao
 
-### Problemas Encontrados
+**Arquivo: `src/pages/Dashboard.tsx`**
+- Trocar o valor inicial do estado `dateFilter` de `"all"` para `"month"`
+- Remover a opcao "Todo periodo" do select de filtros (eliminar o `<SelectItem value="all">`)
 
-#### 1. CRITICO - Voz global configurada como `openai_nova`
-A configuracao global (`system_settings.tts_elevenlabs_voice`) esta com valor `openai_nova`. Quando um agente nao tem voz configurada e a empresa tambem nao, o sistema tenta usar `openai_nova` como voz ElevenLabs -- isso nao vai funcionar no ElevenLabs, mas o codigo detecta que e OpenAI e redireciona corretamente. Nao e um bug funcional, mas e confuso ter uma voz OpenAI como "default ElevenLabs".
+**Arquivo: `src/hooks/useDashboardMetrics.tsx`**
+- Corrigir a funcao `getDateRange()` para usar `startOfDay()` em todos os casos:
+  - "7days": `startOfDay(subDays(now, 7))` em vez de `subDays(now, 7)`
+  - "30days": `startOfDay(subDays(now, 30))` em vez de `subDays(now, 30)`
+  - "all": `startOfDay(subDays(now, 365))` em vez de `subDays(now, 365)` (mantido como fallback de seguranca)
 
-#### 2. MEDIO - PNH tem voz `camila` que nao existe
-A empresa PNH Importacao tem `camila` como voz do tenant. Essa voz nao existe no mapa `ELEVENLABS_VOICES`. Se o agente "Triagem" (que nao tem voz propria) ativar audio, vai receber `camila`, que vai cair no fallback do ElevenLabs para `el_laura`. Funciona, mas nao e intencional.
+Essas tres mudancas cirurgicas resolvem todos os problemas reportados sem alterar nenhuma outra logica do dashboard.
 
-#### 3. INFO - Maria agora com Laura (corrigido pelo usuario)
-O usuario informou que alterou Maria de Heloisa para Laura. O banco confirma: `agent_voice_id = el_laura`. Esta correto.
-
-### Verificacao: Cada agente fala com a voz certa?
-
-| Agente | Voz Configurada | Voz que Realmente Fala | Correto? |
-|---|---|---|---|
-| Maria (FMO) | el_laura | Laura (ElevenLabs) | SIM |
-| Caio (FMO) | el_felipe | Felipe (ElevenLabs) | SIM |
-| Davi (FMO) | el_eloisa | Eloisa (ElevenLabs) | SIM |
-| Ana Proposta (FMO) | el_laura | Laura (ElevenLabs) | SIM |
-| Davi (Suporte) | el_felipe | Felipe (ElevenLabs) | SIM |
-| Ana (Instituto) | el_laura | Laura (ElevenLabs) | SIM |
-| Triagem (PNH) | nenhuma | Cairia em `camila` -> fallback Laura | ATENCAO |
-| Vendas (PNH) | el_laura | Laura (ElevenLabs) | SIM |
-
-**Conclusao: Todos os agentes com voz configurada estao corretos.** O unico caso de atencao e o agente "Triagem" da PNH que nao tem voz propria e herdaria `camila` (voz invalida), mas o audio esta desativado para PNH entao nao gera problema na pratica.
-
-### Correcoes Recomendadas
-
-| # | Prioridade | Correcao |
-|---|---|---|
-| 1 | MEDIO | Atualizar voz global de `openai_nova` para `el_laura` na tabela `system_settings` (key: `tts_elevenlabs_voice`) |
-| 2 | BAIXA | Atualizar voz tenant da PNH de `camila` para `el_laura` (voz valida) |
-
-Essas correcoes sao no banco de dados (SQL simples), nao requerem alteracao de codigo.
-
-### SQL para Correcao
+### Detalhes tecnicos
 
 ```text
--- 1. Corrigir voz global
-UPDATE system_settings SET value = 'el_laura' WHERE key = 'tts_elevenlabs_voice';
+// ANTES (useDashboardMetrics.tsx, getDateRange):
+case "7days":
+  startDate = subDays(now, 7);        // 14/02 as 17:00 (hora atual)
+case "30days":
+  startDate = subDays(now, 30);       // 22/01 as 17:00
+default:
+  startDate = subDays(now, 365);      // 22/02/2025 as 17:00
 
--- 2. Corrigir voz tenant da PNH (remover 'camila' invalida)
-UPDATE law_firm_settings 
-SET ai_capabilities = jsonb_set(
-  COALESCE(ai_capabilities, '{}'::jsonb), 
-  '{elevenlabs_voice}', 
-  '"el_laura"'
-)
-WHERE law_firm_id = (SELECT id FROM law_firms WHERE name LIKE 'PNH%');
+// DEPOIS:
+case "7days":
+  startDate = startOfDay(subDays(now, 7));   // 14/02 as 00:00
+case "30days":
+  startDate = startOfDay(subDays(now, 30));  // 22/01 as 00:00
+default:
+  startDate = startOfDay(subDays(now, 365)); // 22/02/2025 as 00:00
 ```
 
-### Resumo
+```text
+// ANTES (Dashboard.tsx, linha 70):
+const [dateFilter, setDateFilter] = useState<DateFilter>("all");
 
-As vozes dos agentes da FMO estao todas corretas apos a correcao manual da Maria. O sistema de precedencia (agente > empresa > global > fallback) funciona bem. As unicas limpezas necessarias sao dados invalidos no banco: a voz global `openai_nova` e a voz `camila` da PNH.
+// DEPOIS:
+const [dateFilter, setDateFilter] = useState<DateFilter>("month");
+```
+
+```text
+// ANTES (Dashboard.tsx, linha 449):
+<SelectItem value="all">Todo período</SelectItem>
+
+// REMOVIDO - essa opcao deixa de existir
+```
+
+### Impacto
+
+| Mudanca | Efeito |
+|---|---|
+| Padrao "Este mes" | Cards mostram dados do mes atual imediatamente, sem precisar selecionar departamento |
+| Remover "Todo periodo" | Evita queries pesadas que excedem limites e retornam dados truncados |
+| `startOfDay()` nos filtros | Todos os dias do periodo aparecem completos no grafico (incluindo hoje e o primeiro dia) |
+
+### Arquivos modificados
+
+| Arquivo | Alteracao |
+|---|---|
+| `src/pages/Dashboard.tsx` | Trocar default para "month"; remover opcao "all" do select |
+| `src/hooks/useDashboardMetrics.tsx` | Adicionar `startOfDay()` nos cases "7days", "30days" e default |
 
