@@ -22,7 +22,7 @@ const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 
 // Check if voice is OpenAI
 function isOpenAIVoice(voiceId: string): boolean {
-  return voiceId === 'openai_shimmer' || voiceId === 'openai_nova' || OPENAI_VOICES.includes(voiceId);
+  return voiceId === 'openai_nova' || OPENAI_VOICES.includes(voiceId);
 }
 
 interface TenantAIConfig {

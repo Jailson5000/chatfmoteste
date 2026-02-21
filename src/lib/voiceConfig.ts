@@ -39,5 +39,5 @@ export function getElevenLabsVoiceId(id: string): string {
 // Helper to get voice name by ID
 export function getVoiceName(id: string): string {
   const voice = AVAILABLE_VOICES.find(v => v.id === id);
-  return voice?.name || "Sarah";
+  return voice?.name || "Laura";
 }
