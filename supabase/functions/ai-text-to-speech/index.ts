@@ -22,7 +22,7 @@ const OPENAI_VOICES = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'];
 
 // Check if voice is OpenAI
 function isOpenAIVoice(voiceId: string): boolean {
-  return voiceId === 'openai_shimmer' || OPENAI_VOICES.includes(voiceId);
+  return voiceId === 'openai_shimmer' || voiceId === 'openai_nova' || OPENAI_VOICES.includes(voiceId);
 }
 
 interface TenantAIConfig {
@@ -428,7 +428,7 @@ serve(async (req) => {
       }
       
       console.log('[TTS] ElevenLabs FAILED, trying OpenAI fallback...');
-      const openaiResult = await generateOpenAIAudio(text, 'shimmer');
+      const openaiResult = await generateOpenAIAudio(text, 'nova');
       
       if (openaiResult.success) {
         console.log('[TTS] OpenAI fallback SUCCESS with mimeType:', openaiResult.mimeType);
@@ -466,7 +466,7 @@ serve(async (req) => {
 
     // ElevenLabs disabled, use OpenAI directly
     console.log('[TTS] ElevenLabs disabled, using OpenAI');
-    const openaiResult = await generateOpenAIAudio(text, 'shimmer');
+    const openaiResult = await generateOpenAIAudio(text, 'nova');
       
     if (openaiResult.success) {
       // Record TTS usage for billing (non-blocking) - skip when called from backend
