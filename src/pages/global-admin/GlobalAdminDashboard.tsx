@@ -31,18 +31,9 @@ import { InfrastructureMonitor } from "@/components/global-admin/InfrastructureM
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useRef, useState } from "react";
-// Mock data for charts
-const areaChartData = [
-  { name: "Jul", empresas: 30, conexoes: 25 },
-  { name: "Ago", empresas: 40, conexoes: 35 },
-  { name: "Set", empresas: 55, conexoes: 48 },
-  { name: "Out", empresas: 65, conexoes: 58 },
-  { name: "Nov", empresas: 90, conexoes: 78 },
-  { name: "Dez", empresas: 120, conexoes: 105 },
-];
 
 export default function GlobalAdminDashboard() {
-  const { dashboardMetrics, isLoading } = useSystemMetrics();
+  const { dashboardMetrics, growthData, isLoading } = useSystemMetrics();
   const tableRef = useRef<HTMLDivElement>(null);
   const [filterByAlerts, setFilterByAlerts] = useState(false);
   const navigate = useNavigate();
@@ -147,7 +138,7 @@ export default function GlobalAdminDashboard() {
             conversas: dashboardMetrics?.totalConversations || 0,
             mrr: dashboardMetrics?.revenue || 0,
           },
-          chartData: areaChartData,
+          chartData: growthData,
           pieData: pieChartData.map(p => ({ name: p.name, value: p.value })),
           barData: [],
         },
@@ -289,7 +280,7 @@ export default function GlobalAdminDashboard() {
             <p className="text-sm text-white/40">Evolução de empresas e conexões</p>
           </div>
           <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={areaChartData}>
+            <AreaChart data={growthData}>
               <defs>
                 <linearGradient id="colorEmpresas" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />

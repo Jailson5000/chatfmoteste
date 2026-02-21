@@ -167,9 +167,62 @@ export function useSystemMetrics() {
     },
   });
 
+  const { data: growthData = [], isLoading: growthLoading } = useQuery({
+    queryKey: ["growth-chart-data"],
+    queryFn: async () => {
+      const [companiesRes, instancesRes, metaRes] = await Promise.all([
+        supabase.from("companies").select("id, created_at"),
+        supabase.from("whatsapp_instances").select("id, created_at"),
+        supabase.from("meta_connections").select("id, created_at").eq("type", "whatsapp_cloud"),
+      ]);
+
+      const companies = companiesRes.data || [];
+      const instances = instancesRes.data || [];
+      const metaConnections = metaRes.data || [];
+
+      // Helper: "YYYY-MM" key from date string
+      const toMonthKey = (dateStr: string) => dateStr.slice(0, 7);
+
+      // Collect all unique months
+      const monthSet = new Set<string>();
+      companies.forEach(c => monthSet.add(toMonthKey(c.created_at)));
+      instances.forEach(i => monthSet.add(toMonthKey(i.created_at)));
+      metaConnections.forEach(m => monthSet.add(toMonthKey(m.created_at)));
+
+      const sortedMonths = Array.from(monthSet).sort();
+      if (sortedMonths.length === 0) return [];
+
+      // Count per month
+      const companyPerMonth: Record<string, number> = {};
+      const connectionPerMonth: Record<string, number> = {};
+      companies.forEach(c => {
+        const k = toMonthKey(c.created_at);
+        companyPerMonth[k] = (companyPerMonth[k] || 0) + 1;
+      });
+      [...instances, ...metaConnections].forEach(i => {
+        const k = toMonthKey(i.created_at);
+        connectionPerMonth[k] = (connectionPerMonth[k] || 0) + 1;
+      });
+
+      // Build cumulative
+      const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+      let cumCompanies = 0;
+      let cumConnections = 0;
+
+      return sortedMonths.map(key => {
+        cumCompanies += companyPerMonth[key] || 0;
+        cumConnections += connectionPerMonth[key] || 0;
+        const [year, month] = key.split("-");
+        const label = `${monthNames[parseInt(month, 10) - 1]}/${year.slice(2)}`;
+        return { name: label, empresas: cumCompanies, conexoes: cumConnections };
+      });
+    },
+  });
+
   return {
     metrics,
     dashboardMetrics,
-    isLoading: metricsLoading || dashboardLoading,
+    growthData,
+    isLoading: metricsLoading || dashboardLoading || growthLoading,
   };
 }
