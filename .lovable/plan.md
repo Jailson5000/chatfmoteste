@@ -1,107 +1,121 @@
 
-## Corrigir: Auto-Reconnect Nao Detecta Sessoes Fantasma
+## Corrigir: Sessoes Corrompidas no Evolution - QR Code Nao Aparece
 
-### Causa Raiz Comprovada (testes diretos na API)
+### Diagnostico Comprovado
 
-Testes reais feitos AGORA na Evolution API confirmam:
-
-| Instancia | fetchInstances | connectionState (REAL) | Webhook events | DB status |
-|---|---|---|---|---|
-| inst_7sw6k99c (MIAU) | open | **close** | connecting (loop) | connected |
-| inst_0gkejsc5 (3528) | open | close/connecting | connecting (loop) | connected |
-| inst_l26f156k (9089) | open | close/connecting | connecting (loop) | connected |
-| inst_ea9bfhx3 (LOJA LIZ) | open | close/connecting | connecting (loop) | connected |
-
-**`fetchInstances` mente** - retorna `connectionStatus: open` baseado no REGISTRO da instancia, nao no estado real do socket Baileys. O estado real vem do endpoint `/instance/connectionState/{name}` que retorna `close`.
-
-### Por que nada funciona atualmente
-
-```text
-1. Auto-reconnect busca instancias com status IN ("connecting", "disconnected")
-2. TODAS estao marcadas como "connected" no DB (porque fetchInstances disse "open")
-3. ZERO instancias qualificam para reconexao
-4. Sockets Baileys estao mortos (connectionState = close)
-5. Webhook recebe apenas "connecting" em loop infinito
-6. ZERO messages.upsert chegam
-7. Todo envio falha com "Connection Closed"
-8. Logout no envio marca como "disconnected" temporariamente
-9. Auto-reconnect roda, fetchInstances diz "open", marca "connected" de novo
-10. Volta ao passo 1 - ciclo infinito
+**Evidencia direta dos logs:**
+```
+/instance/connect raw response for inst_0gkejsc5: {"count":0}
+/instance/connect raw response for inst_7sw6k99c: {"count":0}
+/instance/connect raw response for inst_ea9bfhx3: {"count":0}
 ```
 
-### Solucao: Verificacao em Duas Etapas
+A resposta `{"count":0}` do endpoint `/instance/connect` e invalida - nao contem QR code, nao contem estado. Isso significa que a sessao Baileys esta corrompida internamente no servidor Evolution.
 
-Mudar `checkConnectionState` no `auto-reconnect-instances/index.ts` para verificar AMBOS os endpoints:
+**Confirmacao visual:** A screenshot do usuario mostra que MESMO no painel do Evolution, ao clicar "Get QR Code" na instancia "TESTE INTERNO MIAU", o QR nao aparece - apenas a mensagem "Scan the QR code with your WhatsApp Web" sem imagem.
 
-```text
-ANTES:
-  fetchInstances = "open" -> confiar -> marcar connected -> FIM
-
-DEPOIS:
-  fetchInstances = "open" -> verificar com /instance/connectionState
-    -> connectionState = "open" -> marcar connected (sessao REALMENTE funcional)
-    -> connectionState = "close"/"connecting" -> forcar logout + reconnect
+**Logout tambem falha:**
+```
+Logout response for inst_ea9bfhx3: 500
+Logout response for inst_7sw6k99c: 400
+Logout response for inst_464pnw5n: 400
 ```
 
-A diferenca crucial: `/instance/connectionState` e READ-ONLY (nao reinicia o socket como `/instance/connect`).
+### Causa Raiz
 
-### Mudancas Tecnicas
+As sessoes Baileys estao num estado corrompido onde:
+- `fetchInstances` reporta "open" (registro existe)
+- `connectionState` reporta "close" (socket morto)
+- `/instance/connect` retorna `{"count":0}` (nao consegue gerar QR)
+- `/instance/logout` retorna 400/500 (nao consegue limpar)
 
-**Arquivo 1: `supabase/functions/auto-reconnect-instances/index.ts`**
+A UNICA forma de resolver e **deletar a instancia no Evolution e recriar do zero**, forcando um novo registro Baileys.
 
-1. Modificar `checkConnectionState()` para retornar um campo adicional `socketState`
-2. Apos fetchInstances retornar "open", chamar `/instance/connectionState/{name}` para confirmar
-3. Se connectionState != "open", retornar `{ isConnected: false, ghostSession: true }`
+### Solucao: Auto-Recuperacao via Delete + Recreate
 
-4. No loop principal (linha 374), quando `connectionCheck.isConnected == false` E `ghostSession == true`:
-   - Chamar `DELETE /instance/logout/{name}` para limpar a sessao morta
-   - Chamar `GET /instance/connect/{name}` para iniciar reconexao limpa
-   - Se retornar QR code, marcar como `awaiting_qr`
-   - Se retornar "open", marcar como "connected"
+**Arquivo: `supabase/functions/evolution-api/index.ts`**
 
-5. Tambem incluir instancias com status "connected" na query inicial (linha 273) MAS limitar a verificacao a instancias que nao receberam `messages.upsert` recentemente (usar campo `last_webhook_event`):
-   - Adicionar `"connected"` ao `.in("status", ["connecting", "disconnected", "connected"])`
-   - Filtrar connected: so verificar se `last_webhook_event = 'connection.update'` (nunca recebeu mensagem)
+1. Na acao `get_qrcode` (linha ~818): Apos receber a resposta de `/instance/connect`, detectar a resposta invalida `{"count":0}` (sem QR code E sem estado valido). Quando detectada:
+   - Chamar `DELETE /instance/delete/{instanceName}` para remover a instancia corrompida
+   - Chamar `POST /instance/create` para recriar com QR code habilitado
+   - Configurar webhook e settings (groupsIgnore)
+   - Retornar o QR code da nova instancia
 
-**Arquivo 2: `supabase/functions/evolution-api/index.ts`**
+   Isso reutiliza a mesma logica que ja existe para o caso `404` (linhas 729-810), expandindo para cobrir tambem respostas invalidas.
 
-Nenhuma mudanca necessaria - a logica de logout no "Connection Closed" ja esta implementada corretamente.
+2. No `auto-reconnect-instances/index.ts`: Quando `/instance/connect` retorna `{"count":0}` durante tentativa de reconexao de ghost session, aplicar a mesma estrategia - deletar e recriar a instancia, ao inves de apenas marcar como "connecting" e esperar.
+
+### Mudancas Tecnicas Detalhadas
+
+**Arquivo 1: `supabase/functions/evolution-api/index.ts`**
+
+Na acao `get_qrcode`, apos a linha 818 (parse da resposta):
+- Verificar se `qrCode === null` E `status` nao e "open"/"connected" E a resposta contem `{"count":0}` ou corpo vazio
+- Se verdadeiro, executar o fluxo de recuperacao:
+
+```text
+// Pseudocodigo:
+if (!qrCode && status !== "open" && status !== "connected") {
+  // Sessao corrompida - deletar e recriar
+  console.log("Corrupted session detected, deleting and recreating...");
+  
+  // 1. Deletar instancia no Evolution
+  await fetch(`${apiUrl}/instance/delete/${instanceName}`, { method: "DELETE" });
+  await sleep(2000);
+  
+  // 2. Recriar instancia
+  const createResp = await fetch(`${apiUrl}/instance/create`, {
+    body: { instanceName, qrcode: true, webhook: buildWebhookConfig(WEBHOOK_URL) }
+  });
+  
+  // 3. Configurar settings (groupsIgnore)
+  await fetch(`${apiUrl}/settings/set/${instanceName}`, { body: settingsPayload });
+  
+  // 4. Extrair QR code da resposta de criacao
+  qrCode = createResp.qrcode.base64;
+}
+```
+
+**Arquivo 2: `supabase/functions/auto-reconnect-instances/index.ts`**
+
+Na secao de ghost session handling, apos `/instance/connect` retornar `{"count":0}`:
+- Detectar resposta invalida (sem QR, sem estado)
+- Executar delete + recreate ao inves de simplesmente registrar o resultado
+- Manter o mesmo `instance_name` e `api_key` no banco de dados
 
 ### Fluxo Corrigido
 
 ```text
-Auto-reconnect roda a cada 5 min
+Usuario clica "Reconectar" ou "Obter QR Code"
   |
   v
-Busca instancias: disconnected + connecting + connected(sem mensagens)
+/instance/connect retorna {"count":0}?
   |
-  v
-Para cada instancia:
-  fetchInstances -> "open"?
-    |
-    SIM -> /instance/connectionState -> "open"?
-    |        |
-    |        SIM -> DB = "connected" (sessao REAL) -> FIM
-    |        |
-    |        NAO -> SESSAO FANTASMA detectada!
-    |              -> /instance/logout (limpa sessao morta)
-    |              -> /instance/connect (reconexao limpa)
-    |              -> Aguardar QR ou conexao automatica
-    |
-    NAO -> Instancia realmente desconectada
-          -> /instance/connect (reconexao normal)
+  SIM -> Sessao corrompida detectada
+  |       |
+  |       v
+  |     DELETE /instance/delete/{name}  (remove registro corrompido)
+  |       |
+  |       v
+  |     POST /instance/create  (cria nova instancia limpa)
+  |       |
+  |       v
+  |     QR code gerado com sucesso -> retorna para o usuario
+  |
+  NAO -> QR code valido? -> Exibir para o usuario
+         Ja conectado? -> Atualizar status
 ```
 
 ### Impacto Esperado
 
 | Antes | Depois |
 |---|---|
-| fetchInstances = "open" -> confia cegamente | fetchInstances + connectionState = verificacao dupla |
-| Sessoes fantasma nunca detectadas | Detectadas e reparadas automaticamente |
-| 0 instancias qualificam para reconexao | Todas as fantasmas qualificam |
-| ZERO messages.upsert | Sessoes limpas -> mensagens fluem |
-| Todo envio falha | Envio funciona apos reconexao |
+| QR code nunca aparece ({"count":0}) | Instancia recriada automaticamente com QR valido |
+| Sessoes corrompidas ficam presas para sempre | Auto-recuperacao via delete+recreate |
+| Usuario precisa ir no painel Evolution manualmente | Tudo resolvido pela plataforma automaticamente |
+| Auto-reconnect nao consegue recuperar | Auto-reconnect deleta e recria quando necessario |
 
 ### Arquivos Editados
 
-1. `supabase/functions/auto-reconnect-instances/index.ts` - Adicionar verificacao dupla (fetchInstances + connectionState), incluir instancias "connected" sem mensagens na verificacao, forcar logout antes de reconnect para sessoes fantasma
+1. `supabase/functions/evolution-api/index.ts` - Detectar resposta `{"count":0}` no get_qrcode e executar delete+recreate automatico
+2. `supabase/functions/auto-reconnect-instances/index.ts` - Detectar resposta invalida no ghost session e executar delete+recreate
