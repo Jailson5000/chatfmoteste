@@ -1175,6 +1175,115 @@ function extractPhoneFromJid(jid: string | null): string | null {
   return match ? match[1] : jid.replace(/@.*/, '');
 }
 
+/**
+ * Schedule a delayed status verification for instances stuck in awaiting_qr.
+ * After a container restart, instances may auto-reconnect (Baileys restores session)
+ * but the "open" webhook event is lost. This fire-and-forget function waits 10s,
+ * then queries the Evolution API directly to check the real connection state.
+ * If the instance is actually connected, it updates the DB accordingly.
+ */
+async function scheduleStatusVerification(
+  supabaseClient: ReturnType<typeof createClient>,
+  instanceId: string,
+  instanceName: string,
+  apiUrl: string,
+  apiKey: string,
+  requestId: string,
+): Promise<void> {
+  try {
+    console.log(`[AUTO-SYNC] ⏳ Scheduling status verification in 10s for ${instanceName} (${requestId})`);
+    
+    // Wait 10 seconds for the instance to finish reconnecting
+    await new Promise(resolve => setTimeout(resolve, 10000));
+    
+    // Query Evolution API for the real status
+    const base = apiUrl.replace(/\/+$/, '').replace(/\/manager$/i, '');
+    const url = `${base}/instance/fetchInstances?instanceName=${encodeURIComponent(instanceName)}`;
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'apikey': apiKey,
+        'Content-Type': 'application/json',
+      },
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeout);
+    
+    if (!response.ok) {
+      console.log(`[AUTO-SYNC] ❌ Evolution API returned ${response.status} for ${instanceName}`);
+      return;
+    }
+    
+    const data = await response.json();
+    
+    // Extract connection status from response (handles array or single object)
+    let connectionStatus = 'unknown';
+    if (Array.isArray(data) && data.length > 0) {
+      const inst = data[0];
+      connectionStatus = (inst.connectionStatus || inst.status || inst.instance?.connectionStatus || '').toLowerCase();
+    } else if (data && typeof data === 'object') {
+      connectionStatus = (data.connectionStatus || data.status || data.instance?.connectionStatus || '').toLowerCase();
+    }
+    
+    console.log(`[AUTO-SYNC] 🔍 Real status for ${instanceName}: ${connectionStatus}`);
+    
+    if (connectionStatus === 'open' || connectionStatus === 'connected') {
+      // Instance is actually connected! Update DB.
+      console.log(`[AUTO-SYNC] ✅ Instance ${instanceName} is actually connected! Updating DB...`);
+      
+      // Extract phone number from the response
+      let phoneNumber: string | null = null;
+      if (Array.isArray(data) && data.length > 0) {
+        const owner = data[0].owner || data[0].instance?.owner;
+        if (owner && typeof owner === 'string') {
+          const atIdx = owner.indexOf('@');
+          const digits = (atIdx !== -1 ? owner.slice(0, atIdx) : owner).replace(/\D/g, '');
+          if (digits.length >= 10 && digits.length <= 15) {
+            phoneNumber = digits;
+          }
+        }
+      }
+      
+      const updatePayload: Record<string, unknown> = {
+        status: 'connected',
+        awaiting_qr: false,
+        manual_disconnect: false,
+        disconnected_since: null,
+        last_alert_sent_at: null,
+        alert_sent_for_current_disconnect: false,
+        reconnect_attempts_count: 0,
+        updated_at: new Date().toISOString(),
+      };
+      
+      if (phoneNumber) {
+        updatePayload.phone_number = phoneNumber;
+        console.log(`[AUTO-SYNC] 📱 Phone number: ${phoneNumber.slice(0, 2)}***${phoneNumber.slice(-4)}`);
+      }
+      
+      const { error } = await supabaseClient
+        .from('whatsapp_instances')
+        .update(updatePayload)
+        .eq('id', instanceId)
+        .in('status', ['awaiting_qr', 'connecting']); // Only update if still stuck
+      
+      if (error) {
+        console.log(`[AUTO-SYNC] ❌ DB update failed for ${instanceName}: ${error.message}`);
+      } else {
+        console.log(`[AUTO-SYNC] ✅ DB updated successfully for ${instanceName}`);
+      }
+    } else {
+      console.log(`[AUTO-SYNC] ℹ️ Instance ${instanceName} is not connected (${connectionStatus}), no action needed`);
+    }
+  } catch (err: any) {
+    console.log(`[AUTO-SYNC] ❌ Error in status verification for ${instanceName}: ${err?.message || err}`);
+  }
+}
+
 // Fetch connected phone number from Evolution API
 async function fetchConnectedPhoneNumber(
   apiUrl: string,
@@ -4285,6 +4394,20 @@ serve(async (req) => {
           if (isAlreadyAwaitingQr) {
             dbStatus = 'awaiting_qr';
             logDebug('CONNECTION', `Preserving awaiting_qr status (ignoring connecting state)`, { requestId });
+            
+            // AUTO-SYNC: Schedule a delayed verification to detect instances that
+            // reconnected after container restart but whose "open" event was lost.
+            // This runs fire-and-forget (does not block webhook response).
+            if (instance.api_url && instance.api_key) {
+              scheduleStatusVerification(
+                supabaseClient,
+                instance.id,
+                instance.instance_name,
+                instance.api_url,
+                instance.api_key,
+                requestId,
+              ).catch(err => console.log(`[AUTO-SYNC] Fire-and-forget error: ${err}`));
+            }
           } else if (instance.status === 'connected') {
             // NEVER downgrade from connected to connecting via webhook events.
             // Evolution API v2.3.7 (Baileys) sends periodic "connecting" events as keep-alive,
