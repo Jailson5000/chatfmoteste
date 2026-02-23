@@ -76,14 +76,25 @@ export function useCompanyApproval(): CompanyApprovalStatus {
       return;
     }
 
+    const fetchWithTimeout = <T,>(promiseLike: PromiseLike<T>, timeoutMs = 15000): Promise<T> => {
+      return Promise.race([
+        Promise.resolve(promiseLike),
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+        )
+      ]);
+    };
+
     const fetchApprovalStatus = async () => {
       try {
         // First get user's law_firm_id from profile
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('law_firm_id')
-          .eq('id', user.id)
-          .maybeSingle();
+        const { data: profile, error: profileError } = await fetchWithTimeout(
+          supabase
+            .from('profiles')
+            .select('law_firm_id')
+            .eq('id', user.id)
+            .maybeSingle()
+        );
 
         if (profileError || !profile?.law_firm_id) {
           console.log('[useCompanyApproval] No law_firm_id found for user');
@@ -108,21 +119,23 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         }
 
         // Get company status, trial info, suspension info, and law_firm subdomain
-        const { data: company, error: companyError } = await supabase
-          .from('companies')
-          .select(`
-            approval_status, 
-            rejection_reason, 
-            name,
-            status,
-            suspended_reason,
-            trial_type,
-            trial_ends_at,
-            law_firm:law_firms(subdomain),
-            plan:plans!companies_plan_id_fkey(name, price)
-          `)
-          .eq('law_firm_id', profile.law_firm_id)
-          .maybeSingle();
+        const { data: company, error: companyError } = await fetchWithTimeout(
+          supabase
+            .from('companies')
+            .select(`
+              approval_status, 
+              rejection_reason, 
+              name,
+              status,
+              suspended_reason,
+              trial_type,
+              trial_ends_at,
+              law_firm:law_firms(subdomain),
+              plan:plans!companies_plan_id_fkey(name, price)
+            `)
+            .eq('law_firm_id', profile.law_firm_id)
+            .maybeSingle()
+        );
 
         if (companyError || !company) {
           console.log('[useCompanyApproval] No company found for law_firm_id:', profile.law_firm_id);
@@ -181,24 +194,34 @@ export function useCompanyApproval(): CompanyApprovalStatus {
           suspended_reason: suspendedReason,
           loading: false,
         }));
-      } catch (err) {
+      } catch (err: any) {
         console.error('[useCompanyApproval] Error:', err);
-        // SECURITY: Block access on any error - fail secure
-        setStatus(prev => ({
-          ...prev,
-          approval_status: 'rejected', // BLOCK access on error
-          rejection_reason: 'Erro ao verificar acesso. Tente novamente ou contate o suporte.',
-          company_name: null,
-          company_subdomain: null,
-          trial_type: null,
-          trial_ends_at: null,
-          trial_expired: false,
-          plan_name: null,
-          plan_price: null,
-          company_status: null,
-          suspended_reason: null,
-          loading: false,
-        }));
+        if (err?.message === 'TIMEOUT') {
+          console.warn('[useCompanyApproval] Query timed out after 15s');
+          // Don't block - let ProtectedRoute show retry button
+          setStatus(prev => ({
+            ...prev,
+            approval_status: null,
+            loading: false,
+          }));
+        } else {
+          // SECURITY: Block access on any other error - fail secure
+          setStatus(prev => ({
+            ...prev,
+            approval_status: 'rejected',
+            rejection_reason: 'Erro ao verificar acesso. Tente novamente ou contate o suporte.',
+            company_name: null,
+            company_subdomain: null,
+            trial_type: null,
+            trial_ends_at: null,
+            trial_expired: false,
+            plan_name: null,
+            plan_price: null,
+            company_status: null,
+            suspended_reason: null,
+            loading: false,
+          }));
+        }
       }
     };
 

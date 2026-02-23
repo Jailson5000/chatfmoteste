@@ -1,7 +1,9 @@
+import { useState, useEffect } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompanyApproval } from "@/hooks/useCompanyApproval";
 import { useTenant } from "@/hooks/useTenant";
+import { Button } from "@/components/ui/button";
 import PendingApproval from "@/pages/PendingApproval";
 import CompanyBlocked from "@/pages/CompanyBlocked";
 import TenantMismatch from "@/pages/TenantMismatch";
@@ -28,6 +30,7 @@ interface ProtectedRouteProps {
  */
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading, mustChangePassword } = useAuth();
+  const [showRetry, setShowRetry] = useState(false);
   const { 
     approval_status, 
     rejection_reason, 
@@ -42,6 +45,28 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     loading: approvalLoading 
   } = useCompanyApproval();
   const { subdomain: currentSubdomain, isMainDomain, isLoading: tenantLoading } = useTenant();
+
+  // Timer to show retry button after 10s of loading
+  useEffect(() => {
+    if (approvalLoading || tenantLoading) {
+      setShowRetry(false);
+      const timer = setTimeout(() => setShowRetry(true), 10000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowRetry(false);
+    }
+  }, [approvalLoading, tenantLoading]);
+
+  // Timer to show retry button after 10s of loading
+  useEffect(() => {
+    if (approvalLoading || tenantLoading) {
+      setShowRetry(false);
+      const timer = setTimeout(() => setShowRetry(true), 10000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowRetry(false);
+    }
+  }, [approvalLoading, tenantLoading]);
 
   // Show loading while checking auth
   if (loading) {
@@ -67,6 +92,16 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
           <p className="text-muted-foreground">Verificando acesso...</p>
+          {showRetry && (
+            <div className="flex flex-col items-center gap-2 mt-2">
+              <p className="text-sm text-muted-foreground">
+                O servidor está demorando mais que o normal...
+              </p>
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                Tentar novamente
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     );
