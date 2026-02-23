@@ -5569,9 +5569,9 @@ serve(async (req) => {
         // ========================================================================
         if (mediaUrl && ['image', 'document', 'audio', 'video', 'ptt', 'sticker'].includes(messageType) && !isFromMe) {
           try {
-            const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
-            const evolutionBaseUrl = evolutionBaseUrlRaw.replace(/\/+$/, '');
-            const evolutionApiKey = Deno.env.get('EVOLUTION_GLOBAL_API_KEY') ?? '';
+            // Use instance-specific credentials (not global env vars)
+            const evolutionBaseUrl = (instance.api_url || '').replace(/\/+$/, '').replace(/\/manager$/i, '');
+            const evolutionApiKey = instance.api_key || '';
 
             const persistedUrl = await persistMediaToStorage(
               supabaseClient,
