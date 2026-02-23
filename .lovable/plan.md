@@ -1,84 +1,64 @@
 
 
-## Corrigir Erro: Funcao SQL `get_global_ai_usage`
+## Corrigir Download de Midia pelo Menu de Acoes
 
-### Problema
+### Problema Encontrado
 
-A funcao SQL `get_global_ai_usage` no banco de dados referencia uma coluna chamada `period_start` na tabela `usage_records`, mas essa coluna nao existe. O nome real da coluna eh `billing_period` (tipo `text`).
+O botao "Baixar" no menu de acoes da mensagem (tres pontinhos) usa a funcao `handleDownloadMedia` que SEMPRE chama a Evolution API para descriptografar a midia. Isso ignora completamente o `media_url` da mensagem, que frequentemente ja eh uma URL publica do Storage (midia persistida).
 
-Isso causa o erro `column "period_start" does not exist` no Postgres toda vez que o dashboard Global Admin tenta carregar metricas de uso de IA.
+Resultado: quando a midia original do WhatsApp ja expirou (apos ~48h), o download falha com "Falha ao baixar midia" mesmo que a copia esteja disponivel no Storage.
+
+O `DocumentViewer`, `ImageViewer`, `AudioPlayer` e `VideoPlayer` ja tratam isso corretamente - eles verificam se a URL eh publica antes de tentar descriptografar. Mas o menu "Baixar" nao usa essa logica.
 
 ### Correcao
 
-Recriar a funcao `get_global_ai_usage` substituindo todas as referencias de `period_start` por `billing_period`. Como `billing_period` eh do tipo `text` (e nao `date`), as comparacoes precisam ser ajustadas para usar cast ou formato compativel.
+**Arquivo: `src/pages/Conversations.tsx` (funcao `handleDownloadMedia`)**
 
-A coluna `billing_period` armazena valores como `2026-02` (formato YYYY-MM). Precisamos adaptar as queries para comparar por texto de periodo mensal em vez de comparacao de datas.
+Adicionar verificacao do `media_url` da mensagem antes de chamar a Evolution API:
 
-### Detalhes Tecnicos
+1. Buscar a mensagem pelo `whatsappMessageId` na lista de mensagens local
+2. Se a mensagem tem `media_url` que eh uma URL publica do Storage, baixar diretamente dela
+3. Se a URL eh de arquivo interno (`internal-chat-files`), gerar signed URL e baixar
+4. Somente como fallback, chamar a Evolution API para descriptografar
 
-**Migracao SQL a executar:**
+```text
+const handleDownloadMedia = useCallback(async (whatsappMessageId, conversationId, _fileName) => {
+  try {
+    toast({ title: "Baixando midia..." });
 
-```sql
-CREATE OR REPLACE FUNCTION public.get_global_ai_usage()
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  result jsonb;
-  current_period text;
-  last_period text;
-BEGIN
-  IF NOT is_admin(auth.uid()) THEN
-    RETURN jsonb_build_object('error', 'access_denied');
-  END IF;
+    // 1. Buscar mensagem local para verificar se ja tem media_url publica
+    const msg = messages.find(m => m.whatsapp_message_id === whatsappMessageId);
+    const mediaUrl = msg?.media_url;
+    
+    // 2. Se tem URL publica do Storage, baixar diretamente
+    if (mediaUrl && isPublicStorageUrl(mediaUrl)) {
+      const response = await fetch(mediaUrl);
+      const blob = await response.blob();
+      // ... gerar nome e baixar via blob
+      return;
+    }
+    
+    // 3. Se eh arquivo interno, usar signed URL
+    if (mediaUrl && (mediaUrl.startsWith('internal-chat-files://') || mediaUrl.includes('/internal-chat-files/'))) {
+      // ... extrair path, gerar signed URL, baixar
+      return;
+    }
 
-  current_period := to_char(now(), 'YYYY-MM');
-  last_period := to_char(now() - interval '1 month', 'YYYY-MM');
-
-  SELECT jsonb_build_object(
-    'current_month', jsonb_build_object(
-      'ai_conversations', COALESCE((
-        SELECT SUM(count) FROM usage_records
-        WHERE usage_type = 'ai_conversation'
-        AND billing_period = current_period
-      ), 0),
-      'tts_minutes', COALESCE((
-        SELECT SUM(count) FROM usage_records
-        WHERE usage_type = 'tts_minutes'
-        AND billing_period = current_period
-      ), 0)
-    ),
-    'last_month', jsonb_build_object(
-      'ai_conversations', COALESCE((
-        SELECT SUM(count) FROM usage_records
-        WHERE usage_type = 'ai_conversation'
-        AND billing_period = last_period
-      ), 0),
-      'tts_minutes', COALESCE((
-        SELECT SUM(count) FROM usage_records
-        WHERE usage_type = 'tts_minutes'
-        AND billing_period = last_period
-      ), 0)
-    ),
-    'total_companies', (SELECT COUNT(*) FROM companies WHERE status = 'active'),
-    'last_webhook_cleanup', (
-      SELECT value->>'ran_at' FROM system_settings WHERE key = 'last_webhook_cleanup'
-    )
-  ) INTO result;
-
-  RETURN result;
-END;
-$$;
+    // 4. Fallback: descriptografar via Evolution API
+    const response = await supabase.functions.invoke("evolution-api", { ... });
+    // ... logica atual
+  }
+});
 ```
+
+**Arquivo: `src/components/kanban/KanbanChatPanel.tsx` (mesma funcao)**
+
+Aplicar a mesma correcao na funcao `handleDownloadMedia` do painel Kanban, que tem a mesma logica duplicada.
 
 ### O que muda
 
-- `period_start >= current_month_start` vira `billing_period = current_period` (formato 'YYYY-MM')
-- `period_start >= last_month_start AND period_start < current_month_start` vira `billing_period = last_period`
-- Variaveis de data (`current_month_start`, `last_month_start`) substituidas por variaveis de texto (`current_period`, `last_period`)
-
-### Sobre o warning do React
-
-O warning "Function components cannot be given refs" no `GlobalAdminConnections` eh um aviso cosmetico do Radix UI DropdownMenu e nao causa nenhum problema funcional. Todos os `DropdownMenuTrigger` ja usam `asChild` corretamente. Este warning pode ser ignorado com seguranca.
+- Download de midias ja persistidas no Storage funciona mesmo quando a midia original do WhatsApp expirou
+- Menos chamadas desnecessarias a Evolution API (mais rapido)
+- Fallback para Evolution API continua funcionando para midias ainda nao persistidas
+- Dois arquivos editados com a mesma correcao
 
