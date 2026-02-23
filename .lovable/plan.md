@@ -1,73 +1,84 @@
 
 
-## Corrigir Login Travado em "Entrando..."
+## Corrigir Erro: Funcao SQL `get_global_ai_usage`
 
 ### Problema
 
-O login esta travado em "Entrando..." em AMBAS as telas (regular e global admin) porque a chamada `signInWithPassword` depende do banco de dados (GoTrue -> Postgres), e quando o banco esta lento ou com timeout, a chamada fica pendente sem limite de tempo. A terceira tela (fmoadv) mostra apenas o logo porque o `useAuth` esta preso no loading (sessao antiga com refresh token invalido).
+A funcao SQL `get_global_ai_usage` no banco de dados referencia uma coluna chamada `period_start` na tabela `usage_records`, mas essa coluna nao existe. O nome real da coluna eh `billing_period` (tipo `text`).
 
-### Causa Raiz
+Isso causa o erro `column "period_start" does not exist` no Postgres toda vez que o dashboard Global Admin tenta carregar metricas de uso de IA.
 
-1. Os logs de auth mostram restart do servico de auth as 13:28-13:29, invalidando todos os refresh tokens
-2. Tentativas de refresh retornam "Refresh Token Not Found" (13:30 e 13:32)
-3. `signInWithPassword` nao tem timeout - fica pendente quando o DB esta lento
-4. `GlobalAdminAuth` nao reseta `isSubmitting` no caminho de sucesso (so no erro)
+### Correcao
 
-### Correcoes
+Recriar a funcao `get_global_ai_usage` substituindo todas as referencias de `period_start` por `billing_period`. Como `billing_period` eh do tipo `text` (e nao `date`), as comparacoes precisam ser ajustadas para usar cast ou formato compativel.
 
-**Arquivo 1: `src/pages/Auth.tsx`**
+A coluna `billing_period` armazena valores como `2026-02` (formato YYYY-MM). Precisamos adaptar as queries para comparar por texto de periodo mensal em vez de comparacao de datas.
 
-Envolver `signInWithPassword` com timeout de 15 segundos:
+### Detalhes Tecnicos
 
-```text
-const loginWithTimeout = Promise.race([
-  supabase.auth.signInWithPassword({ email, password }),
-  new Promise((_, reject) => 
-    setTimeout(() => reject(new Error('TIMEOUT')), 15000)
-  )
-]);
+**Migracao SQL a executar:**
+
+```sql
+CREATE OR REPLACE FUNCTION public.get_global_ai_usage()
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  result jsonb;
+  current_period text;
+  last_period text;
+BEGIN
+  IF NOT is_admin(auth.uid()) THEN
+    RETURN jsonb_build_object('error', 'access_denied');
+  END IF;
+
+  current_period := to_char(now(), 'YYYY-MM');
+  last_period := to_char(now() - interval '1 month', 'YYYY-MM');
+
+  SELECT jsonb_build_object(
+    'current_month', jsonb_build_object(
+      'ai_conversations', COALESCE((
+        SELECT SUM(count) FROM usage_records
+        WHERE usage_type = 'ai_conversation'
+        AND billing_period = current_period
+      ), 0),
+      'tts_minutes', COALESCE((
+        SELECT SUM(count) FROM usage_records
+        WHERE usage_type = 'tts_minutes'
+        AND billing_period = current_period
+      ), 0)
+    ),
+    'last_month', jsonb_build_object(
+      'ai_conversations', COALESCE((
+        SELECT SUM(count) FROM usage_records
+        WHERE usage_type = 'ai_conversation'
+        AND billing_period = last_period
+      ), 0),
+      'tts_minutes', COALESCE((
+        SELECT SUM(count) FROM usage_records
+        WHERE usage_type = 'tts_minutes'
+        AND billing_period = last_period
+      ), 0)
+    ),
+    'total_companies', (SELECT COUNT(*) FROM companies WHERE status = 'active'),
+    'last_webhook_cleanup', (
+      SELECT value->>'ran_at' FROM system_settings WHERE key = 'last_webhook_cleanup'
+    )
+  ) INTO result;
+
+  RETURN result;
+END;
+$$;
 ```
 
-No catch de TIMEOUT, mostrar toast "Servidor lento, tente novamente".
+### O que muda
 
-**Arquivo 2: `src/pages/global-admin/GlobalAdminAuth.tsx`**
+- `period_start >= current_month_start` vira `billing_period = current_period` (formato 'YYYY-MM')
+- `period_start >= last_month_start AND period_start < current_month_start` vira `billing_period = last_period`
+- Variaveis de data (`current_month_start`, `last_month_start`) substituidas por variaveis de texto (`current_period`, `last_period`)
 
-Duas correcoes:
-1. Adicionar timeout de 15s ao `signIn`
-2. Garantir que `setIsSubmitting(false)` SEMPRE execute, mesmo no caminho de sucesso (usar `finally`)
+### Sobre o warning do React
 
-```text
-try {
-  // ... login logic
-} catch {
-  toast.error("Erro ao fazer login");
-} finally {
-  setIsSubmitting(false); // SEMPRE reseta
-}
-```
-
-**Arquivo 3: `src/hooks/useAuth.tsx`**
-
-No `handleSessionExpired`, limpar tokens corrompidos do localStorage para evitar loops de refresh:
-
-```text
-// Limpar tokens invalidos antes de signOut
-try {
-  const keys = Object.keys(localStorage);
-  keys.forEach(key => {
-    if (key.includes('sb-') && key.includes('auth-token')) {
-      localStorage.removeItem(key);
-    }
-  });
-} catch (e) {}
-```
-
-Tambem adicionar protecao no `getSession` catch para nao ficar preso em loop quando o refresh token esta invalido.
-
-### Resultado Esperado
-
-1. Login mostra erro apos 15 segundos se o servidor estiver lento (em vez de ficar travado)
-2. Botao "Entrando..." volta ao estado "Entrar" sempre, mesmo apos sucesso
-3. Sessoes com refresh token invalido sao limpas automaticamente, permitindo novo login
-4. Tela de fmoadv mostra botao "Tentar novamente" apos 10s (ja implementado) e permite recarregar
+O warning "Function components cannot be given refs" no `GlobalAdminConnections` eh um aviso cosmetico do Radix UI DropdownMenu e nao causa nenhum problema funcional. Todos os `DropdownMenuTrigger` ja usam `asChild` corretamente. Este warning pode ser ignorado com seguranca.
 
