@@ -189,6 +189,7 @@ export default function GlobalAdminConnections() {
     syncEvolutionInstances,
     fetchPhoneNumber,
     reapplyAllWebhooks,
+    forceSyncAll,
   } = useGlobalAdminInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -425,6 +426,23 @@ export default function GlobalAdminConnections() {
               </TooltipTrigger>
               <TooltipContent>
                 <p>Reconfigurar webhooks em todas as instâncias conectadas (aplica filtros atualizados)</p>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => forceSyncAll.mutate()}
+                  disabled={forceSyncAll.isPending}
+                  className="bg-orange-600 hover:bg-orange-700"
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${forceSyncAll.isPending ? "animate-spin" : ""}`} />
+                  Forçar Sync Completo
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Reconfigura TODOS os webhooks com URL correta + sincroniza status (correção de webhooks quebrados)</p>
               </TooltipContent>
             </Tooltip>
             <Tooltip>

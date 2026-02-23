@@ -75,7 +75,8 @@ type EvolutionAction =
   | "n8n_send_reply"
   // Webhook reapply endpoints
   | "reapply_webhook"
-  | "reapply_all_webhooks";
+  | "reapply_all_webhooks"
+  | "verify_webhook_config";
 
 interface EvolutionRequest {
   action: EvolutionAction;
@@ -3213,7 +3214,7 @@ serve(async (req) => {
         let resolvedInstanceName = body.instanceName;
         if (!resolvedInstanceName && body.instanceId) {
           console.log(`[Evolution API] Resolving instanceName from instanceId: ${body.instanceId}`);
-          const { data: instanceRow, error: lookupError } = await supabaseAdmin
+          const { data: instanceRow, error: lookupError } = await supabaseClient
             .from("whatsapp_instances")
             .select("instance_name")
             .eq("id", body.instanceId)
@@ -3232,6 +3233,8 @@ serve(async (req) => {
 
         const webhookConfig = buildWebhookConfig(WEBHOOK_URL);
         
+        console.log(`[Evolution API] Webhook URL being set: ${WEBHOOK_URL.slice(0, 80)}...`);
+        
         // Try with { webhook: ... } wrapper first (required by some Evolution API versions)
         let webhookResponse = await fetchWithTimeout(`${apiUrl}/webhook/set/${resolvedInstanceName}`, {
           method: "POST",
@@ -3240,6 +3243,12 @@ serve(async (req) => {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ webhook: webhookConfig }),
+        });
+
+        const firstResponseText = await safeReadResponseText(webhookResponse);
+        console.log(`[Evolution API] Webhook config response (wrapped) for ${resolvedInstanceName}:`, {
+          status: webhookResponse.status,
+          body: firstResponseText.slice(0, 500)
         });
 
         // Fallback: if wrapped format fails with 400, try without wrapper
@@ -3253,6 +3262,12 @@ serve(async (req) => {
             },
             body: JSON.stringify(webhookConfig),
           });
+          
+          const secondResponseText = await safeReadResponseText(webhookResponse);
+          console.log(`[Evolution API] Webhook config response (unwrapped) for ${resolvedInstanceName}:`, {
+            status: webhookResponse.status,
+            body: secondResponseText.slice(0, 500)
+          });
         }
 
         if (!webhookResponse.ok) {
@@ -3260,7 +3275,59 @@ serve(async (req) => {
           throw new Error(simplifyEvolutionError(webhookResponse.status, errorText));
         }
 
-        return new Response(JSON.stringify({ success: true, message: "Webhook configured successfully" }), {
+        return new Response(JSON.stringify({ success: true, message: "Webhook configured successfully", webhookUrl: WEBHOOK_URL.slice(0, 80) }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      case "verify_webhook_config": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        let resolvedInstanceName = body.instanceName;
+        if (!resolvedInstanceName && body.instanceId) {
+          const { data: instanceRow } = await supabaseClient
+            .from("whatsapp_instances")
+            .select("instance_name")
+            .eq("id", body.instanceId)
+            .single();
+          resolvedInstanceName = instanceRow?.instance_name;
+        }
+        if (!resolvedInstanceName) {
+          throw new Error("instanceName or instanceId is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        console.log(`[Evolution API] Verifying webhook config for: ${resolvedInstanceName}`);
+        
+        const response = await fetchWithTimeout(`${apiUrl}/webhook/find/${resolvedInstanceName}`, {
+          method: "GET",
+          headers: {
+            apikey: globalApiKey,
+            "Content-Type": "application/json",
+          },
+        });
+        
+        const responseText = await safeReadResponseText(response);
+        console.log(`[Evolution API] Webhook find response for ${resolvedInstanceName}:`, responseText.slice(0, 500));
+        
+        let config;
+        try {
+          config = JSON.parse(responseText);
+        } catch {
+          config = { raw: responseText.slice(0, 500) };
+        }
+        
+        return new Response(JSON.stringify({ 
+          success: true, 
+          instance_name: resolvedInstanceName,
+          webhook_config: config,
+          expected_url: WEBHOOK_URL.slice(0, 80),
+        }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
