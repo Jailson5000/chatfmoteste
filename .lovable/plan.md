@@ -1,57 +1,71 @@
 
+# Recriar instancias na Evolution API apos reset de volumes
 
-# Corrigir Evolution API - Reverter versao e estabilizar conexoes
+## Problema
 
-## Diagnostico
+Apos o `docker compose down -v`, o banco de dados interno da Evolution API foi apagado. Todas as 8 instancias que existiam la dentro foram perdidas. No banco de dados da plataforma, elas continuam registradas mas com status `not_found_in_evolution`.
 
-O `docker-compose.yml` usa `image: evoapicloud/evolution-api:latest`, que puxou automaticamente a versao 2.3.7. Como o QR code nao funciona **nem no Manager da Evolution**, o problema e da versao da imagem Docker, nao do codigo da plataforma.
+Os botoes "Reaplicar Webhooks" e "Sincronizacao Completa" **ignoram** instancias com status `not_found_in_evolution` (filtro explicito no codigo), por isso 0 de 8 sao processadas.
 
-## Solucao em 2 partes
+O QR code ja funciona no Manager da Evolution (v2.3.3 esta OK), entao o problema e apenas que as instancias precisam ser recriadas la dentro.
 
-### Parte 1 - Infraestrutura (voce executa no servidor)
+## Solucao
 
-Trocar a imagem `latest` por uma versao fixa que estava funcionando. A ultima versao estavel conhecida para Baileys e a **2.2.3** ou **2.1.1**. Como voce estava na 2.3.x e funcionava no sabado, vamos tentar primeiro a **2.3.3** (versao anterior a 2.3.7):
+Adicionar uma funcao "Recriar Instancias Perdidas" que:
+
+1. Seleciona todas as instancias com status `not_found_in_evolution`
+2. Para cada uma, chama `global_create_instance` na Evolution API (apenas cria, sem inserir no banco pois ja existe)
+3. Configura o webhook
+4. Atualiza o status no banco para `awaiting_qr`
+
+## Alteracoes
+
+### 1. Edge Function: `supabase/functions/evolution-api/index.ts`
+
+Adicionar nova action `global_recreate_instance` que:
+- Recebe `instanceName` (obrigatorio)
+- Cria a instancia na Evolution API via `/instance/create`
+- Configura settings (groupsIgnore, etc)
+- Configura webhook
+- NAO insere no banco (a row ja existe)
+- Atualiza o status da instancia existente para `awaiting_qr`
+- Retorna sucesso com QR code se disponivel
+
+### 2. Hook: `src/hooks/useGlobalAdminInstances.tsx`
+
+Adicionar mutation `recreateAllLostInstances` que:
+- Filtra instancias com status `not_found_in_evolution`
+- Para cada uma, chama a nova action `global_recreate_instance`
+- Exibe progresso e resultado via toast
+- Invalida queries para atualizar a UI
+
+### 3. Pagina: `src/pages/global-admin/GlobalAdminConnections.tsx`
+
+Adicionar botao "Recriar Instancias Perdidas" visivel quando existem instancias com status `not_found_in_evolution`. O botao ficara junto aos existentes (Reaplicar Webhooks, Sincronizacao Completa).
+
+## Fluxo esperado
 
 ```text
-No docker-compose.yml, trocar:
-  image: evoapicloud/evolution-api:latest
-Por:
-  image: evoapicloud/evolution-api:v2.3.3
+Botao "Recriar Instancias Perdidas" clicado
+  |
+  v
+Para cada instancia "not_found_in_evolution":
+  |
+  +-- POST /instance/create (Evolution API)
+  +-- POST /settings/set (groupsIgnore=true)
+  +-- POST /webhook/set (webhook URL)
+  +-- UPDATE whatsapp_instances SET status='awaiting_qr'
+  |
+  v
+Toast: "6 de 8 instancias recriadas. Escaneie os QR Codes."
+  |
+  v
+Usuarios podem gerar QR code normalmente pela plataforma
 ```
 
-Depois aplicar:
+## Escopo
 
-```text
-cd /opt/stacks/evolution
-docker compose down
-docker compose pull
-docker compose up -d
-sleep 30
-docker stats --no-stream
-```
-
-Se 2.3.3 nao funcionar, testar `v2.3.5` ou `v2.3.0`.
-
-### Parte 2 - Codigo (eu implemento)
-
-Ajustar a edge function `evolution-api` para:
-
-1. **Adicionar timeout mais curto no Level 1** - reduzir de 15s para 10s por tentativa, dando mais agilidade ao fluxo
-2. **Adicionar deteccao de versao da API** - logar a versao da Evolution detectada para futuro debug
-3. **Melhorar mensagem de erro** - quando todos os niveis falharem, informar claramente que o problema pode ser da versao da API
-
-### Arquivo modificado
-
-- `supabase/functions/evolution-api/index.ts` - ajustes menores no fluxo de recovery
-
-## Ordem de execucao
-
-1. Voce altera o `docker-compose.yml` no servidor (pinando a versao)
-2. Eu ajusto o codigo da edge function
-3. Voce testa gerando QR code no Manager da Evolution primeiro
-4. Se funcionar no Manager, testa pela plataforma
-
-## Por que isso aconteceu
-
-A tag `latest` no Docker sempre puxa a versao mais recente. Quando a Evolution API lancou a 2.3.7, o restart do Docker baixou essa versao automaticamente, substituindo a que estava funcionando. Pinar a versao impede isso no futuro.
-
+- 3 arquivos modificados
+- 1 nova action na edge function (~60 linhas)
+- 1 nova mutation no hook (~40 linhas)
+- 1 novo botao na pagina (~10 linhas)
