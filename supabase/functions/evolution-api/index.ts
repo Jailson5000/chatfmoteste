@@ -903,27 +903,74 @@ serve(async (req) => {
               const createError = await safeReadResponseText(createResponse);
               console.error(`[Evolution API] Failed to recreate instance:`, createError);
               
-              // If 403 "name in use", try logout+connect instead
+              // If 403 "name in use", try logout+connect with retries
               if (createResponse.status === 403) {
-                console.log(`[Evolution API] 403 on create - trying logout+connect fallback...`);
+                console.log(`[Evolution API] 403 on create - trying logout+connect fallback with retries...`);
                 try {
                   await fetchWithTimeout(`${apiUrl}/instance/logout/${instance.instance_name}`, {
                     method: "DELETE",
                     headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
                   }, 10000).catch(() => {});
                   
-                  await new Promise(resolve => setTimeout(resolve, 3000));
+                  await new Promise(resolve => setTimeout(resolve, 5000));
                   
-                  const fallbackConnect = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
-                    method: "GET",
-                    headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-                  });
+                  let fb404Succeeded = false;
+                  for (let fbAttempt = 1; fbAttempt <= 3; fbAttempt++) {
+                    console.log(`[Evolution API] 404->403 fallback connect attempt ${fbAttempt}...`);
+                    const fallbackConnect = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+                      method: "GET",
+                      headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                    });
+                    
+                    if (fallbackConnect.ok) {
+                      const fbData = await fallbackConnect.json();
+                      console.log(`[Evolution API] 404->403 fallback attempt ${fbAttempt} response:`, JSON.stringify(fbData).slice(0, 300));
+                      const fbQr = fbData.base64 || fbData.qrcode?.base64 || fbData.qrcode || fbData.code || null;
+                      
+                      if (fbQr) {
+                        console.log(`[Evolution API] ✅ 404->403 fallback succeeded on attempt ${fbAttempt} - QR obtained!`);
+                        wasRecreatedFrom404 = true;
+                        // Build a synthetic response-like object for downstream
+                        qrResponse = new Response(JSON.stringify(fbData), {
+                          status: 200,
+                          headers: { "Content-Type": "application/json" },
+                        });
+                        fb404Succeeded = true;
+                        break;
+                      }
+                    }
+                    
+                    if (fbAttempt < 3) {
+                      await new Promise(resolve => setTimeout(resolve, 5000));
+                    }
+                  }
                   
-                  if (fallbackConnect.ok) {
-                    qrResponse = fallbackConnect;
-                    console.log(`[Evolution API] Logout+connect fallback succeeded`);
-                  } else {
-                    throw new Error("Instância existe no servidor mas não gera QR. Aguarde alguns minutos e tente novamente.");
+                  if (!fb404Succeeded) {
+                    // Check connectionState
+                    try {
+                      const stResp = await fetchWithTimeout(`${apiUrl}/instance/connectionState/${instance.instance_name}`, {
+                        method: "GET",
+                        headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                      });
+                      if (stResp.ok) {
+                        const stData = await stResp.json();
+                        const st = stData.instance?.state || stData.state || "unknown";
+                        console.log(`[Evolution API] 404->403 fallback final connectionState: ${st}`);
+                        if (st === "connecting") {
+                          wasRecreatedFrom404 = true;
+                          qrResponse = new Response(JSON.stringify({ count: 0 }), {
+                            status: 200,
+                            headers: { "Content-Type": "application/json" },
+                          });
+                        } else {
+                          throw new Error("Instância existe no servidor mas não gera QR. Aguarde 1 minuto e tente novamente.");
+                        }
+                      } else {
+                        throw new Error("Instância existe no servidor mas não gera QR. Aguarde 1 minuto e tente novamente.");
+                      }
+                    } catch (stErr: any) {
+                      throw new Error(stErr.message || "Instância existe no servidor mas não gera QR. Aguarde 1 minuto e tente novamente.");
+                    }
                   }
                 } catch (fallbackErr: any) {
                   throw new Error(fallbackErr.message || "Não foi possível recriar a instância.");
@@ -1159,7 +1206,85 @@ serve(async (req) => {
             }
 
             if (!recreateSuccess) {
-              throw new Error("Não foi possível recriar a instância após múltiplas tentativas. Aguarde alguns minutos e tente novamente.");
+              // === FALLBACK: Instance still exists (403), try logout+connect ===
+              console.log(`[Evolution API] All recreate attempts got 403 - instance still exists. Trying logout+connect fallback...`);
+              try {
+                await fetchWithTimeout(`${apiUrl}/instance/logout/${instance.instance_name}`, {
+                  method: "DELETE",
+                  headers: recoveryHeaders,
+                }, 10000).catch(() => {});
+                
+                await new Promise(resolve => setTimeout(resolve, 5000));
+                
+                let fallback403Qr: string | null = null;
+                for (let fb = 1; fb <= 3; fb++) {
+                  console.log(`[Evolution API] 403 fallback connect attempt ${fb}...`);
+                  const fbResp = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+                    method: "GET",
+                    headers: recoveryHeaders,
+                  });
+                  if (fbResp.ok) {
+                    const fbData = await fbResp.json();
+                    console.log(`[Evolution API] 403 fallback attempt ${fb} response:`, JSON.stringify(fbData).slice(0, 300));
+                    fallback403Qr = fbData.base64 || fbData.qrcode?.base64 || fbData.qrcode || fbData.code || null;
+                    if (fallback403Qr) {
+                      console.log(`[Evolution API] ✅ 403 fallback succeeded on attempt ${fb} - QR obtained!`);
+                      await supabaseClient
+                        .from("whatsapp_instances")
+                        .update({ 
+                          status: "awaiting_qr", 
+                          awaiting_qr: true,
+                          manual_disconnect: false,
+                          reconnect_attempts_count: 0,
+                          updated_at: new Date().toISOString() 
+                        })
+                        .eq("id", body.instanceId);
+
+                      return new Response(
+                        JSON.stringify({
+                          success: true,
+                          qrCode: fallback403Qr,
+                          status: "awaiting_qr",
+                          message: "Sessão recuperada - escaneie o QR code",
+                          recovered: true,
+                        }),
+                        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                      );
+                    }
+                  }
+                  if (fb < 3) {
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                  }
+                }
+                
+                // Check connectionState
+                try {
+                  const stResp = await fetchWithTimeout(`${apiUrl}/instance/connectionState/${instance.instance_name}`, {
+                    method: "GET",
+                    headers: recoveryHeaders,
+                  });
+                  if (stResp.ok) {
+                    const stData = await stResp.json();
+                    const st = stData.instance?.state || stData.state || "unknown";
+                    console.log(`[Evolution API] 403 fallback final connectionState: ${st}`);
+                    if (st === "open" || st === "connected") {
+                      return new Response(
+                        JSON.stringify({
+                          success: true,
+                          qrCode: null,
+                          status: "connected",
+                          message: "Instância já está conectada!",
+                        }),
+                        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                      );
+                    }
+                  }
+                } catch (_) {}
+                
+                throw new Error("Instância existe no servidor mas não gerou QR. Aguarde 1 minuto e tente novamente.");
+              } catch (fb403Err: any) {
+                throw new Error(fb403Err.message || "Não foi possível recriar a instância após múltiplas tentativas.");
+              }
             }
 
             // Configure settings (groupsIgnore)
