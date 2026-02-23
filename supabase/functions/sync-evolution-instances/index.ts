@@ -305,7 +305,8 @@ serve(async (req) => {
         }
       );
 
-      const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
+      const token = authHeader.replace("Bearer ", "");
+      const { data: { user }, error: authError } = await supabaseUser.auth.getUser(token);
       
       if (authError || !user) {
         console.error("[sync-evolution-instances] Auth error:", authError?.message);
