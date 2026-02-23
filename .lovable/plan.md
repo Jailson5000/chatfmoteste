@@ -1,62 +1,51 @@
 
-# Correcao: Level 2 Recovery com Delete+Recreate para Limpar Sessoes
+# Fix: Auto-Sync de Status Apos Restart do Container
 
-## Problema Atual
+## Problema
+Apos o `docker restart evolution`, as instancias que ja estavam conectadas (como `inst_5fjooku6`) enviaram eventos `connection.update` com `state: "connecting"` e depois `state: "open"`, mas o evento `open` foi perdido ou chegou antes do webhook estar pronto. Resultado: o banco ficou com `awaiting_qr` enquanto a Evolution mostra "Connected".
 
-As instancias estao presas em "connecting" na Evolution API porque os arquivos de sessao no disco do container estao corrompidos. O fluxo atual de recuperacao (Level 2) faz apenas logout + connect, mas isso nao remove os arquivos de sessao do disco. Resultado: a Evolution API tenta reconectar usando a sessao antiga e nunca gera QR code novo.
+## Solucao Imediata
+Clicar no botao **"Atualizar Todas"** na pagina `/global-admin/connections`. Isso ja existe e chama `refresh_status` para cada instancia, consultando a Evolution API diretamente e atualizando o banco.
 
-Os logs confirmam: `inst_5fjooku6` gerou QR com sucesso (provavelmente porque sua sessao estava limpa), mas as outras instancias ficam retornando `{"count":0}` sem QR.
+## Solucao Automatica (Implementacao)
+Adicionar logica no webhook para que, quando receber um evento `connecting` e a instancia tiver status `awaiting_qr` no banco, agende uma verificacao automatica apos 10 segundos. Isso captura instancias que reconectaram automaticamente mas cujo evento `open` foi perdido.
 
-## Solucao
+### Mudancas
 
-Transformar o Level 2 recovery de "logout + connect" para "logout + delete + create + connect". O `delete` forca a Evolution API a remover os arquivos de sessao do disco. O `create` recria a instancia limpa. O `connect` gera o QR code.
+**Arquivo: `supabase/functions/evolution-webhook/index.ts`**
 
-Isso elimina a necessidade de limpeza manual no VPS (docker exec rm -rf).
+No bloco `connection.update`, apos processar o estado `connecting` para instancias em `awaiting_qr` (linha ~4285-4287):
 
-## Mudancas Tecnicas
+1. Adicionar uma chamada assincrona (fire-and-forget) que aguarda 10 segundos e depois faz um `fetchInstances` na Evolution API para verificar o estado real
+2. Se o estado real for `open`, atualizar o banco para `connected` com as flags corretas (limpar `awaiting_qr`, `disconnected_since`, etc.)
+3. Logar o resultado da verificacao para diagnostico
 
-### Arquivo: `supabase/functions/evolution-api/index.ts`
+Isso resolve o caso em que:
+- Container reinicia
+- Instancia reconecta automaticamente (Baileys restabelece sessao)
+- Evento `open` e perdido
+- O webhook recebe `connecting` mas faz auto-verificacao em 10s
 
-**Linhas 1306-1352** - Substituir o Level 2 recovery:
+**Arquivo: `supabase/functions/evolution-webhook/index.ts`** (tambem)
 
-Antes:
-```
-Level 2: logout -> wait 3s -> connect (2 tentativas)
-```
+Adicionar uma funcao helper `scheduleStatusVerification()` que:
+- Aguarda 10 segundos (`await new Promise(resolve => setTimeout(resolve, 10000))`)
+- Faz GET em `/instance/fetchInstances?instanceName=...`
+- Se `connectionStatus === "open"`, atualiza o banco para `connected`
+- Nao bloqueia a resposta do webhook (roda em background com `event.waitUntil` ou fire-and-forget)
 
-Depois:
-```
-Level 2: logout -> delete -> wait 3s -> create (com webhook+settings) -> wait 2s -> connect (2 tentativas)
-```
+### Detalhe Tecnico
 
-Detalhes:
-1. Manter o logout existente (linha 1312-1320)
-2. Adicionar `DELETE /instance/delete/{instanceName}` apos o logout para forcar remocao dos arquivos de sessao
-3. Manter o delay de 3s (linha 1322)
-4. Adicionar `POST /instance/create` com `instanceName`, `qrcode: true`, `integration: "WHATSAPP-BAILEYS"` e webhook config - extrair QR se retornar inline
-5. Adicionar `POST /settings/set/{instanceName}` com `groupsIgnore: true`
-6. Adicionar `POST /webhook/set/{instanceName}` para reconfigurar webhook
-7. Se o create retornar QR inline, retornar imediatamente (sem precisar do connect)
-8. Caso contrario, aguardar 2s e fazer as 2 tentativas de connect normais
+```text
+Fluxo atual:
+  webhook recebe connecting -> preserva awaiting_qr -> fim
 
-### Deploy
-Redeployar a edge function `evolution-api`.
-
-### Acao Manual no VPS (Opcional mas Recomendada)
-
-Para resolver imediatamente as 7 instancias que estao travadas agora, o ideal e limpar o VPS:
-
-```bash
-docker exec evolution-api rm -rf /evolution/instances/inst_*/
-docker restart evolution-api
+Fluxo novo:
+  webhook recebe connecting -> preserva awaiting_qr -> dispara verificacao em 10s
+  (10s depois) -> consulta Evolution API -> se open -> atualiza para connected
 ```
 
-Aguardar 30 segundos, depois clicar "Gerar QR Code" em cada empresa.
-
-Se nao quiser mexer no VPS, basta clicar "Gerar QR Code" apos o deploy - o novo Level 2 vai fazer o delete+create automaticamente e deve gerar o QR.
-
-## Resultado Esperado
-
-- Level 2 recovery limpa completamente a sessao corrompida via API (sem necessidade de acesso ao VPS)
-- QR code gerado com sucesso apos o delete+create
-- Limite de 2 tentativas mantido no auto-reconnect para nao bloquear no WhatsApp
+### Beneficio
+- Zero intervencao manual apos restart do container
+- Instancias que reconectaram sozinhas sao detectadas automaticamente
+- Sem impacto em performance (apenas 1 request extra por instancia, apenas quando em awaiting_qr)
