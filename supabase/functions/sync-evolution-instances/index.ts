@@ -282,34 +282,40 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
 
-    // Verify admin auth
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      throw new Error("Missing authorization header");
-    }
+    // Auth: support x-cron-secret header (for cron/curl) OR JWT (for admin panel)
+    const cronSecret = req.headers.get("x-cron-secret");
+    const expectedCronSecret = Deno.env.get("CRON_SECRET");
 
-    // Create a client with the user's token to validate
-    const supabaseUser = createClient(
-      Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      {
-        global: {
-          headers: { Authorization: authHeader },
-        },
+    if (cronSecret && expectedCronSecret && cronSecret === expectedCronSecret) {
+      console.log("[sync-evolution-instances] Authenticated via cron secret");
+    } else {
+      // Fallback to JWT auth
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader) {
+        throw new Error("Missing authorization header");
       }
-    );
 
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
-    
-    if (authError || !user) {
-      console.error("[sync-evolution-instances] Auth error:", authError?.message);
-      throw new Error("Unauthorized");
-    }
+      const supabaseUser = createClient(
+        Deno.env.get("SUPABASE_URL") ?? "",
+        Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+        {
+          global: {
+            headers: { Authorization: authHeader },
+          },
+        }
+      );
 
-    // Check admin role
-    const { data: isAdmin } = await supabaseAdmin.rpc("is_admin", { _user_id: user.id });
-    if (!isAdmin) {
-      throw new Error("Admin access required");
+      const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
+      
+      if (authError || !user) {
+        console.error("[sync-evolution-instances] Auth error:", authError?.message);
+        throw new Error("Unauthorized");
+      }
+
+      const { data: isAdmin } = await supabaseAdmin.rpc("is_admin", { _user_id: user.id });
+      if (!isAdmin) {
+        throw new Error("Admin access required");
+      }
     }
 
     const body = await req.json().catch(() => ({}));
