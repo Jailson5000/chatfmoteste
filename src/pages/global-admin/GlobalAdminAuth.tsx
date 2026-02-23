@@ -37,15 +37,17 @@ export default function GlobalAdminAuth() {
       const validation = loginSchema.safeParse({ email, password });
       if (!validation.success) {
         toast.error(validation.error.errors[0].message);
-        setIsSubmitting(false);
         return;
       }
 
-      const { error } = await signIn(email, password);
+      const signInPromise = signIn(email, password);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+      );
+      const { error } = await Promise.race([signInPromise, timeoutPromise]);
 
       if (error) {
         toast.error("Credenciais inválidas");
-        setIsSubmitting(false);
         return;
       }
 
@@ -53,7 +55,9 @@ export default function GlobalAdminAuth() {
         navigate("/global-admin");
       }, 500);
     } catch (error: any) {
-      toast.error("Erro ao fazer login");
+      const isTimeout = error?.message === 'TIMEOUT';
+      toast.error(isTimeout ? "Servidor lento, tente novamente" : "Erro ao fazer login");
+    } finally {
       setIsSubmitting(false);
     }
   };
