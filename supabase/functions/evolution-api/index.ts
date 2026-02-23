@@ -797,7 +797,19 @@ serve(async (req) => {
             }, 30000);
             
             if (createResponse.ok) {
-              console.log(`[Evolution API] Instance recreated successfully`);
+              // Extract QR from create response (Evolution v2.3.x returns QR inline)
+              let createQrCode: string | null = null;
+              try {
+                const createData = await createResponse.json();
+                console.log(`[Evolution API] Instance recreated successfully. Create response keys: ${Object.keys(createData)}`);
+                createQrCode = createData?.qrcode?.base64 || createData?.base64 || 
+                  (typeof createData?.qrcode === "string" ? createData.qrcode : null) || createData?.code || null;
+                if (createQrCode) {
+                  console.log(`[Evolution API] ✅ QR code extracted directly from /instance/create response!`);
+                }
+              } catch (parseErr) {
+                console.warn(`[Evolution API] Could not parse create response:`, parseErr);
+              }
               
               // CRITICAL: Configure groupsIgnore=true to prevent AI from responding in groups
               try {
@@ -839,8 +851,17 @@ serve(async (req) => {
                 body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
               }).catch(e => console.warn("[Evolution API] Webhook config failed:", e));
               
-              // Wait for Baileys v7 to fully initialize the session (needs more than 1s)
-              console.log(`[Evolution API] Waiting 5s for Baileys v7 to initialize after recreate...`);
+              // If QR was already extracted from create response, return immediately
+              if (createQrCode) {
+                console.log(`[Evolution API] Returning QR from create response (no connect needed)`);
+                return new Response(
+                  JSON.stringify({ success: true, qrCode: createQrCode, status: "awaiting_qr" }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                );
+              }
+              
+              // Fallback: Wait for Baileys v7 to fully initialize the session
+              console.log(`[Evolution API] No QR in create response, waiting 5s for Baileys v7 to initialize...`);
               await new Promise(resolve => setTimeout(resolve, 5000));
               
               // Try to get QR code with retries (Baileys v7 may need extra time)
@@ -1343,6 +1364,30 @@ serve(async (req) => {
 
               if (recreateResponse.ok) {
                 console.log(`[Evolution API] Level 3 - Recreate succeeded on attempt ${attempt}`);
+                // Extract QR from create response (Evolution v2.3.x returns QR inline)
+                try {
+                  const recreateData = await recreateResponse.json();
+                  console.log(`[Evolution API] Level 3 - Create response keys: ${Object.keys(recreateData)}`);
+                  const inlineQr = recreateData?.qrcode?.base64 || recreateData?.base64 || 
+                    (typeof recreateData?.qrcode === "string" ? recreateData.qrcode : null) || recreateData?.code || null;
+                  if (inlineQr) {
+                    console.log(`[Evolution API] ✅ Level 3 - QR extracted from /instance/create response!`);
+                    // Configure settings and webhook before returning
+                    try {
+                      await fetchWithTimeout(`${apiUrl}/settings/set/${instance.instance_name}`, {
+                        method: "POST", headers: recoveryHeaders,
+                        body: JSON.stringify({ rejectCall: false, msgCall: "", groupsIgnore: true, alwaysOnline: false, readMessages: false, readStatus: false, syncFullHistory: false }),
+                      });
+                    } catch (_) {}
+                    await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
+                      method: "POST", headers: recoveryHeaders,
+                      body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+                    }).catch(() => {});
+                    return await returnQrSuccess(inlineQr, "Level 3 (create inline)");
+                  }
+                } catch (parseErr) {
+                  console.warn(`[Evolution API] Level 3 - Could not parse create response:`, parseErr);
+                }
                 recreateSuccess = true;
                 break;
               }
