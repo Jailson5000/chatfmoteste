@@ -92,58 +92,6 @@ function shouldSkipReconnect(instance: InstanceToReconnect): { skip: boolean; re
   return { skip: false, reason: "" };
 }
 
-// Try to restart the instance via Evolution API
-async function attemptRestart(instance: InstanceToReconnect): Promise<ReconnectResult> {
-  const apiUrl = normalizeUrl(instance.api_url);
-  
-  try {
-    console.log(`[Auto-Reconnect] Attempting restart for ${instance.instance_name}...`);
-    
-    const restartResponse = await fetchWithTimeout(
-      `${apiUrl}/instance/restart/${encodeURIComponent(instance.instance_name)}`,
-      {
-        method: "PUT",
-        headers: {
-          apikey: instance.api_key,
-          "Content-Type": "application/json",
-        },
-      },
-      15000
-    );
-
-    if (restartResponse.ok) {
-      console.log(`[Auto-Reconnect] Restart successful for ${instance.instance_name}`);
-      return {
-        instance_id: instance.id,
-        instance_name: instance.instance_name,
-        success: true,
-        action: "restart",
-        message: "Instance restarted successfully",
-      };
-    }
-
-    const errorText = await restartResponse.text().catch(() => "");
-    console.log(`[Auto-Reconnect] Restart returned ${restartResponse.status}: ${errorText.slice(0, 200)}`);
-
-    // If restart fails with 404 or similar, instance may not exist - try connect
-    if (restartResponse.status === 404 || restartResponse.status === 400) {
-      return await attemptConnect(instance);
-    }
-
-    return {
-      instance_id: instance.id,
-      instance_name: instance.instance_name,
-      success: false,
-      action: "restart",
-      message: `Restart failed with status ${restartResponse.status}`,
-    };
-  } catch (error: any) {
-    console.error(`[Auto-Reconnect] Restart error for ${instance.instance_name}:`, error);
-    
-    // Try connect as fallback
-    return await attemptConnect(instance);
-  }
-}
 
 // Try to connect the instance (may return QR code)
 async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectResult> {
@@ -440,8 +388,8 @@ serve(async (req) => {
         })
         .eq("id", instance.id);
 
-      // Try restart first, then connect if restart fails
-      const result = await attemptRestart(instance);
+      // Try connect directly (restart endpoint removed in Evolution API v2.3+)
+      const result = await attemptConnect(instance);
       results.push(result);
 
       // Track instances that need QR code
