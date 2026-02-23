@@ -7,10 +7,10 @@ const corsHeaders = {
 };
 
 // Configuration - 3 attempts in 3 minutes (1 per minute)
-const CONNECTING_THRESHOLD_MINUTES = 1; // Try after 1 min if stuck in "connecting"
-const DISCONNECTED_THRESHOLD_MINUTES = 1; // Try after 1 min if disconnected
-const MAX_RECONNECT_ATTEMPTS = 3; // Total 3 attempts per disconnection cycle
-const ATTEMPT_WINDOW_MINUTES = 3; // Window for counting attempts
+const CONNECTING_THRESHOLD_MINUTES = 1;
+const DISCONNECTED_THRESHOLD_MINUTES = 1;
+const MAX_RECONNECT_ATTEMPTS = 3;
+const ATTEMPT_WINDOW_MINUTES = 3;
 
 interface InstanceToReconnect {
   id: string;
@@ -24,6 +24,7 @@ interface InstanceToReconnect {
   last_reconnect_attempt_at: string | null;
   manual_disconnect: boolean | null;
   awaiting_qr: boolean | null;
+  last_webhook_event: string | null;
 }
 
 interface ReconnectResult {
@@ -36,14 +37,12 @@ interface ReconnectResult {
   needs_qr?: boolean;
 }
 
-// Helper to normalize URL
 function normalizeUrl(url: string): string {
   let normalized = url.replace(/\/+$/, "");
   normalized = normalized.replace(/\/manager$/i, "");
   return normalized;
 }
 
-// Helper for timeout fetch
 async function fetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -51,7 +50,6 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("timeout"), timeoutMs);
-
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (error: any) {
@@ -64,24 +62,16 @@ async function fetchWithTimeout(
   }
 }
 
-// Check if instance should skip reconnection (too many recent attempts)
 function shouldSkipReconnect(instance: InstanceToReconnect): { skip: boolean; reason: string } {
   const lastAttempt = instance.last_reconnect_attempt_at 
     ? new Date(instance.last_reconnect_attempt_at) 
     : null;
   
-  if (!lastAttempt) {
-    return { skip: false, reason: "" };
-  }
+  if (!lastAttempt) return { skip: false, reason: "" };
 
   const windowStart = new Date(Date.now() - ATTEMPT_WINDOW_MINUTES * 60 * 1000);
-  
-  // Reset counter if last attempt was outside the window
-  if (lastAttempt < windowStart) {
-    return { skip: false, reason: "" };
-  }
+  if (lastAttempt < windowStart) return { skip: false, reason: "" };
 
-  // Check if we've hit the limit (3 attempts in 3 minutes)
   if (instance.reconnect_attempts_count >= MAX_RECONNECT_ATTEMPTS) {
     return { 
       skip: true, 
@@ -92,8 +82,30 @@ function shouldSkipReconnect(instance: InstanceToReconnect): { skip: boolean; re
   return { skip: false, reason: "" };
 }
 
+// Force logout to clear stale Evolution session
+async function forceLogout(instance: InstanceToReconnect): Promise<boolean> {
+  const apiUrl = normalizeUrl(instance.api_url);
+  try {
+    console.log(`[Auto-Reconnect] Forcing logout for ghost session ${instance.instance_name}...`);
+    const response = await fetchWithTimeout(
+      `${apiUrl}/instance/logout/${encodeURIComponent(instance.instance_name)}`,
+      {
+        method: "DELETE",
+        headers: {
+          apikey: instance.api_key,
+          "Content-Type": "application/json",
+        },
+      },
+      10000
+    );
+    console.log(`[Auto-Reconnect] Logout response for ${instance.instance_name}: ${response.status}`);
+    return response.ok || response.status === 404;
+  } catch (error: any) {
+    console.warn(`[Auto-Reconnect] Logout failed for ${instance.instance_name}: ${error.message}`);
+    return false;
+  }
+}
 
-// Try to connect the instance (may return QR code)
 async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectResult> {
   const apiUrl = normalizeUrl(instance.api_url);
   
@@ -116,13 +128,10 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
       const data = await connectResponse.json().catch(() => ({}));
       console.log(`[Auto-Reconnect] /instance/connect raw response for ${instance.instance_name}:`, JSON.stringify(data).slice(0, 500));
       
-      // Check if we got connected or need QR code
-      // Evolution API v2.3.7 returns "status" not "state" in /instance/connect response
       const state = data?.instance?.state || data?.instance?.status || data?.instance?.connectionStatus || data?.state || data?.status;
       const qrcode = data?.base64 || data?.qrcode?.base64;
       
       if (state === "open" || state === "connected") {
-        console.log(`[Auto-Reconnect] Connect successful for ${instance.instance_name} - already connected`);
         return {
           instance_id: instance.id,
           instance_name: instance.instance_name,
@@ -133,19 +142,18 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
       }
       
       if (qrcode) {
-        console.log(`[Auto-Reconnect] Connect returned QR code for ${instance.instance_name} - marking as awaiting_qr to stop further attempts`);
+        console.log(`[Auto-Reconnect] Connect returned QR code for ${instance.instance_name} - marking as awaiting_qr`);
         return {
           instance_id: instance.id,
           instance_name: instance.instance_name,
-          success: false, // Not fully successful, needs QR scan
+          success: false,
           action: "connect",
           message: "Session expired - QR code scan required",
           qrcode: qrcode,
-          needs_qr: true, // Flag to update awaiting_qr in database
+          needs_qr: true,
         };
       }
 
-      console.log(`[Auto-Reconnect] Connect initiated for ${instance.instance_name}, state: ${state}`);
       return {
         instance_id: instance.id,
         instance_name: instance.instance_name,
@@ -174,18 +182,21 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
   }
 }
 
-// Check if instance is actually connected on Evolution API before attempting restart
-// Uses fetchInstances (same as Evolution Manager UI) as PRIMARY source
+// DUAL VERIFICATION: fetchInstances + connectionState
+// fetchInstances returns REGISTRATION status (can be stale "open")
+// connectionState returns REAL Baileys socket status
 async function checkConnectionState(instance: InstanceToReconnect): Promise<{
   isConnected: boolean;
   state: string;
+  ghostSession: boolean; // fetchInstances="open" but socket is dead
 }> {
   const apiUrl = normalizeUrl(instance.api_url);
+  let fetchInstancesState = "unknown";
 
-  // PRIMARY: fetchInstances (same source as Evolution Manager UI)
+  // STEP 1: fetchInstances (registration status)
   try {
     const fetchUrl = `${apiUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instance.instance_name)}`;
-    console.log(`[Auto-Reconnect] Checking via fetchInstances for ${instance.instance_name}...`);
+    console.log(`[Auto-Reconnect] Step 1 - fetchInstances for ${instance.instance_name}...`);
 
     const response = await fetchWithTimeout(fetchUrl, {
       method: "GET",
@@ -197,8 +208,6 @@ async function checkConnectionState(instance: InstanceToReconnect): Promise<{
 
     if (response.ok) {
       const data = await response.json();
-      console.log(`[Auto-Reconnect] fetchInstances raw for ${instance.instance_name}:`, JSON.stringify(data).slice(0, 300));
-
       const instances = Array.isArray(data) ? data : data?.instances || [data];
       const found = instances.find((i: any) =>
         i?.instanceName === instance.instance_name ||
@@ -206,19 +215,23 @@ async function checkConnectionState(instance: InstanceToReconnect): Promise<{
       ) || instances[0];
 
       if (found) {
-        const state = found.connectionStatus || found.status || found.state || "unknown";
-        const isConnected = state === "open" || state === "connected";
-        console.log(`[Auto-Reconnect] fetchInstances state for ${instance.instance_name}: ${state} (connected: ${isConnected})`);
-        return { isConnected, state };
+        fetchInstancesState = found.connectionStatus || found.status || found.state || "unknown";
+        console.log(`[Auto-Reconnect] fetchInstances state for ${instance.instance_name}: ${fetchInstancesState}`);
       }
     }
   } catch (e: any) {
     console.warn(`[Auto-Reconnect] fetchInstances failed for ${instance.instance_name}:`, e.message);
   }
 
-  // FALLBACK: connectionState (may be inaccurate in Evolution v2.3+)
+  // If fetchInstances says NOT connected, no need for second check
+  if (fetchInstancesState !== "open" && fetchInstancesState !== "connected") {
+    console.log(`[Auto-Reconnect] fetchInstances says ${fetchInstancesState} - instance truly disconnected`);
+    return { isConnected: false, state: fetchInstancesState, ghostSession: false };
+  }
+
+  // STEP 2: fetchInstances says "open" - VERIFY with connectionState (real socket status)
   try {
-    console.log(`[Auto-Reconnect] Falling back to connectionState for ${instance.instance_name}...`);
+    console.log(`[Auto-Reconnect] Step 2 - connectionState verification for ${instance.instance_name}...`);
     const stateResponse = await fetchWithTimeout(
       `${apiUrl}/instance/connectionState/${encodeURIComponent(instance.instance_name)}`,
       {
@@ -233,16 +246,26 @@ async function checkConnectionState(instance: InstanceToReconnect): Promise<{
 
     if (stateResponse.ok) {
       const data = await stateResponse.json();
-      const state = data.state || data.instance?.state || "unknown";
-      const isConnected = state === "open" || state === "connected";
-      console.log(`[Auto-Reconnect] connectionState for ${instance.instance_name}: ${state} (connected: ${isConnected})`);
-      return { isConnected, state };
+      const socketState = data.state || data.instance?.state || "unknown";
+      const isReallyConnected = socketState === "open" || socketState === "connected";
+      
+      if (isReallyConnected) {
+        console.log(`[Auto-Reconnect] ✅ VERIFIED: ${instance.instance_name} is truly connected (fetchInstances=${fetchInstancesState}, connectionState=${socketState})`);
+        return { isConnected: true, state: socketState, ghostSession: false };
+      } else {
+        // GHOST SESSION DETECTED!
+        console.log(`[Auto-Reconnect] 👻 GHOST SESSION DETECTED: ${instance.instance_name} - fetchInstances="${fetchInstancesState}" but connectionState="${socketState}"`);
+        return { isConnected: false, state: socketState, ghostSession: true };
+      }
     }
   } catch (e: any) {
-    console.error(`[Auto-Reconnect] Both endpoints failed for ${instance.instance_name}:`, e.message);
+    console.warn(`[Auto-Reconnect] connectionState failed for ${instance.instance_name}:`, e.message);
   }
 
-  return { isConnected: false, state: "error" };
+  // If connectionState endpoint fails, fall back to trusting fetchInstances
+  // (better than breaking everything)
+  console.log(`[Auto-Reconnect] connectionState check failed, trusting fetchInstances for ${instance.instance_name}`);
+  return { isConnected: true, state: fetchInstancesState, ghostSession: false };
 }
 
 serve(async (req) => {
@@ -257,20 +280,16 @@ serve(async (req) => {
     );
 
     console.log("[Auto-Reconnect] Starting auto-reconnection check...");
-    console.log(`[Auto-Reconnect] Thresholds: connecting=${CONNECTING_THRESHOLD_MINUTES}min, disconnected=${DISCONNECTED_THRESHOLD_MINUTES}min`);
 
     const now = new Date();
     const connectingThreshold = new Date(now.getTime() - CONNECTING_THRESHOLD_MINUTES * 60 * 1000).toISOString();
     const disconnectedThreshold = new Date(now.getTime() - DISCONNECTED_THRESHOLD_MINUTES * 60 * 1000).toISOString();
 
-    // Find instances that need reconnection:
-    // 1. Status "connecting" for more than X minutes (stuck in connecting)
-    // 2. Status "disconnected" for more than Y minutes (disconnected but not by user logout)
-    // We fetch all and filter in code because Supabase's .or() doesn't combine well with multiple conditions
+    // CHANGED: Also include "connected" instances to detect ghost sessions
     const { data: rawInstances, error: fetchError } = await supabaseClient
       .from("whatsapp_instances")
-      .select("id, instance_name, status, api_url, api_key, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at, manual_disconnect, awaiting_qr")
-      .in("status", ["connecting", "disconnected"])
+      .select("id, instance_name, status, api_url, api_key, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at, manual_disconnect, awaiting_qr, last_webhook_event")
+      .in("status", ["connecting", "disconnected", "connected"])
       .not("api_url", "is", null)
       .not("api_key", "is", null);
 
@@ -279,16 +298,12 @@ serve(async (req) => {
       throw fetchError;
     }
 
-    // Filter out instances that should NOT be auto-reconnected:
-    // - manual_disconnect = true (user intentionally disconnected)
-    // - awaiting_qr = true (waiting for user to scan QR code)
+    // Filter out instances that should NOT be auto-reconnected
     const instances = (rawInstances || []).filter(instance => {
-      // Skip if manually disconnected
       if (instance.manual_disconnect === true) {
         console.log(`[Auto-Reconnect] Skipping ${instance.instance_name}: manual_disconnect=true`);
         return false;
       }
-      // Skip if awaiting QR scan
       if (instance.awaiting_qr === true) {
         console.log(`[Auto-Reconnect] Skipping ${instance.instance_name}: awaiting_qr=true`);
         return false;
@@ -309,32 +324,38 @@ serve(async (req) => {
       );
     }
 
-    // Filter instances based on time thresholds
+    // Filter instances based on time thresholds and ghost session eligibility
     const instancesToReconnect: InstanceToReconnect[] = [];
 
     for (const instance of instances) {
-      // Use disconnected_since for timing, or fall back to checking if we should try anyway
       const disconnectedSince = instance.disconnected_since 
         ? new Date(instance.disconnected_since) 
         : null;
 
       if (instance.status === "connecting") {
-        // For "connecting" status, we need it to be stuck for at least CONNECTING_THRESHOLD_MINUTES
         if (disconnectedSince && disconnectedSince.toISOString() <= connectingThreshold) {
           instancesToReconnect.push(instance as InstanceToReconnect);
         } else if (!disconnectedSince) {
-          // If no timestamp, assume it needs help
           instancesToReconnect.push(instance as InstanceToReconnect);
         }
       } else if (instance.status === "disconnected") {
-        // For "disconnected" status, wait DISCONNECTED_THRESHOLD_MINUTES before trying
         if (disconnectedSince && disconnectedSince.toISOString() <= disconnectedThreshold) {
+          instancesToReconnect.push(instance as InstanceToReconnect);
+        }
+      } else if (instance.status === "connected") {
+        // NEW: Include "connected" instances for ghost session detection
+        // Only check those that haven't received real messages (last_webhook_event != messages.upsert)
+        // or have no webhook event at all
+        const lastEvent = instance.last_webhook_event;
+        const isLikelyGhost = !lastEvent || lastEvent === "connection.update" || lastEvent === "connecting";
+        if (isLikelyGhost) {
+          console.log(`[Auto-Reconnect] Including connected instance ${instance.instance_name} for ghost check (last_webhook_event=${lastEvent || "null"})`);
           instancesToReconnect.push(instance as InstanceToReconnect);
         }
       }
     }
 
-    console.log(`[Auto-Reconnect] ${instancesToReconnect.length} instances qualify for reconnection attempt`);
+    console.log(`[Auto-Reconnect] ${instancesToReconnect.length} instances qualify for reconnection/ghost check`);
 
     if (instancesToReconnect.length === 0) {
       return new Response(
@@ -348,61 +369,68 @@ serve(async (req) => {
       );
     }
 
-    // Attempt reconnection for each qualifying instance
     const results: ReconnectResult[] = [];
     const qrCodesNeeded: { instance_name: string; law_firm_id: string }[] = [];
 
     for (const instance of instancesToReconnect) {
-      // Check rate limiting
-      const skipCheck = shouldSkipReconnect(instance);
-      if (skipCheck.skip) {
-        console.log(`[Auto-Reconnect] Skipping ${instance.instance_name}: ${skipCheck.reason}`);
-        results.push({
-          instance_id: instance.id,
-          instance_name: instance.instance_name,
-          success: false,
-          action: "skipped",
-          message: skipCheck.reason,
-        });
-        continue;
+      // Check rate limiting (skip for "connected" ghost checks - they don't count as reconnect attempts)
+      if (instance.status !== "connected") {
+        const skipCheck = shouldSkipReconnect(instance);
+        if (skipCheck.skip) {
+          console.log(`[Auto-Reconnect] Skipping ${instance.instance_name}: ${skipCheck.reason}`);
+          results.push({
+            instance_id: instance.id,
+            instance_name: instance.instance_name,
+            success: false,
+            action: "skipped",
+            message: skipCheck.reason,
+          });
+          continue;
+        }
       }
 
-      // STEP 1: Check if instance is actually connected in Evolution API
-      // This catches cases where the DB is out of sync but session is still active
+      // STEP 1: Check real connection state (DUAL VERIFICATION)
       const connectionCheck = await checkConnectionState(instance);
 
       if (connectionCheck.isConnected) {
-        // fetchInstances (same source as Evolution Manager UI) says "open"
-        // TRUST IT and sync DB directly. Do NOT call /instance/connect as that
-        // RESTARTS the Baileys socket and causes a destabilization loop.
-        console.log(`[Auto-Reconnect] Instance ${instance.instance_name} is connected per fetchInstances (state: ${connectionCheck.state}) - syncing DB`);
-        
-        await supabaseClient
-          .from("whatsapp_instances")
-          .update({
-            status: "connected",
-            disconnected_since: null,
-            reconnect_attempts_count: 0,
-            awaiting_qr: false,
-            manual_disconnect: false,
-            alert_sent_for_current_disconnect: false,
-            updated_at: now.toISOString(),
-          })
-          .eq("id", instance.id);
+        // Truly connected - sync DB if needed
+        if (instance.status !== "connected") {
+          console.log(`[Auto-Reconnect] Instance ${instance.instance_name} is verified connected - syncing DB`);
+          await supabaseClient
+            .from("whatsapp_instances")
+            .update({
+              status: "connected",
+              disconnected_since: null,
+              reconnect_attempts_count: 0,
+              awaiting_qr: false,
+              manual_disconnect: false,
+              alert_sent_for_current_disconnect: false,
+              updated_at: now.toISOString(),
+            })
+            .eq("id", instance.id);
+        }
         
         results.push({
           instance_id: instance.id,
           instance_name: instance.instance_name,
           success: true,
           action: "status_sync",
-          message: `DB synced with Evolution API (fetchInstances: ${connectionCheck.state})`,
+          message: `Verified connected (fetchInstances + connectionState both confirm)`,
         });
         
         await new Promise(resolve => setTimeout(resolve, 300));
-        continue; // STOP - do not call /instance/connect
+        continue;
       }
 
-      // STEP 2: If not connected, proceed with restart attempt
+      // STEP 2: Handle ghost sessions - logout first to clear stale cache
+      if (connectionCheck.ghostSession) {
+        console.log(`[Auto-Reconnect] 👻 Handling ghost session for ${instance.instance_name}: forcing logout before reconnect`);
+        await forceLogout(instance);
+        // Small delay after logout to let Evolution clear the session
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      // STEP 3: Instance is NOT connected - proceed with reconnection
       // Update attempt counter BEFORE trying
       const windowStart = new Date(Date.now() - ATTEMPT_WINDOW_MINUTES * 60 * 1000);
       const lastAttempt = instance.last_reconnect_attempt_at 
@@ -418,10 +446,15 @@ serve(async (req) => {
         .update({
           reconnect_attempts_count: newAttemptCount,
           last_reconnect_attempt_at: now.toISOString(),
+          // If it was "connected" (ghost), mark as disconnected first
+          ...(instance.status === "connected" && {
+            status: "disconnected",
+            disconnected_since: now.toISOString(),
+          }),
         })
         .eq("id", instance.id);
 
-      // Try connect directly (restart endpoint removed in Evolution API v2.3+)
+      // Try connect
       const result = await attemptConnect(instance);
       results.push(result);
 
@@ -432,9 +465,7 @@ serve(async (req) => {
           law_firm_id: instance.law_firm_id,
         });
         
-        // CRITICAL: Mark instance as awaiting_qr to STOP future auto-reconnect attempts
-        // User must manually scan QR - no point in auto-reconnecting anymore
-        console.log(`[Auto-Reconnect] Setting awaiting_qr=true for ${instance.instance_name} to stop reconnection loop`);
+        console.log(`[Auto-Reconnect] Setting awaiting_qr=true for ${instance.instance_name}`);
         await supabaseClient
           .from("whatsapp_instances")
           .update({
@@ -444,7 +475,6 @@ serve(async (req) => {
           })
           .eq("id", instance.id);
       } else if (!result.success && newAttemptCount >= MAX_RECONNECT_ATTEMPTS) {
-        // Max attempts reached without success - mark as awaiting QR to stop loop
         console.log(`[Auto-Reconnect] Max attempts (${MAX_RECONNECT_ATTEMPTS}) reached for ${instance.instance_name} - marking awaiting_qr`);
         qrCodesNeeded.push({
           instance_name: instance.instance_name,
@@ -459,16 +489,13 @@ serve(async (req) => {
           })
           .eq("id", instance.id);
       } else if (result.success) {
-        // Check if the connection returned "already connected" state
         const isFullyConnected = result.message.includes("reconnected automatically") || 
                                  result.message.includes("already connected");
         
-        // Update instance status based on result
         await supabaseClient
           .from("whatsapp_instances")
           .update({
             status: isFullyConnected ? "connected" : "connecting",
-            // If fully connected, reset all reconnection-related fields
             ...(isFullyConnected && {
               disconnected_since: null,
               reconnect_attempts_count: 0,
@@ -481,11 +508,11 @@ serve(async (req) => {
           .eq("id", instance.id);
 
         if (isFullyConnected) {
-          console.log(`[Auto-Reconnect] Instance ${instance.instance_name} marked as connected in database`);
+          console.log(`[Auto-Reconnect] Instance ${instance.instance_name} marked as connected`);
         }
       }
 
-      // Small delay between instances to avoid overwhelming the API
+      // Delay between instances
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
@@ -494,21 +521,22 @@ serve(async (req) => {
     const failedCount = results.filter(r => !r.success && r.action !== "skipped").length;
     const skippedCount = results.filter(r => r.action === "skipped").length;
     const statusSyncCount = results.filter(r => r.action === "status_sync").length;
+    const ghostsDetected = results.filter(r => r.message.includes("ghost") || r.action === "ghost_logout").length;
     const qrNeededCount = qrCodesNeeded.length;
 
-    console.log(`[Auto-Reconnect] Summary: ${successCount} successful (${statusSyncCount} status syncs), ${failedCount} failed, ${skippedCount} skipped, ${qrNeededCount} need QR scan`);
+    console.log(`[Auto-Reconnect] Summary: ${successCount} successful (${statusSyncCount} verified), ${failedCount} failed, ${skippedCount} skipped, ${qrNeededCount} need QR`);
 
-    // Log the action in admin_notification_logs if there were attempts
     if (results.length > 0 && results.some(r => r.action !== "skipped")) {
       await supabaseClient.from("admin_notification_logs").insert({
         event_type: "AUTO_RECONNECT_ATTEMPT",
         event_key: `auto_reconnect_${now.toISOString().slice(0, 13)}`,
-        email_sent_to: "system", // No email sent, just logging
+        email_sent_to: "system",
         metadata: {
           total_attempts: results.filter(r => r.action !== "skipped").length,
           successful: successCount,
           status_syncs: statusSyncCount,
           failed: failedCount,
+          ghosts_detected: ghostsDetected,
           qr_needed: qrNeededCount,
           instances: results.map(r => ({
             name: r.instance_name,
