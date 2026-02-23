@@ -1,51 +1,36 @@
 
 
-# Corrigir Edge Functions para Evolution API v2.3.7
+# Reverter Edge Functions para Evolution API v2.2.3
 
-## Problema
+## Contexto
+O Docker foi revertido para `atendai/evolution-api:v2.2.3`. Agora as edge functions precisam voltar aos timings originais da v2.2.3 (Baileys v6 = inicializacao rapida).
 
-As edge functions foram otimizadas para a v2.2.3 (Baileys v6, inicializacao rapida). A v2.3.7 usa Baileys v7 que precisa de mais tempo para inicializar sessoes. Alem disso, o endpoint `/instance/restart` nao existe na v2.3.x (retorna 404).
+## Mudancas
 
-## Mudancas Necessarias
-
-### 1. `auto-reconnect-instances/index.ts`
-
-**Problema**: Tenta `/instance/restart` primeiro (linhas 275-337), que retorna 404 na v2.3.x.
-
-**Correcao**: Remover a tentativa de restart e ir direto para `/instance/connect`. Atualizar comentarios de "v2.2.3" para "v2.3.7".
-
-### 2. `evolution-api/index.ts`
-
-Duas areas precisam de ajuste:
+### 1. `supabase/functions/evolution-api/index.ts`
 
 **a) create_instance (linhas 674-678)**
-- Comentario diz "v2.2.3 - fast init"
-- `maxRetries = 2` e `retryDelayMs = 2000` sao curtos demais para Baileys v7
-- Corrigir para `maxRetries = 3` e `retryDelayMs = 4000`
+- Comentario: voltar para "v2.2.3 - fast init"
+- `maxRetries = 3` volta para `maxRetries = 2`
+- `retryDelayMs = 4000` volta para `retryDelayMs = 2000`
 
-**b) get_qrcode - corrupted session recovery (linhas 1121-1122, 1217-1249)**
-- Variavel `detectedApiVersion` hardcoded como "v2.2.3"
-- Level 1: delays de 3s sao curtos para Baileys v7
-- Corrigir para `detectedApiVersion = "v2.3.7"`, delays de 5s no Level 1, e 5s no Level 2
+**b) get_qrcode - corrupted session recovery (linha 1121-1122)**
+- Comentario: voltar para "v2.2.3 optimized"
+- `detectedApiVersion = "v2.3.7"` volta para `"v2.2.3"`
 
-## Detalhes Tecnicos
+**c) Level 1 delays (linha 1247)**
+- `setTimeout(resolve, 5000)` volta para `setTimeout(resolve, 3000)`
 
-### auto-reconnect-instances/index.ts
-- Linhas 271-337: Remover bloco try/catch do `/instance/restart` e ir direto para `/instance/connect` como fallback unico
-- Atualizar log de "v2.2.3 preferred" para "v2.3.7 - connect only"
+**d) Level 2 delay pos-logout (linha 1295)**
+- `setTimeout(resolve, 5000)` volta para `setTimeout(resolve, 3000)`
 
-### evolution-api/index.ts
-- Linha 676: Atualizar comentario para "v2.3.7 - Baileys v7 needs more time"
-- Linha 677: `maxRetries = 2` para `maxRetries = 3`
-- Linha 678: `retryDelayMs = 2000` para `retryDelayMs = 4000`
-- Linha 1121: Atualizar comentario para "v2.3.7 - Baileys v7"
-- Linha 1122: `"v2.2.3"` para `"v2.3.7"`
-- Linha 1218: Atualizar log de Level 1 com delays corretos
-- Linha 1247: Delay entre retries de 3000 para 5000ms
-- Linha 1295: Delay pos-logout de 3000 para 5000ms
-- Linha 1323: Delay entre retries Level 2 de 3000 para 5000ms
+**e) Level 2 delay entre retries (linha 1323)**
+- `setTimeout(resolve, 5000)` volta para `setTimeout(resolve, 3000)`
 
-### Sem mudancas necessarias
-- `evolution-webhook/index.ts` - ja compativel (logica de status preservation funciona igual)
-- `sync-evolution-instances/index.ts` - ja compativel (usa fetchInstances que funciona igual)
+### 2. `supabase/functions/auto-reconnect-instances/index.ts`
+
+**Linhas 275-276**: Atualizar comentarios de "v2.3.7" para "v2.2.3". A logica de usar `/instance/connect` diretamente funciona em ambas as versoes, entao nao precisa restaurar o bloco de `/instance/restart`.
+
+### 3. Deploy
+Redeployar ambas as edge functions apos as mudancas.
 
