@@ -149,6 +149,8 @@ async function deleteAndRecreateInstance(instance: InstanceToReconnect): Promise
           instanceName: instance.instance_name,
           token: instance.api_key,
           qrcode: true,
+          integration: "WHATSAPP-BAILEYS",
+          webhook: buildWebhookConfig(WEBHOOK_URL),
         }),
       },
       30000

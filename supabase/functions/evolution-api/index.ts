@@ -741,6 +741,8 @@ serve(async (req) => {
                 instanceName: instance.instance_name,
                 token: instance.api_key,
                 qrcode: true,
+                integration: "WHATSAPP-BAILEYS",
+                webhook: buildWebhookConfig(WEBHOOK_URL),
               }),
             }, 30000);
             
@@ -870,6 +872,8 @@ serve(async (req) => {
                 instanceName: instance.instance_name,
                 token: instance.api_key,
                 qrcode: true,
+                integration: "WHATSAPP-BAILEYS",
+                webhook: buildWebhookConfig(WEBHOOK_URL),
               }),
             }, 30000);
 
@@ -1712,6 +1716,8 @@ serve(async (req) => {
                   instanceName: instance.instance_name,
                   token: instance.api_key,
                   qrcode: true,
+                  integration: "WHATSAPP-BAILEYS",
+                  webhook: buildWebhookConfig(WEBHOOK_URL),
                 }),
               }, 30000);
               
