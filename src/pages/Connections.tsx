@@ -50,12 +50,14 @@ import { QRCodeDialog } from "@/components/connections/QRCodeDialog";
 import { ConnectionDetailPanel } from "@/components/connections/ConnectionDetailPanel";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 export default function Connections() {
   const { toast } = useToast();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const reconnectId = searchParams.get("reconnect");
   const { isAdmin } = useUserRole();
   const { tenant } = useTenant();
   const { evolutionApiUrl, evolutionApiKey, isConfigured: isApiConfigured } = useLawFirmSettings();
@@ -398,6 +400,19 @@ export default function Connections() {
       setQrLoading(false);
     }
   };
+
+  // Auto-reconnect when redirected from Conversations with ?reconnect=INSTANCE_ID
+  useEffect(() => {
+    if (reconnectId && instances.length > 0 && !isLoading) {
+      const instance = instances.find(i => i.id === reconnectId);
+      if (instance && instance.status !== "connected") {
+        console.log("[Connections] Auto-reconnecting instance:", reconnectId);
+        handleConnectInstance(instance);
+      }
+      // Clear the URL parameter
+      navigate("/connections", { replace: true });
+    }
+  }, [reconnectId, instances, isLoading]);
 
   const handleCloseQRDialog = () => {
     console.log("[Connections] Closing QR dialog");
