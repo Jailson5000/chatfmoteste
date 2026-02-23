@@ -6,11 +6,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Configuration - 3 attempts in 3 minutes (1 per minute)
+// Configuration - 2 attempts in 5 minutes to avoid WhatsApp rate limiting
 const CONNECTING_THRESHOLD_MINUTES = 1;
 const DISCONNECTED_THRESHOLD_MINUTES = 1;
-const MAX_RECONNECT_ATTEMPTS = 3;
-const ATTEMPT_WINDOW_MINUTES = 3;
+const MAX_RECONNECT_ATTEMPTS = 2;
+const ATTEMPT_WINDOW_MINUTES = 5;
 
 interface InstanceToReconnect {
   id: string;
@@ -695,7 +695,7 @@ serve(async (req) => {
       }
 
       // Delay between instances
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
     // Log summary
