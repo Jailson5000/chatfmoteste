@@ -3813,6 +3813,27 @@ serve(async (req) => {
         const apiUrl = normalizeUrl(globalApiUrl);
         console.log(`[Evolution API] GLOBAL Recreating lost instance: ${body.instanceName} at ${apiUrl}`);
 
+        // Step 0: Clean up any existing instance (logout + delete to clear session files)
+        console.log(`[Evolution API] global_recreate: Cleaning up existing instance ${body.instanceName}...`);
+        try {
+          await fetchWithTimeout(`${apiUrl}/instance/logout/${body.instanceName}`, {
+            method: "DELETE",
+            headers: { apikey: globalApiKey },
+          }, 5000);
+          console.log(`[Evolution API] global_recreate: Logout successful for ${body.instanceName}`);
+        } catch (_) { /* ignore - may not exist */ }
+
+        try {
+          await fetchWithTimeout(`${apiUrl}/instance/delete/${body.instanceName}`, {
+            method: "DELETE",
+            headers: { apikey: globalApiKey },
+          }, 5000);
+          console.log(`[Evolution API] global_recreate: Delete successful for ${body.instanceName}`);
+        } catch (_) { /* ignore - may not exist */ }
+
+        // Wait for filesystem cleanup
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
         // Step 1: Create instance in Evolution API
         const recreateResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
           method: "POST",
