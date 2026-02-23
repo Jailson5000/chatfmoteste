@@ -1,81 +1,36 @@
 
-## Corrigir Envio/Recebimento de Mensagens + Auto-Reconexao
+## Corrigir Status das Instancias Travadas + refresh_status do Admin Global
 
-### Diagnostico
+### Problema 1: refresh_status nao funciona para Admin Global
 
-A Evolution API na VPS (`evo.fmoadv.com.br`) esta com as sessoes WhatsApp (Baileys) quebradas:
-- O endpoint `/instance/fetchInstances` reporta "open", mas os sockets reais estao fechados
-- Ao tentar enviar mensagem, retorna `Error: Connection Closed`
-- Nenhum evento `MESSAGES_UPSERT` esta chegando (sem recebimento)
-- Dezenas de eventos `connection.update` com `state: connecting` estao sendo disparados
+A funcao `refresh_status` na Edge Function `evolution-api` chama `getInstanceById(supabaseClient, lawFirmId, body.instanceId)` **sem passar o parametro `isGlobalAdmin`**. Como o admin global nao pertence ao law_firm das instancias, o filtro `law_firm_id` causa "Instance not found" para quase todas.
 
-### Acao imediata necessaria (na VPS)
+**Correcao**: Passar `isGlobalAdmin` na chamada do `refresh_status`, igual ja e feito no `refresh_phone` (linha 1256).
 
-Voce precisa reiniciar a Evolution API ou forcar reconexao das instancias:
+### Problema 2: Webhook URL sem token de autenticacao
 
-```bash
-# Opcao 1: Reiniciar o container da Evolution
-docker restart evolution-api
+A funcao `buildWebhookConfig` configura a URL do webhook como `https://...supabase.co/functions/v1/evolution-webhook` **sem incluir o token de autenticacao na query string**. A Evolution API envia webhooks duplicados (comportamento conhecido), e o webhook que nao tem o token e rejeitado. Para as instancias `inst_l26f156k` e `inst_n5572v68`, os eventos `open` foram perdidos e so os `connecting` foram processados.
 
-# Opcao 2: Forcar reconexao de cada instancia via API
-curl -s -X DELETE "https://evo.fmoadv.com.br/instance/logout/inst_l26f156k" \
-  -H "apikey: SUA_API_KEY"
-# Depois reconectar:
-curl -s -X GET "https://evo.fmoadv.com.br/instance/connect/inst_l26f156k" \
-  -H "apikey: SUA_API_KEY"
-```
+**Correcao**: Alterar `buildWebhookConfig` para incluir `?token=EVOLUTION_WEBHOOK_TOKEN` na URL, e depois reaplicar webhooks.
 
-### Melhoria no codigo (prevencao futura)
+### Problema 3: Reaplicar Webhooks ignora instancias "connecting"
 
-Alterar a Edge Function `evolution-api` para que, ao detectar o erro "Connection Closed" durante o envio:
+O hook `useGlobalAdminInstances` filtra apenas instancias com `status === "connected"` para reaplicar webhooks. Instancias travadas como "connecting" sao ignoradas.
 
-1. Atualizar o status da instancia no banco para `disconnected`
-2. Tentar automaticamente chamar o endpoint `/instance/restart` da Evolution API
-3. Informar o usuario que a instancia perdeu conexao e precisa ser reconectada
+**Correcao**: Incluir instancias com status "connecting" no filtro de reaplicacao.
 
 ### Detalhes tecnicos
 
-**Arquivo**: `supabase/functions/evolution-api/index.ts`
+**Arquivo 1**: `supabase/functions/evolution-api/index.ts`
+- Linha ~1200: Adicionar `isGlobalAdmin` na chamada `getInstanceById`
+- Linha ~177-192: Alterar `buildWebhookConfig` para receber e incluir o token na URL
 
-Na secao de tratamento de erro do background send (linha ~1895-1927), adicionar deteccao do erro "Connection Closed":
-
-```typescript
-// Dentro do bloco de erro do background send
-if (sendResponse.status === 400) {
-  try {
-    const errorJson = JSON.parse(errorText);
-    const messages = errorJson?.response?.message || errorJson?.message || [];
-    const isConnectionClosed = messages.some(
-      (m: string) => typeof m === 'string' && m.includes('Connection Closed')
-    );
-    
-    if (isConnectionClosed && instanceId) {
-      // Atualizar status no banco para refletir a realidade
-      await supabaseClient
-        .from("whatsapp_instances")
-        .update({ 
-          status: 'disconnected', 
-          disconnected_since: new Date().toISOString() 
-        })
-        .eq("id", instanceId);
-      
-      // Tentar reconexao automatica em background
-      try {
-        await fetch(
-          `${apiUrl}/instance/restart/${instance.instance_name}`,
-          { method: "PUT", headers: { apikey: instance.api_key || "" } }
-        );
-      } catch {}
-      
-      errorReason = "Conexao WhatsApp perdida. Reconectando automaticamente...";
-    }
-  } catch {}
-}
-```
-
-**Tambem no webhook** (`evolution-webhook/index.ts`): Ajustar para aceitar o estado `close` vindo do webhook e marcar como `disconnected` no banco, mesmo que o status atual seja `connected`. Isso garante que desconexoes reais sejam registradas.
+**Arquivo 2**: `src/hooks/useGlobalAdminInstances.tsx`
+- Linha do `reapplyAllWebhooks`: Mudar filtro de `status === "connected"` para incluir `"connecting"` tambem
 
 ### Resultado esperado
 
-1. **Imediato**: Apos reiniciar a Evolution API na VPS, as instancias devem reconectar e voltar a enviar/receber
-2. **Futuro**: Se uma conexao cair novamente, o sistema detectara o erro "Connection Closed", atualizara o status no banco e tentara reconectar automaticamente
+1. O admin global conseguira atualizar o status de todas as instancias via "Refresh Status"
+2. Os webhooks serao configurados com autenticacao correta, garantindo que eventos `open` sejam processados
+3. Instancias travadas como "connecting" tambem terao seus webhooks reaplicados
+4. Apos as correcoes, clicar "Reaplicar Webhooks" deve resolver o status de `inst_l26f156k` e `inst_n5572v68`
