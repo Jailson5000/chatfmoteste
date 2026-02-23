@@ -1,107 +1,73 @@
 
 
-## Corrigir Tela "Verificando acesso..." Travada
+## Corrigir Login Travado em "Entrando..."
 
 ### Problema
-O banco de dados esta com instabilidade de conexao (logs mostram `dial error: i/o timeout` e 504 no endpoint `/user`). Quando isso acontece:
 
-1. O hook `useCompanyApproval` faz queries ao banco (`profiles` e `companies`) que ficam pendentes indefinidamente
-2. O `ProtectedRoute` mostra "Verificando acesso..." eternamente porque `approvalLoading` nunca vira `false`
-3. Edge functions (`evolution-health`, `sync-evolution-instances`, `get-billing-status`) tambem falham porque `getUser(token)` depende do mesmo banco
+O login esta travado em "Entrando..." em AMBAS as telas (regular e global admin) porque a chamada `signInWithPassword` depende do banco de dados (GoTrue -> Postgres), e quando o banco esta lento ou com timeout, a chamada fica pendente sem limite de tempo. A terceira tela (fmoadv) mostra apenas o logo porque o `useAuth` esta preso no loading (sessao antiga com refresh token invalido).
 
 ### Causa Raiz
-O Lovable Cloud esta com o banco de dados sobrecarregado (connection pool esgotado ou instancia pequena). Os logs de auth confirmam:
-- 13:16:40Z - `/user` retornou 500 (context canceled)
-- 13:24:27Z - `/user` retornou 504 (timeout de 11s conectando ao Postgres) 
-- 13:26:49Z - `/user` retornou 200, mas com 4s de latencia
+
+1. Os logs de auth mostram restart do servico de auth as 13:28-13:29, invalidando todos os refresh tokens
+2. Tentativas de refresh retornam "Refresh Token Not Found" (13:30 e 13:32)
+3. `signInWithPassword` nao tem timeout - fica pendente quando o DB esta lento
+4. `GlobalAdminAuth` nao reseta `isSubmitting` no caminho de sucesso (so no erro)
 
 ### Correcoes
 
-**1. Adicionar timeout ao `useCompanyApproval` (evitar tela travada para sempre)**
+**Arquivo 1: `src/pages/Auth.tsx`**
 
-Arquivo: `src/hooks/useCompanyApproval.tsx`
-
-Envolver as queries do banco com um `Promise.race` contra um timeout de 15 segundos. Se o timeout ocorrer, definir `loading: false` com uma mensagem de erro amigavel e botao para tentar novamente.
+Envolver `signInWithPassword` com timeout de 15 segundos:
 
 ```text
-const fetchWithTimeout = (promise, timeoutMs = 15000) => {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
-    )
-  ]);
-};
-
-// Usar em cada query:
-const { data: profile } = await fetchWithTimeout(
-  supabase.from('profiles').select('law_firm_id').eq('id', user.id).maybeSingle()
-);
+const loginWithTimeout = Promise.race([
+  supabase.auth.signInWithPassword({ email, password }),
+  new Promise((_, reject) => 
+    setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+  )
+]);
 ```
 
-No catch, quando o erro for TIMEOUT, definir um estado que permita retry:
+No catch de TIMEOUT, mostrar toast "Servidor lento, tente novamente".
+
+**Arquivo 2: `src/pages/global-admin/GlobalAdminAuth.tsx`**
+
+Duas correcoes:
+1. Adicionar timeout de 15s ao `signIn`
+2. Garantir que `setIsSubmitting(false)` SEMPRE execute, mesmo no caminho de sucesso (usar `finally`)
 
 ```text
-catch (err) {
-  if (err.message === 'TIMEOUT') {
-    setStatus(prev => ({
-      ...prev,
-      approval_status: null, // NAO bloquear, apenas mostrar erro
-      loading: false,
-    }));
-  }
+try {
+  // ... login logic
+} catch {
+  toast.error("Erro ao fazer login");
+} finally {
+  setIsSubmitting(false); // SEMPRE reseta
 }
 ```
 
-**2. Adicionar botao "Tentar novamente" na tela de loading do ProtectedRoute**
+**Arquivo 3: `src/hooks/useAuth.tsx`**
 
-Arquivo: `src/components/auth/ProtectedRoute.tsx`
-
-Na tela de "Verificando acesso...", adicionar um timeout visual de 10 segundos. Apos o timeout, mostrar um botao "Tentar novamente" que chama `window.location.reload()` e uma mensagem informando que o servidor pode estar lento.
+No `handleSessionExpired`, limpar tokens corrompidos do localStorage para evitar loops de refresh:
 
 ```text
-// Adicionar estado para controlar timeout visual
-const [showRetry, setShowRetry] = useState(false);
-
-useEffect(() => {
-  if (approvalLoading || tenantLoading) {
-    const timer = setTimeout(() => setShowRetry(true), 10000);
-    return () => clearTimeout(timer);
-  } else {
-    setShowRetry(false);
-  }
-}, [approvalLoading, tenantLoading]);
-
-// Na UI de loading:
-{showRetry && (
-  <div className="flex flex-col items-center gap-2 mt-4">
-    <p className="text-sm text-muted-foreground">
-      O servidor esta demorando mais que o normal...
-    </p>
-    <Button onClick={() => window.location.reload()}>
-      Tentar novamente
-    </Button>
-  </div>
-)}
+// Limpar tokens invalidos antes de signOut
+try {
+  const keys = Object.keys(localStorage);
+  keys.forEach(key => {
+    if (key.includes('sb-') && key.includes('auth-token')) {
+      localStorage.removeItem(key);
+    }
+  });
+} catch (e) {}
 ```
 
-**3. Adicionar timeout ao `useTenant` para query do banco**
-
-Arquivo: `src/hooks/useTenant.tsx`
-
-A query `supabase.from('law_firms').select(...)` tambem pode travar. Adicionar o mesmo padrao de timeout de 15 segundos. Se falhar, definir `isLoading: false` com erro para nao bloquear a UI.
+Tambem adicionar protecao no `getSession` catch para nao ficar preso em loop quando o refresh token esta invalido.
 
 ### Resultado Esperado
 
-1. Se o banco estiver lento/offline, a tela "Verificando acesso..." mostra um botao "Tentar novamente" apos 10 segundos em vez de ficar travada infinitamente
-2. As queries do `useCompanyApproval` e `useTenant` tem timeout de 15 segundos
-3. O usuario pode clicar "Tentar novamente" para recarregar quando o banco se recuperar
-4. Edge functions vao voltar a funcionar sozinhas quando o banco se estabilizar (nao precisam de correcao de codigo)
-
-### Detalhes Tecnicos
-
-Arquivos a editar:
-- `src/hooks/useCompanyApproval.tsx` - Adicionar timeout de 15s nas queries
-- `src/hooks/useTenant.tsx` - Adicionar timeout de 15s na query de law_firms
-- `src/components/auth/ProtectedRoute.tsx` - Adicionar botao "Tentar novamente" apos 10s de loading
+1. Login mostra erro apos 15 segundos se o servidor estiver lento (em vez de ficar travado)
+2. Botao "Entrando..." volta ao estado "Entrar" sempre, mesmo apos sucesso
+3. Sessoes com refresh token invalido sao limpas automaticamente, permitindo novo login
+4. Tela de fmoadv mostra botao "Tentar novamente" apos 10s (ja implementado) e permite recarregar
 
