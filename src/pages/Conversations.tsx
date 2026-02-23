@@ -4433,52 +4433,106 @@ export default function Conversations() {
               "flex-shrink-0 p-4 border-t border-border bg-card",
               isPontualMode && "border-t-2 border-t-amber-500",
               isInternalMode && "border-t-2 border-t-yellow-500 bg-yellow-50/50 dark:bg-yellow-900/10",
-              instanceDisconnectedInfo && "border-t-2 border-t-red-500"
+              instanceDisconnectedInfo && !instanceDisconnectedInfo.deleted && "border-t-2 border-t-red-500",
+              instanceDisconnectedInfo?.deleted && "border-t-2 border-t-amber-500"
             )}>
               {/* WhatsApp Disconnected Banner */}
               {instanceDisconnectedInfo && (
-                <div className="w-full mb-2 flex items-center justify-between bg-red-500/10 text-red-600 dark:text-red-400 px-3 py-2 rounded-md text-sm">
-                  <span className="flex items-center gap-2">
-                    <WifiOff className="h-4 w-4" />
-                    {instanceDisconnectedInfo.deleted 
-                      ? "WhatsApp sem conexão. A conexão foi excluída ou desvinculada."
-                      : `WhatsApp desconectado. Clique no botão para reconectar.`
-                    }
-                  </span>
-                  {!instanceDisconnectedInfo.deleted && (
-                    <Button 
-                      variant="default"
-                      size="sm" 
-                      className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white"
-                      disabled={isReconnecting}
-                      onClick={async () => {
-                        setIsReconnecting(true);
-                        try {
-                          const { data, error } = await supabase.functions.invoke("evolution-api", {
-                            body: { action: "refresh_status", instanceId: instanceDisconnectedInfo.instanceId }
-                          });
-                          if (!error && data?.status === "connected") {
-                            await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
-                            toast({ title: "WhatsApp reconectado com sucesso!" });
-                          } else {
-                          navigate(`/connections?reconnect=${instanceDisconnectedInfo.instanceId}`);
-                        }
-                        } catch {
-                          navigate(`/connections?reconnect=${instanceDisconnectedInfo.instanceId}`);
-                        } finally {
-                          setIsReconnecting(false);
-                        }
-                      }}
-                    >
-                      {isReconnecting ? (
-                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-3 w-3 mr-1" />
-                      )}
-                      {isReconnecting ? "Reconectando..." : "Reconectar"}
-                    </Button>
+                <>
+                  {instanceDisconnectedInfo.deleted ? (
+                    <div className="w-full mb-2 flex items-center justify-between gap-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-2 rounded-md text-sm">
+                      <span className="flex items-center gap-2 flex-shrink-0">
+                        <WifiOff className="h-4 w-4" />
+                        Conexão excluída. Selecione outra:
+                      </span>
+                      <Select
+                        onValueChange={async (value) => {
+                          if (value && selectedConversation?.id) {
+                            const newInstance = whatsappInstances.find(inst => inst.id === value);
+                            const changeData = {
+                              conversationId: selectedConversation.id,
+                              newInstanceId: value,
+                              oldInstanceName: "Excluída",
+                              newInstanceName: newInstance?.display_name || newInstance?.instance_name || "Desconhecido",
+                              oldPhoneDigits: undefined,
+                              newPhoneDigits: newInstance?.phone_number?.slice(-4),
+                            };
+                            try {
+                              const result = await checkExistingConversationInDestination(
+                                selectedConversation.id,
+                                value,
+                                selectedConversation.law_firm_id
+                              );
+                              if (result.exists) {
+                                setPendingInstanceChange({ ...changeData, existingConvName: result.existingConvName });
+                                setInstanceChangeDialogOpen(true);
+                              } else {
+                                changeWhatsAppInstance.mutate(changeData);
+                              }
+                            } catch {
+                              changeWhatsAppInstance.mutate(changeData);
+                            }
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-7 text-xs w-auto min-w-[160px] max-w-[240px] border-amber-300 dark:border-amber-600 bg-background">
+                          <SelectValue placeholder="Selecione uma conexão" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {whatsappInstances
+                            .filter(inst => inst.status === "connected")
+                            .map(inst => {
+                              const lastDigits = inst.phone_number ? inst.phone_number.slice(-4) : null;
+                              return (
+                                <SelectItem key={inst.id} value={inst.id}>
+                                  {inst.display_name || inst.instance_name}
+                                  {lastDigits ? ` (…${lastDigits})` : ""}
+                                </SelectItem>
+                              );
+                            })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="w-full mb-2 flex items-center justify-between bg-red-500/10 text-red-600 dark:text-red-400 px-3 py-2 rounded-md text-sm">
+                      <span className="flex items-center gap-2">
+                        <WifiOff className="h-4 w-4" />
+                        WhatsApp desconectado. Clique no botão para reconectar.
+                      </span>
+                      <Button 
+                        variant="default"
+                        size="sm" 
+                        className="h-7 text-xs bg-red-600 hover:bg-red-700 text-white"
+                        disabled={isReconnecting}
+                        onClick={async () => {
+                          setIsReconnecting(true);
+                          try {
+                            const { data, error } = await supabase.functions.invoke("evolution-api", {
+                              body: { action: "refresh_status", instanceId: instanceDisconnectedInfo.instanceId }
+                            });
+                            if (!error && data?.status === "connected") {
+                              await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
+                              toast({ title: "WhatsApp reconectado com sucesso!" });
+                            } else {
+                              navigate(`/connections?reconnect=${instanceDisconnectedInfo.instanceId}`);
+                            }
+                          } catch {
+                            navigate(`/connections?reconnect=${instanceDisconnectedInfo.instanceId}`);
+                          } finally {
+                            setIsReconnecting(false);
+                          }
+                        }}
+                      >
+                        {isReconnecting ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <RefreshCw className="h-3 w-3 mr-1" />
+                        )}
+                        {isReconnecting ? "Reconectando..." : "Reconectar"}
+                      </Button>
+                    </div>
                   )}
-                </div>
+                </>
               )}
 
               {/* Pontual Mode Indicator */}

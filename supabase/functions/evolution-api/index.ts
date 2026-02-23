@@ -1027,197 +1027,124 @@ serve(async (req) => {
           console.log(`[Evolution API] Evolution delete failed (non-fatal):`, e);
         }
 
-        // ── Smart client reassignment before deleting instance ──
-        // Instead of blindly setting whatsapp_instance_id = NULL (which can violate
-        // idx_clients_phone_norm_law_firm_no_instance), we:
-        // 1. Find another active instance in the same law_firm
-        // 2. Merge duplicate clients (move conversations, delete duplicate)
-        // 3. Reassign remaining clients to other instance or NULL gracefully
+        // ── Simple NULL + tracking (no automatic reassignment) ──
+        // Set whatsapp_instance_id = NULL and track last_whatsapp_instance_id
+        // Handle uniqueness conflicts (23505) by merging only conflicting records
 
-        console.log(`[Evolution API] Smart client reassignment for instance: ${body.instanceId}`);
+        console.log(`[Evolution API] Setting NULL for clients/conversations of instance: ${body.instanceId}`);
 
-        // 1. Find another instance in the same law_firm
-        const { data: otherInstances } = await supabaseClient
-          .from("whatsapp_instances")
-          .select("id")
-          .eq("law_firm_id", lawFirmId)
-          .neq("id", body.instanceId)
-          .limit(1);
-
-        const targetInstanceId = otherInstances?.[0]?.id || null;
-        console.log(`[Evolution API] Target instance for reassignment: ${targetInstanceId || "NULL"}`);
-
-        // 2. Fetch all clients from the instance being deleted
-        const { data: clientsToMove } = await supabaseClient
+        // 1. Try batch update for clients
+        const { error: clientsError } = await supabaseClient
           .from("clients")
-          .select("id, phone")
+          .update({ 
+            whatsapp_instance_id: null, 
+            last_whatsapp_instance_id: body.instanceId 
+          } as any)
           .eq("whatsapp_instance_id", body.instanceId)
           .eq("law_firm_id", lawFirmId);
 
-        if (clientsToMove && clientsToMove.length > 0) {
-          console.log(`[Evolution API] ${clientsToMove.length} clients to reassign`);
-
-          // 3. Find existing clients at destination (same phone, same law_firm, target instance or NULL)
-          const phones = clientsToMove.map(c => c.phone).filter(Boolean);
-          
-          // Get clients that already exist at target destination
-          let existingAtTarget: { id: string; phone: string }[] = [];
-          if (phones.length > 0) {
-            const targetFilter = targetInstanceId 
-              ? supabaseClient.from("clients").select("id, phone")
-                  .eq("law_firm_id", lawFirmId)
-                  .eq("whatsapp_instance_id", targetInstanceId)
-                  .in("phone", phones)
-              : supabaseClient.from("clients").select("id, phone")
-                  .eq("law_firm_id", lawFirmId)
-                  .is("whatsapp_instance_id", null)
-                  .in("phone", phones);
+        if (clientsError) {
+          if (clientsError.code === "23505") {
+            console.log(`[Evolution API] Uniqueness conflict on clients, resolving individually...`);
             
-            const { data: existing } = await targetFilter;
-            existingAtTarget = existing || [];
-          }
-
-          // Also check for NULL-instance duplicates if target is another instance
-          let existingAtNull: { id: string; phone: string }[] = [];
-          if (targetInstanceId && phones.length > 0) {
-            const { data: nullExisting } = await supabaseClient
+            // Fetch clients from this instance
+            const { data: conflictClients } = await supabaseClient
               .from("clients")
               .select("id, phone")
-              .eq("law_firm_id", lawFirmId)
-              .is("whatsapp_instance_id", null)
-              .in("phone", phones);
-            existingAtNull = nullExisting || [];
-          }
+              .eq("whatsapp_instance_id", body.instanceId)
+              .eq("law_firm_id", lawFirmId);
 
-          const conflictPhones = new Set([
-            ...existingAtTarget.map(c => c.phone),
-            ...existingAtNull.map(c => c.phone),
-          ]);
-
-          // 4. For conflicting clients: merge conversations then delete duplicate
-          for (const client of clientsToMove) {
-            if (client.phone && conflictPhones.has(client.phone)) {
-              // Find the surviving client (prefer targetInstance, fallback to NULL)
-              const survivor = existingAtTarget.find(c => c.phone === client.phone)
-                || existingAtNull.find(c => c.phone === client.phone);
-              
-              if (survivor) {
-                console.log(`[Evolution API] Merging client ${client.id} -> ${survivor.id} (phone: ${client.phone})`);
-                
-                // Move conversations to survivor
-                await supabaseClient
-                  .from("conversations")
-                  .update({ client_id: survivor.id })
-                  .eq("client_id", client.id);
-
-                // Move client_tags (ignore conflicts)
-                await supabaseClient
-                  .from("client_tags")
-                  .update({ client_id: survivor.id })
-                  .eq("client_id", client.id);
-
-                // Move client_actions
-                await supabaseClient
-                  .from("client_actions")
-                  .update({ client_id: survivor.id })
-                  .eq("client_id", client.id);
-
-                // Move client_memories
-                await supabaseClient
-                  .from("client_memories")
-                  .update({ client_id: survivor.id })
-                  .eq("client_id", client.id);
-
-                // Delete the duplicate client
-                await supabaseClient
+            if (conflictClients) {
+              for (const client of conflictClients) {
+                // Try individual update
+                const { error: indivError } = await supabaseClient
                   .from("clients")
-                  .delete()
+                  .update({ whatsapp_instance_id: null, last_whatsapp_instance_id: body.instanceId } as any)
                   .eq("id", client.id);
-              }
-            }
-          }
 
-          // 5. Reassign remaining (non-conflicting) clients
-          const updatePayload = targetInstanceId
-            ? { whatsapp_instance_id: targetInstanceId, last_whatsapp_instance_id: body.instanceId }
-            : { whatsapp_instance_id: null, last_whatsapp_instance_id: body.instanceId };
+                if (indivError?.code === "23505") {
+                  // This client has a duplicate with NULL instance - merge into existing
+                  const { data: existing } = await supabaseClient
+                    .from("clients")
+                    .select("id")
+                    .eq("law_firm_id", lawFirmId)
+                    .eq("phone", client.phone)
+                    .is("whatsapp_instance_id", null)
+                    .neq("id", client.id)
+                    .limit(1)
+                    .single();
 
-          const { error: clientsUpdateError } = await supabaseClient
-            .from("clients")
-            .update(updatePayload as any)
-            .eq("whatsapp_instance_id", body.instanceId)
-            .eq("law_firm_id", lawFirmId);
-
-          if (clientsUpdateError) {
-            // If still fails (edge case), log and continue
-            console.error(`[Evolution API] Failed to reassign remaining clients:`, clientsUpdateError);
-          } else {
-            console.log(`[Evolution API] Remaining clients reassigned`);
-          }
-        }
-
-        // 6. Handle conversations similarly
-        // Find conversations that would conflict at destination
-        const { data: convsToMove } = await supabaseClient
-          .from("conversations")
-          .select("id, remote_jid")
-          .eq("whatsapp_instance_id", body.instanceId)
-          .eq("law_firm_id", lawFirmId);
-
-        if (convsToMove && convsToMove.length > 0) {
-          const remoteJids = convsToMove.map(c => c.remote_jid).filter(Boolean);
-          
-          if (remoteJids.length > 0) {
-            // Find existing conversations at target
-            const targetConvFilter = targetInstanceId
-              ? supabaseClient.from("conversations").select("id, remote_jid")
-                  .eq("law_firm_id", lawFirmId)
-                  .eq("whatsapp_instance_id", targetInstanceId)
-                  .in("remote_jid", remoteJids)
-              : supabaseClient.from("conversations").select("id, remote_jid")
-                  .eq("law_firm_id", lawFirmId)
-                  .is("whatsapp_instance_id", null)
-                  .in("remote_jid", remoteJids);
-
-            const { data: existingConvs } = await targetConvFilter;
-            const conflictJids = new Set((existingConvs || []).map(c => c.remote_jid));
-
-            // Merge conflicting conversations (move messages to survivor, delete duplicate)
-            for (const conv of convsToMove) {
-              if (conv.remote_jid && conflictJids.has(conv.remote_jid)) {
-                const survivor = (existingConvs || []).find(c => c.remote_jid === conv.remote_jid);
-                if (survivor) {
-                  console.log(`[Evolution API] Merging conversation ${conv.id} -> ${survivor.id}`);
-                  await supabaseClient
-                    .from("messages")
-                    .update({ conversation_id: survivor.id })
-                    .eq("conversation_id", conv.id);
-                  await supabaseClient
-                    .from("conversations")
-                    .delete()
-                    .eq("id", conv.id);
+                  if (existing) {
+                    console.log(`[Evolution API] Merging duplicate client ${client.id} -> ${existing.id}`);
+                    // Move related records to surviving client
+                    await supabaseClient.from("conversations").update({ client_id: existing.id }).eq("client_id", client.id);
+                    await supabaseClient.from("client_tags").update({ client_id: existing.id }).eq("client_id", client.id);
+                    await supabaseClient.from("client_actions").update({ client_id: existing.id }).eq("client_id", client.id);
+                    await supabaseClient.from("client_memories").update({ client_id: existing.id }).eq("client_id", client.id);
+                    // Delete the duplicate
+                    await supabaseClient.from("clients").delete().eq("id", client.id);
+                  }
                 }
               }
             }
-          }
-
-          // Reassign remaining conversations
-          const convPayload = targetInstanceId
-            ? { whatsapp_instance_id: targetInstanceId, last_whatsapp_instance_id: body.instanceId }
-            : { whatsapp_instance_id: null, last_whatsapp_instance_id: body.instanceId };
-
-          const { error: convsUpdateError } = await supabaseClient
-            .from("conversations")
-            .update(convPayload as any)
-            .eq("whatsapp_instance_id", body.instanceId)
-            .eq("law_firm_id", lawFirmId);
-
-          if (convsUpdateError) {
-            console.error(`[Evolution API] Failed to reassign conversations:`, convsUpdateError);
           } else {
-            console.log(`[Evolution API] Conversations reassigned`);
+            console.error(`[Evolution API] Failed to update clients:`, clientsError);
           }
         }
+
+        // 2. Same for conversations
+        const { error: convsError } = await supabaseClient
+          .from("conversations")
+          .update({
+            whatsapp_instance_id: null,
+            last_whatsapp_instance_id: body.instanceId
+          } as any)
+          .eq("whatsapp_instance_id", body.instanceId)
+          .eq("law_firm_id", lawFirmId);
+
+        if (convsError) {
+          if (convsError.code === "23505") {
+            console.log(`[Evolution API] Uniqueness conflict on conversations, resolving individually...`);
+            
+            const { data: conflictConvs } = await supabaseClient
+              .from("conversations")
+              .select("id, remote_jid")
+              .eq("whatsapp_instance_id", body.instanceId)
+              .eq("law_firm_id", lawFirmId);
+
+            if (conflictConvs) {
+              for (const conv of conflictConvs) {
+                const { error: indivConvError } = await supabaseClient
+                  .from("conversations")
+                  .update({ whatsapp_instance_id: null, last_whatsapp_instance_id: body.instanceId } as any)
+                  .eq("id", conv.id);
+
+                if (indivConvError?.code === "23505") {
+                  // Merge into existing conversation with same remote_jid + NULL instance
+                  const { data: existingConv } = await supabaseClient
+                    .from("conversations")
+                    .select("id")
+                    .eq("law_firm_id", lawFirmId)
+                    .eq("remote_jid", conv.remote_jid)
+                    .is("whatsapp_instance_id", null)
+                    .neq("id", conv.id)
+                    .limit(1)
+                    .single();
+
+                  if (existingConv) {
+                    console.log(`[Evolution API] Merging duplicate conversation ${conv.id} -> ${existingConv.id}`);
+                    await supabaseClient.from("messages").update({ conversation_id: existingConv.id }).eq("conversation_id", conv.id);
+                    await supabaseClient.from("conversations").delete().eq("id", conv.id);
+                  }
+                }
+              }
+            }
+          } else {
+            console.error(`[Evolution API] Failed to update conversations:`, convsError);
+          }
+        }
+
+        console.log(`[Evolution API] Clients and conversations set to NULL with tracking`);
 
         // Delete from database
         const { error: deleteError } = await supabaseClient
