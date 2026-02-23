@@ -199,6 +199,7 @@ export default function Connections() {
   }, [isQRDialogOpen, currentInstanceId, stopPolling, refetch]);
 
   // Poll once and schedule next poll with backoff
+  // Smart polling: if no QR code yet, actively fetch it via getQRCode instead of just checking status
   const pollOnce = useCallback(async (instanceId: string) => {
     pollCountRef.current++;
     const count = pollCountRef.current;
@@ -212,28 +213,63 @@ export default function Connections() {
     }
 
     try {
-      console.log(`[Connections] Polling status (${count}/${MAX_POLLS})...`);
-      const result = await getStatus.mutateAsync(instanceId);
-      console.log("[Connections] Poll result:", result);
-      
-      if (result.status === "open" || result.status === "connected" || result.evolutionState === "open") {
-        console.log("[Connections] Instance connected! Stopping poll.");
-        stopPolling();
-        setConnectionStatus("Conectado!");
-        setCurrentQRCode(null); // Hide QR code
-        await refetch(); // Refresh instance list
+      // If we don't have a QR code yet, actively try to fetch one
+      if (!currentQRCode) {
+        console.log(`[Connections] Polling for QR code (${count}/${MAX_POLLS})...`);
+        try {
+          const qrResult = await getQRCode.mutateAsync(instanceId);
+          console.log("[Connections] QR poll result:", qrResult);
+
+          if (qrResult.status === "open" || qrResult.status === "connected" || qrResult.evolutionState === "open") {
+            console.log("[Connections] Instance connected! Stopping poll.");
+            stopPolling();
+            setConnectionStatus("Conectado!");
+            setCurrentQRCode(null);
+            await refetch();
+            setTimeout(() => {
+              setIsQRDialogOpen(false);
+              setConnectionStatus(null);
+              setPollCount(0);
+            }, 1000);
+            return;
+          }
+
+          if (qrResult.qrCode) {
+            console.log("[Connections] QR code obtained via polling!");
+            setCurrentQRCode(qrResult.qrCode);
+            setQrError(null);
+            setConnectionStatus("Escaneie o QR Code");
+          } else {
+            // Still no QR, keep waiting
+            setConnectionStatus("Aguardando QR Code...");
+          }
+        } catch (qrError) {
+          console.warn("[Connections] QR fetch error (will retry):", qrError);
+          // Don't set error - just continue polling
+          setConnectionStatus("Aguardando QR Code...");
+        }
+      } else {
+        // Already have QR code, just check connection status
+        console.log(`[Connections] Polling status (${count}/${MAX_POLLS})...`);
+        const result = await getStatus.mutateAsync(instanceId);
+        console.log("[Connections] Poll result:", result);
         
-        // Close dialog after showing success (reduced delay)
-        setTimeout(() => {
-          setIsQRDialogOpen(false);
-          setConnectionStatus(null);
-          setPollCount(0);
-        }, 1000);
-        return;
-      } else if (result.qrCode && result.qrCode !== currentQRCode) {
-        // QR code updated (e.g., expired and regenerated)
-        console.log("[Connections] QR code updated");
-        setCurrentQRCode(result.qrCode);
+        if (result.status === "open" || result.status === "connected" || result.evolutionState === "open") {
+          console.log("[Connections] Instance connected! Stopping poll.");
+          stopPolling();
+          setConnectionStatus("Conectado!");
+          setCurrentQRCode(null);
+          await refetch();
+          setTimeout(() => {
+            setIsQRDialogOpen(false);
+            setConnectionStatus(null);
+            setPollCount(0);
+          }, 1000);
+          return;
+        } else if (result.qrCode && result.qrCode !== currentQRCode) {
+          console.log("[Connections] QR code updated");
+          setCurrentQRCode(result.qrCode);
+        }
       }
     } catch (error) {
       console.error("[Connections] Poll error:", error);
@@ -244,7 +280,7 @@ export default function Connections() {
     const nextInterval = getPollingInterval(count);
     console.log(`[Connections] Next poll in ${nextInterval}ms`);
     pollIntervalRef.current = setTimeout(() => pollOnce(instanceId), nextInterval);
-  }, [stopPolling, getStatus, refetch, currentQRCode, getPollingInterval]);
+  }, [stopPolling, getStatus, getQRCode, refetch, currentQRCode, getPollingInterval]);
 
   // Start polling for connection status
   const startPolling = useCallback((instanceId: string) => {
@@ -395,7 +431,10 @@ export default function Connections() {
         // Start polling for status updates
         startPolling(instance.id);
       } else {
-        setQrError("QR Code não disponível. Tente novamente.");
+        // No QR code yet - start smart polling that will actively fetch QR
+        console.log("[Connections] No QR code from initial request, starting smart polling...");
+        setConnectionStatus("Aguardando QR Code...");
+        startPolling(instance.id);
       }
     } catch (error) {
       console.error("[Connections] Error getting QR code:", error);

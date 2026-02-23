@@ -1,4 +1,4 @@
-import { CheckCircle2, Loader2, QrCode, AlertCircle } from "lucide-react";
+import { CheckCircle2, Loader2, QrCode, AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,6 +34,7 @@ export function QRCodeDialog({
   maxPolls,
 }: QRCodeDialogProps) {
   const isConnected = connectionStatus === "Conectado!";
+  const isWaitingForQR = !qrCode && !error && !isLoading && !isConnected && pollCount > 0;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -81,6 +82,22 @@ export function QRCodeDialog({
                 </p>
               </div>
             </>
+          ) : isWaitingForQR ? (
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative">
+                <QrCode className="h-16 w-16 text-muted-foreground opacity-30" />
+                <RefreshCw className="h-6 w-6 animate-spin text-primary absolute -bottom-1 -right-1" />
+              </div>
+              <div className="text-center space-y-1">
+                <p className="text-muted-foreground font-medium">Aguardando QR Code...</p>
+                <p className="text-xs text-muted-foreground">
+                  A API está inicializando a sessão. Isso pode levar até 60 segundos.
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Tentativa {pollCount}/{maxPolls}
+                </p>
+              </div>
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-4">
               <QrCode className="h-16 w-16 text-muted-foreground opacity-50" />
@@ -93,7 +110,7 @@ export function QRCodeDialog({
           <Button variant="outline" onClick={onClose}>
             Fechar
           </Button>
-          {error && (
+          {(error || (!qrCode && !isLoading && !isConnected)) && (
             <Button onClick={onRetry}>Tentar Novamente</Button>
           )}
         </DialogFooter>
