@@ -673,11 +673,11 @@ serve(async (req) => {
         // If no QR code from create response, retry with /instance/connect endpoint
         // Baileys v7 needs more time to initialize the WebSocket session
         if (!qrCode) {
-          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect (v2.2.3 - fast init)`);
-          const maxRetries = 2;
-          const retryDelayMs = 2000;
+          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect (v2.3.7 - Baileys v7 needs more time)`);
+          const maxRetries = 3;
+          const retryDelayMs = 4000;
 
-          // Brief wait for Baileys v6 to initialize (much faster than v7)
+          // Wait for Baileys v7 to initialize (slower than v6)
           await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
 
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -1118,8 +1118,8 @@ serve(async (req) => {
             "Content-Type": "application/json",
           };
 
-          // v2.2.3 - Baileys v6 initializes fast, no need for version detection
-          const detectedApiVersion = "v2.2.3";
+          // v2.3.7 - Baileys v7 needs more time for session init
+          const detectedApiVersion = "v2.3.7";
 
           // Helper to extract QR from connect response
           const extractQrFromResponse = (data: any): string | null => {
@@ -1215,7 +1215,7 @@ serve(async (req) => {
             // LEVEL 1 - Simple retry connect (NO logout, NO delete)
             // 3 attempts x 3s delay = ~12s total
             // ====================================================================
-            console.log(`[Evolution API] 🔄 LEVEL 1: Simple retry connect for ${instance.instance_name} (3 attempts, 3s delay)`);
+            console.log(`[Evolution API] 🔄 LEVEL 1: Simple retry connect for ${instance.instance_name} (3 attempts, 5s delay)`);
             
             for (let l1 = 1; l1 <= 3; l1++) {
               console.log(`[Evolution API] Level 1 - connect attempt ${l1}/3...`);
@@ -1244,7 +1244,7 @@ serve(async (req) => {
               }
               
               if (l1 < 3) {
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                await new Promise(resolve => setTimeout(resolve, 5000));
               }
             }
 
@@ -1292,7 +1292,7 @@ serve(async (req) => {
               console.warn(`[Evolution API] Level 2 - Logout failed (non-fatal):`, e);
             }
 
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
             for (let l2 = 1; l2 <= 2; l2++) {
               console.log(`[Evolution API] Level 2 - connect attempt ${l2}/2...`);
@@ -1320,7 +1320,7 @@ serve(async (req) => {
                 console.warn(`[Evolution API] Level 2 attempt ${l2} error:`, l2Err?.message);
               }
               if (l2 < 2) {
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                await new Promise(resolve => setTimeout(resolve, 5000));
               }
             }
 

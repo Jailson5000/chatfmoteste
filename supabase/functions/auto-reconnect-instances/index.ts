@@ -272,72 +272,8 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
   const apiUrl = normalizeUrl(instance.api_url);
   
   try {
-    // v2.2.3: Try restart first (preferred method - keeps session and reconnects)
-    console.log(`[Auto-Reconnect] Attempting restart for ${instance.instance_name} (v2.2.3 preferred)...`);
-    
-    try {
-      const restartResponse = await fetchWithTimeout(
-        `${apiUrl}/instance/restart/${encodeURIComponent(instance.instance_name)}`,
-        {
-          method: "PUT",
-          headers: {
-            apikey: instance.api_key,
-            "Content-Type": "application/json",
-          },
-        },
-        15000
-      );
-
-      if (restartResponse.ok) {
-        const data = await restartResponse.json().catch(() => ({}));
-        console.log(`[Auto-Reconnect] /instance/restart response for ${instance.instance_name}:`, JSON.stringify(data).slice(0, 500));
-        
-        const state = data?.instance?.state || data?.instance?.status || data?.state || data?.status;
-        
-        if (state === "open" || state === "connected") {
-          return {
-            instance_id: instance.id,
-            instance_name: instance.instance_name,
-            success: true,
-            action: "restart",
-            message: "Instance reconnected automatically via restart",
-          };
-        }
-        
-        // Restart succeeded but not yet connected - give it a moment then check
-        console.log(`[Auto-Reconnect] Restart returned state=${state}, waiting 3s then checking...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        
-        // Quick check connectionState
-        try {
-          const stateResp = await fetchWithTimeout(
-            `${apiUrl}/instance/connectionState/${encodeURIComponent(instance.instance_name)}`,
-            { method: "GET", headers: { apikey: instance.api_key, "Content-Type": "application/json" } },
-            8000
-          );
-          if (stateResp.ok) {
-            const stateData = await stateResp.json();
-            const realState = stateData?.instance?.state || stateData?.state || "unknown";
-            if (realState === "open" || realState === "connected") {
-              return {
-                instance_id: instance.id,
-                instance_name: instance.instance_name,
-                success: true,
-                action: "restart",
-                message: "Instance reconnected automatically via restart (verified)",
-              };
-            }
-          }
-        } catch (_) {}
-      } else {
-        console.log(`[Auto-Reconnect] Restart failed (${restartResponse.status}), falling back to connect...`);
-      }
-    } catch (restartErr: any) {
-      console.warn(`[Auto-Reconnect] Restart error for ${instance.instance_name}: ${restartErr.message}, falling back to connect...`);
-    }
-
-    // Fallback: /instance/connect
-    console.log(`[Auto-Reconnect] Fallback: attempting connect for ${instance.instance_name}...`);
+    // v2.3.7 - Baileys v7: /instance/restart removed (404), use /instance/connect only
+    console.log(`[Auto-Reconnect] Attempting connect for ${instance.instance_name} (v2.3.7 - connect only)...`);
     
     const connectResponse = await fetchWithTimeout(
       `${apiUrl}/instance/connect/${encodeURIComponent(instance.instance_name)}`,
