@@ -2,81 +2,83 @@
 
 # Fix: QR Code nao aparece ao criar/conectar instancias WhatsApp
 
-## Diagnostico
+## Problema
 
-Os logs mostram um padrao claro: toda chamada a `/instance/connect/{name}` retorna `{"count":0}` (sem QR code). Isso acontece em 3 cenarios:
+Os logs confirmam o problema: a Evolution API retorna `{"count":0}` consistentemente para TODAS as chamadas `/instance/connect/{name}`, mesmo apos 25+ segundos de retries no backend. O backend ja tem retry logic extensiva (4 retries de 5s cada) mas nao e suficiente.
 
-1. **Criar instancia**: O `create_instance` na Evolution API retorna `qrcode: {count: 0}` em vez de um base64 QR. O frontend verifica `result.qrCode` que e `null`, entao o dialogo de QR nunca abre.
-
-2. **Conectar instancia existente (MIAU)**: O `get_qrcode` chama `/instance/connect` que retorna `{count:0}`, dispara o recovery (logout+connect, delete+recreate) e todas as tentativas subsequentes tambem retornam `{count:0}`.
-
-3. **Nova instancia (dsged)**: Criada com sucesso mas sem QR. O frontend mostra "Instancia criada com sucesso" mas nao abre o dialogo de QR automaticamente.
+O problema real esta no frontend: quando o QR nao vem nem do `create_instance` nem do `get_qrcode`, o dialog mostra "QR Code nao disponivel" como um beco sem saida. O polling via `get_status` so verifica o `connectionState` -- nunca tenta obter um novo QR code.
 
 ## Causa Raiz
 
-A Evolution API com Baileys v7 precisa de mais tempo para inicializar a sessao WebSocket antes de gerar o QR code. O delay atual (3-5s) e insuficiente. Alem disso, o fluxo de `create_instance` na edge function nao tenta obter o QR code apos a criacao.
+A Evolution API com Baileys v7 pode levar 30-60+ segundos para inicializar o WebSocket e gerar o primeiro QR code. O backend tenta por ~25s e desiste. O frontend nao tem mecanismo de re-tentativa automatica para buscar o QR code.
 
-## Solucao (2 alteracoes)
+## Solucao (3 alteracoes)
 
-### 1. Edge Function `evolution-api` - Retry de QR apos create_instance
+### 1. Frontend - Polling inteligente que tambem busca QR code
 
-No bloco `create_instance` (linhas 659-703), quando o QR code nao vem na resposta do create, adicionar um loop de retries com delays progressivos para chamar `/instance/connect/{name}`:
+Modificar `src/pages/Connections.tsx`:
 
-- Aguardar 5 segundos apos criar a instancia
-- Tentar `/instance/connect/{name}` ate 4 vezes (com 5s entre tentativas)
-- Se obtiver QR code, retornar com sucesso
-- Se nao, retornar `success: true` sem QR code (o frontend ira tratar)
+- Na funcao `pollOnce`, quando `currentQRCode` e `null` (nenhum QR disponivel ainda), chamar `getQRCode.mutateAsync(instanceId)` em vez de apenas `getStatus.mutateAsync(instanceId)`
+- Isso faz o polling tentar obter o QR code repetidamente ate conseguir, ao inves de so verificar o status
+- Quando o QR code for obtido, atualizar o state e continuar polling normal (so status)
 
-### 2. Frontend `Connections.tsx` - Auto-conectar apos criar instancia sem QR
+### 2. Frontend - QR Dialog com auto-retry
 
-No `handleCreateInstance` (linhas 330-360), quando `result.qrCode` e `null` mas `result.instance` existe, chamar automaticamente `handleConnectInstance(result.instance)` para abrir o dialogo de QR e tentar obter o QR code separadamente.
+Modificar `src/components/connections/QRCodeDialog.tsx`:
 
-Isso garante que o usuario sempre veja o dialogo de QR code apos criar uma instancia, mesmo que o QR nao tenha sido gerado na criacao.
+- Quando nao ha QR code e nao ha erro, mostrar um estado de "Aguardando QR Code..." com spinner em vez de "QR Code nao disponivel" estatico
+- Adicionar botao "Tentar Novamente" tambem no estado sem QR (nao so no estado de erro)
+
+### 3. Frontend - handleConnectInstance com retry automatico
+
+Modificar `src/pages/Connections.tsx`:
+
+- Na funcao `handleConnectInstance`, quando `get_qrcode` retorna sem QR e sem erro (retryable=true ou simplesmente sem qrCode), iniciar o polling mesmo assim em vez de mostrar erro
+- O polling inteligente (item 1) se encarregara de buscar o QR code
 
 ## Detalhes Tecnicos
 
-### Edge Function - Bloco create_instance (apos linha 667)
+### Connections.tsx - pollOnce modificado
 
 ```text
 Antes:
-  1. Criar instancia
-  2. Extrair QR da resposta do create
-  3. Salvar no banco
-  4. Retornar
+  pollOnce chama getStatus.mutateAsync(instanceId) → verifica status e QR atualizado
 
 Depois:
-  1. Criar instancia
-  2. Extrair QR da resposta do create
-  3. SE nao tem QR:
-     a. Aguardar 5s (inicializacao Baileys)
-     b. Loop ate 4 tentativas:
-        - GET /instance/connect/{name}
-        - Se tem QR: usar esse QR
-        - Se nao: aguardar 5s e tentar novamente
-  4. Salvar no banco (com status correto)
-  5. Retornar
+  pollOnce verifica se currentQRCode e null:
+    - Se null: chama getQRCode.mutateAsync(instanceId) em vez de getStatus
+      - Se retornar qrCode: atualiza currentQRCode + continua polling normal
+      - Se retornar connected: para polling, mostra sucesso
+      - Se retornar erro retryable: agenda proximo poll
+    - Se ja tem QR: mantém comportamento atual (getStatus)
 ```
 
-### Frontend - handleCreateInstance
+### Connections.tsx - handleConnectInstance modificado
 
 ```text
 Antes:
-  1. Chamar createInstance
-  2. Se result.qrCode E result.instance: abrir dialog QR
-  3. Se nao: nada acontece
+  get_qrcode falha sem QR → setQrError("QR Code nao disponivel")
 
 Depois:
-  1. Chamar createInstance
-  2. Se result.qrCode E result.instance: abrir dialog QR (sem mudanca)
-  3. Se NAO tem qrCode MAS tem instance:
-     - Chamar handleConnectInstance(instance) automaticamente
-     - Isso abre o dialog de QR e tenta obter o QR separadamente
+  get_qrcode retorna sem QR:
+    - Se retryable ou sem qrCode: inicia polling (que tentara buscar QR)
+    - Mostra estado de "Aguardando..." no dialog em vez de erro
+```
+
+### QRCodeDialog.tsx - Estado intermediario
+
+```text
+Antes:
+  Sem QR + sem erro + sem loading → "QR Code nao disponivel" (beco sem saida)
+
+Depois:
+  Sem QR + sem erro + sem loading + pollCount > 0 → "Aguardando QR Code..." com spinner + botao retry
+  Sem QR + sem erro + sem loading + pollCount == 0 → "QR Code nao disponivel" + botao retry
 ```
 
 ## Resultado Esperado
 
-- Ao criar uma nova instancia, o sistema tentara obter o QR code com ate 4 retries no backend
-- Se o backend nao conseguir, o frontend automaticamente abrira o dialogo de conexao e tentara obter o QR
-- O usuario sempre vera o dialogo de QR code apos criar uma instancia
-- Instancias existentes continuam com o mesmo fluxo de recovery (que tambem se beneficia dos delays maiores)
-
+- Ao criar uma instancia, se o QR nao vier imediatamente, o dialog mostra "Aguardando QR Code..." e continua tentando automaticamente
+- O polling busca ativamente o QR code via `get_qrcode` (que faz `/instance/connect`) a cada 3-5s
+- Quando a Evolution API finalmente gerar o QR (apos 30-60s), ele aparece automaticamente no dialog
+- O usuario nao precisa fechar e reabrir o dialog manualmente
