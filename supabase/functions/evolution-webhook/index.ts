@@ -4156,7 +4156,14 @@ serve(async (req) => {
             dbStatus = 'connecting';
           }
         } else if (data.state === 'close') {
+          // CRITICAL: Always mark as disconnected when Evolution reports 'close',
+          // even if DB currently shows 'connected'. This ensures real disconnections
+          // are never masked by stale DB state.
           dbStatus = 'disconnected';
+          updatePayload.disconnected_since = new Date().toISOString();
+          updatePayload.awaiting_qr = false;
+          updatePayload.reconnect_attempts_count = 0;
+          logDebug('CONNECTION', `Instance closed - marking as disconnected (was: ${instance.status})`, { requestId });
         }
 
         // Build update payload

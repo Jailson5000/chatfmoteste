@@ -1900,9 +1900,41 @@ serve(async (req) => {
               let errorReason = "Falha no envio";
               try {
                 const errorJson = JSON.parse(errorText);
-                // Check for "number not on WhatsApp" error
-                if (errorJson.message && Array.isArray(errorJson.message)) {
-                  const notOnWhatsApp = errorJson.message.find((m: any) => m.exists === false);
+                // Check for "Connection Closed" error - instance lost WhatsApp session
+                const errorMessages = errorJson?.response?.message || errorJson?.message || [];
+                const messageArray = Array.isArray(errorMessages) ? errorMessages : [errorMessages];
+                const isConnectionClosed = messageArray.some(
+                  (m: unknown) => typeof m === 'string' && m.includes('Connection Closed')
+                );
+
+                if (isConnectionClosed && instanceId) {
+                  console.error(`[Evolution API] Connection Closed detected for instance ${instanceId} - marking as disconnected`);
+                  // Update instance status in DB to reflect reality
+                  await supabaseClient
+                    .from("whatsapp_instances")
+                    .update({ 
+                      status: 'disconnected', 
+                      disconnected_since: new Date().toISOString(),
+                      updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", instanceId);
+                  
+                  // Attempt automatic reconnection in background
+                  try {
+                    const connectUrl = `${apiUrl}/instance/connect/${encodeURIComponent(instance.instance_name)}`;
+                    console.log(`[Evolution API] Attempting auto-reconnect: ${connectUrl}`);
+                    await fetch(connectUrl, {
+                      method: "GET",
+                      headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                    });
+                  } catch (reconnectErr) {
+                    console.error(`[Evolution API] Auto-reconnect failed:`, reconnectErr);
+                  }
+                  
+                  errorReason = "Conexão WhatsApp perdida. Reconectando automaticamente...";
+                } else if (Array.isArray(errorMessages)) {
+                  // Check for "number not on WhatsApp" error
+                  const notOnWhatsApp = errorMessages.find((m: any) => m.exists === false);
                   if (notOnWhatsApp) {
                     errorReason = "Número não registrado no WhatsApp";
                   }
