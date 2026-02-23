@@ -542,6 +542,79 @@ export function useGlobalAdminInstances() {
     return acc;
   }, {} as Record<string, { connectionId: string; connectionName: string; apiUrl: string; instances: InstanceWithCompany[] }>);
 
+  // Force sync all: reconfigure webhooks + sync statuses
+  const forceSyncAll = useMutation({
+    mutationFn: async () => {
+      const results: { instance: string; success: boolean; error?: string }[] = [];
+      const targetInstances = instances.filter(i => i.status !== 'not_found_in_evolution');
+      
+      console.log("[forceSyncAll] Starting for", targetInstances.length, "instances");
+      
+      for (const instance of targetInstances) {
+        try {
+          const { data, error } = await supabase.functions.invoke("evolution-api", {
+            body: {
+              action: "global_configure_webhook",
+              instanceName: instance.instance_name,
+            },
+          });
+          
+          const success = !error && data?.success;
+          results.push({
+            instance: instance.instance_name,
+            success,
+            error: error?.message || data?.error,
+          });
+          
+          if (!success) {
+            const errorMsg = error?.message || data?.error || "";
+            console.error("[forceSyncAll] Failed for", instance.instance_name, errorMsg);
+            
+            // Mark 404 instances
+            if (errorMsg.includes("404") || errorMsg.includes("does not exist") || errorMsg.includes("not found")) {
+              await supabase
+                .from("whatsapp_instances")
+                .update({ status: "not_found_in_evolution", updated_at: new Date().toISOString() })
+                .eq("id", instance.id);
+            }
+          }
+        } catch (err: any) {
+          results.push({
+            instance: instance.instance_name,
+            success: false,
+            error: err?.message || "Exception",
+          });
+        }
+      }
+      
+      // Wait and sync statuses
+      await new Promise(r => setTimeout(r, 3000));
+      await supabase.functions.invoke("sync-evolution-instances");
+      
+      return results;
+    },
+    onSuccess: (results) => {
+      queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+      queryClient.invalidateQueries({ queryKey: ["evolution-api-connections"] });
+      refetchHealth();
+      
+      const succeeded = results.filter(r => r.success).length;
+      const failed = results.filter(r => !r.success).length;
+      
+      toast({
+        title: "Sincronização completa",
+        description: `${succeeded} webhooks configurados, ${failed} falha(s)${failed > 0 ? ". Verifique os logs." : "."}`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro na sincronização completa",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     instances,
     instancesByConnection,
@@ -561,5 +634,6 @@ export function useGlobalAdminInstances() {
     syncEvolutionInstances,
     fetchPhoneNumber,
     reapplyAllWebhooks,
+    forceSyncAll,
   };
 }
