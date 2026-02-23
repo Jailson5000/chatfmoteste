@@ -1,106 +1,128 @@
 
 
-# Corrigir Webhook do WhatsApp - Eventos Nao Registrados
+# Plano: Corrigir Geração de QR Code e Race Condition no Polling
 
 ## Problema Identificado
 
-A funcao `buildWebhookConfig` no arquivo `supabase/functions/evolution-api/index.ts` (linha 179) usa chaves em **snake_case**:
-
-```text
-webhook_by_events: false
-webhook_base64: true
+Os logs mostram uma contradição clara:
+```
+Level 2 (create) recovery successful - QR code obtained!
+Level 2 - QR extracted from create response!
+Levels 1-2 exhausted without QR. Returning retryable.
 ```
 
-Porem, a Evolution API v2.2.3 espera **camelCase**:
+Isso acontece porque:
+1. O frontend faz **polling agressivo** chamando `get_qrcode` repetidamente
+2. A primeira chamada faz Level 2 recovery (logout + delete + create) e obtém o QR Code
+3. Enquanto essa chamada ainda processa, **outra chamada paralela** entra e vê `{"count":0}` porque a instância acabou de ser recriada
+4. A segunda chamada dispara **outro** Level 2, deletando a instância que acabou de ser criada
+5. O resultado final retorna "exhausted" ao frontend, que nunca recebe o QR Code
 
-```text
-webhookByEvents: false
-webhookBase64: true
-```
+Sobre a instância 3528 (`inst_eqblozqc`): ela caiu por causa do `docker restart evolution`, que forca re-autenticacao de **todas** as instancias. Isso e esperado -- ela precisa ser reconectada via QR Code.
 
-Como resultado, a API ignora essas propriedades. O webhook URL e registrado, mas a lista de eventos nao e aplicada corretamente. Por isso:
-- Eventos `CONTACTS_UPDATE` chegam (comportamento default da API)
-- Eventos `MESSAGES_UPSERT` NAO chegam (nao foram registrados)
+## Solucao em 2 Partes
 
-## Evidencia
+### Parte 1: Protecao contra chamadas paralelas no backend
 
-1. Logs do `evolution-webhook`: 100% dos eventos sao `CONTACTS_UPDATE`, zero `MESSAGES_UPSERT`
-2. Resposta da criacao da instancia: `"webhook":{"webhookUrl":"..."}` -- sem lista de eventos
+No `evolution-api/index.ts`, adicionar um **guard** que impede multiplas chamadas `get_qrcode` de executar recovery simultaneamente para a mesma instancia:
 
-## Correcao
+- Antes de iniciar Level 1/Level 2 recovery, verificar se a instancia ja esta em `awaiting_qr` com um `updated_at` recente (menos de 60 segundos)
+- Se estiver, retornar `retryable: true` sem disparar novo ciclo de recovery
+- Isso impede o loop destrutivo onde uma chamada desfaz o trabalho da outra
 
-### Arquivo: `supabase/functions/evolution-api/index.ts`
+### Parte 2: Debounce no polling do frontend
 
-Alterar a funcao `buildWebhookConfig` (linhas 179-194) de:
+No `src/pages/Connections.tsx`, evitar que o polling chame `get_qrcode` enquanto uma chamada anterior ainda esta em andamento:
+
+- Adicionar um flag `isQrFetchInProgress` para impedir chamadas paralelas
+- Aumentar o intervalo minimo de polling para QR Code (de ~3s para ~8s)
+- Quando o backend retornar `retryable: true`, aguardar o tempo sugerido antes de tentar novamente
+
+## Detalhes Tecnicos
+
+### Arquivo 1: `supabase/functions/evolution-api/index.ts`
+
+Na secao de `isCorruptedSession` (linha ~1100), antes de iniciar o Level 1 recovery:
 
 ```typescript
-function buildWebhookConfig(webhookUrl: string) {
-  return {
-    enabled: true,
-    url: webhookUrl,
-    webhook_by_events: false,
-    webhook_base64: true,
-    events: [
-      "CONNECTION_UPDATE",
-      "QRCODE_UPDATED",
-      "MESSAGES_UPSERT",
-      "MESSAGES_DELETE",
-      "CONTACTS_UPDATE",
-    ],
-  };
-}
-```
+// GUARD: Check if another get_qrcode call recently ran recovery
+const { data: freshInstance } = await supabaseClient
+  .from("whatsapp_instances")
+  .select("status, awaiting_qr, updated_at")
+  .eq("id", body.instanceId)
+  .single();
 
-Para:
+const updatedAgo = freshInstance?.updated_at 
+  ? Date.now() - new Date(freshInstance.updated_at).getTime() 
+  : Infinity;
 
-```typescript
-function buildWebhookConfig(webhookUrl: string) {
-  return {
-    enabled: true,
-    url: webhookUrl,
-    webhookByEvents: false,
-    webhookBase64: true,
-    events: [
-      "CONNECTION_UPDATE",
-      "QRCODE_UPDATED",
-      "MESSAGES_UPSERT",
-      "MESSAGES_DELETE",
-      "CONTACTS_UPDATE",
-    ],
-  };
-}
-```
-
-Apenas 2 propriedades mudam:
-- `webhook_by_events` -> `webhookByEvents`
-- `webhook_base64` -> `webhookBase64`
-
-### Pos-deploy
-
-Apos o deploy automatico da Edge Function, sera necessario executar no VPS o comando de reaplicar webhook nas instancias conectadas:
-
-```bash
-curl -s -X POST \
-  -H "apikey: a3c56030f89efe1e5b4c033308c7e3c8f72d7492ac8bb46947be28df2e06ffed" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "webhook": {
-      "enabled": true,
-      "url": "https://jiragtersejnarxruqyd.supabase.co/functions/v1/evolution-webhook?token=19a165ec02bee752a7440f6dafd28638604308d7abd31135acbb8941ad6b2ad7",
-      "webhookByEvents": false,
-      "webhookBase64": true,
-      "events": ["CONNECTION_UPDATE","QRCODE_UPDATED","MESSAGES_UPSERT","MESSAGES_DELETE","CONTACTS_UPDATE"]
+// If instance was updated to awaiting_qr in the last 60s, 
+// another call already ran recovery -- just return retryable
+if (freshInstance?.awaiting_qr === true && updatedAgo < 60000) {
+  console.log(`[Evolution API] Recovery already in progress (updated ${updatedAgo}ms ago). Skipping.`);
+  // Try one simple connect to see if QR is available now
+  try {
+    const quickResp = await fetchWithTimeout(
+      `${apiUrl}/instance/connect/${instance.instance_name}`,
+      { method: "GET", headers: recoveryHeaders }, 8000
+    );
+    if (quickResp.ok) {
+      const quickData = await quickResp.json();
+      const quickQr = extractQrFromResponse(quickData);
+      if (quickQr) {
+        return await returnQrSuccess(quickQr, "Quick retry");
+      }
     }
-  }' \
-  https://evo.fmoadv.com.br/webhook/set/inst_7jg7taxw
+  } catch (_) {}
+  
+  return new Response(JSON.stringify({
+    success: false,
+    error: "Recuperacao em andamento. Aguarde 10 segundos...",
+    retryable: true,
+    connectionState: "recovering",
+  }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+
+// Mark instance as recovering BEFORE starting Level 1
+await supabaseClient
+  .from("whatsapp_instances")
+  .update({ awaiting_qr: true, updated_at: new Date().toISOString() })
+  .eq("id", body.instanceId);
 ```
 
-Repetir para `inst_eqblozqc` (trocar o nome da instancia no final da URL).
+### Arquivo 2: `src/pages/Connections.tsx`
 
-Alternativamente, clicar em "Reaplicar Webhooks" no Painel Admin Global apos o deploy.
+Adicionar debounce no `pollOnce`:
 
-## Impacto
+```typescript
+const qrFetchInProgressRef = useRef(false);
 
-- Correcao minima: apenas 2 linhas mudam
-- Nenhuma outra funcionalidade e afetada
-- Apos reaplicar webhooks, as mensagens recebidas no WhatsApp devem aparecer imediatamente no sistema
+// Inside pollOnce, wrap the getQRCode call:
+if (!currentQRCode) {
+  if (qrFetchInProgressRef.current) {
+    console.log("[Connections] QR fetch already in progress, skipping this poll");
+    // Schedule next poll
+    const nextInterval = getPollingInterval(count);
+    pollIntervalRef.current = setTimeout(() => pollOnce(instanceId), nextInterval);
+    return;
+  }
+  
+  qrFetchInProgressRef.current = true;
+  try {
+    const qrResult = await getQRCode.mutateAsync(instanceId);
+    // ... existing handling ...
+  } finally {
+    qrFetchInProgressRef.current = false;
+  }
+}
+```
+
+Tambem aumentar o intervalo minimo de polling de 3s para 8s quando ainda nao tem QR Code.
+
+## Resultado Esperado
+
+1. A primeira chamada `get_qrcode` executa o Level 2 recovery normalmente e retorna o QR Code
+2. Chamadas subsequentes detectam que a recovery ja esta em andamento e fazem apenas um `connect` simples para buscar o QR existente
+3. O frontend nao dispara chamadas paralelas, evitando o loop destrutivo
+4. As instancias desconectadas pelo `docker restart` poderao ser reconectadas normalmente via QR Code
+
