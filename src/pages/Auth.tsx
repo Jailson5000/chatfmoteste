@@ -74,10 +74,14 @@ export default function Auth() {
     setIsLoading(true);
     
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const loginPromise = supabase.auth.signInWithPassword({
         email: loginData.email,
         password: loginData.password,
       });
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), 15000)
+      );
+      const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
 
       if (error) {
         toast({
@@ -94,13 +98,17 @@ export default function Auth() {
         });
       }
     } catch (err: any) {
+      const isTimeout = err?.message === 'TIMEOUT';
       toast({
-        title: "Erro de conexão",
-        description: `Falha na conexão: ${err?.message || 'Erro desconhecido'}.`,
+        title: isTimeout ? "Servidor lento" : "Erro de conexão",
+        description: isTimeout
+          ? "O servidor está demorando para responder. Tente novamente."
+          : `Falha na conexão: ${err?.message || 'Erro desconhecido'}.`,
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {

@@ -63,6 +63,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(refreshTimeoutRef.current);
       refreshTimeoutRef.current = null;
     }
+    // Clear corrupted auth tokens from localStorage to break refresh loops
+    try {
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.includes('sb-') && key.includes('auth-token')) {
+          localStorage.removeItem(key);
+        }
+      });
+    } catch (e) {
+      console.error("[useAuth] Erro ao limpar localStorage:", e);
+    }
     try {
       await supabase.auth.signOut();
     } catch (e) {
