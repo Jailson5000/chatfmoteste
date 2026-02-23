@@ -1,74 +1,76 @@
 
 
-# Adaptar Edge Functions para Evolution API v2.2.3
+# Corrigir QR Code nao gerando - Bug conhecido da Evolution API
 
-## Contexto
+## Diagnostico
 
-A v2.2.3 usa Baileys v6 (mais estável) e tem algumas diferenças de API em relação à v2.3.x:
+Os logs mostram claramente o problema:
 
-- O endpoint `/instance/restart` **EXISTE** na v2.2.3 (foi removido apenas na v2.3+)
-- O endpoint `/instance/connect` funciona normalmente e retorna QR code mais rápido (sem delay de init do Baileys v7)
-- A resposta do `/instance/create` já retorna QR code diretamente (sem necessidade de retries)
-- Formato de webhook usa `webhook_by_events` (snake_case) - igual ao que já temos
-
-## Mudanças Necessárias
-
-### 1. `supabase/functions/evolution-api/index.ts`
-
-**A) Restaurar `restart_instance` para usar `/instance/restart` diretamente (linhas ~2070)**
-- Na v2.2.3 o endpoint `PUT /instance/restart/{instanceName}` funciona normalmente
-- Manter o fallback de recrear se retornar 404 (caso a instância não exista)
-- Nenhuma mudança necessária aqui - o código atual já faz isso corretamente
-
-**B) Simplificar recovery do `get_qrcode` (linhas ~1100-1350)**
-- Na v2.2.3, o Baileys v6 inicializa rápido - não há o problema de `{count:0}`
-- O recovery de Level 1 e Level 2 pode ser mantido como está (é defensivo)
-- Remover a detecção de versão que pode gerar logs confusos
-
-**C) Reduzir retries no `create_instance` (linhas ~675-730)**
-- Na v2.2.3, o `/instance/create` já retorna o QR code na primeira resposta
-- Os 4 retries com delay de 5s eram necessários apenas para o Baileys v7
-- Reduzir para 2 retries com delay de 2s como fallback
-
-**D) Restaurar `global_restart_instance` (linhas ~4188-4218)**
-- Na v2.2.3, `/instance/restart` funciona - manter como está
-- Adicionar fallback para `/instance/connect` caso retorne 404
-
-### 2. `supabase/functions/auto-reconnect-instances/index.ts`
-
-**A) Restaurar uso do `/instance/restart` como método principal**
-- Na v2.2.3, o endpoint de restart funciona e é o método preferido para reconexão
-- Atualizar `attemptConnect` para tentar restart primeiro, connect como fallback
-- A memória do sistema diz que usa connect porque restart foi removido na v2.3+ - agora podemos reverter
-
-### 3. Docker Compose (instrução manual para o usuário)
-
-O usuário precisa alterar a imagem no servidor:
-```
-atendai/evolution-api:v2.2.3
+```text
+/instance/connect -> {"count":0}  (toda vez)
+connectionState -> "connecting"   (preso para sempre)
+Nenhum evento qrcode.update recebido via webhook
 ```
 
-## Detalhes Técnicos
+Isso e um **bug conhecido da Evolution API v2.2.x** (Issues #2365 e #2367 no GitHub). O Baileys entra em um loop infinito de reconexao durante a conexao inicial, impedindo a geracao do QR code. O fix foi incluido apenas na v2.3.7+.
 
-### Diferenças de API v2.2.3 vs v2.3.x
+## Opcoes de Solucao
 
-| Endpoint | v2.2.3 | v2.3.x |
-|---|---|---|
-| `/instance/restart` | Funciona (PUT) | Removido (404) |
-| `/instance/connect` | Retorna QR rapido | Delay Baileys v7 |
-| `/instance/create` | QR na resposta | Pode precisar retry |
-| Webhook format | snake_case | snake_case |
-| Settings format | Mesmo | Mesmo |
+### Opcao A: Workaround no Docker Compose (mais rapido)
+Adicionar a variavel de ambiente `CONFIG_SESSION_PHONE_VERSION` no container da Evolution API:
 
-### Arquivos alterados
-1. `supabase/functions/evolution-api/index.ts` - Reduzir retries no create, manter restart funcional
-2. `supabase/functions/auto-reconnect-instances/index.ts` - Usar restart como método principal de reconexão
+```text
+docker exec -it evolution bash
+# Ou editar o docker-compose.yml:
 
-### Instruções manuais para o servidor
-Após aprovação, o usuário deve executar no servidor VPS:
-```bash
-# Alterar imagem para v2.2.3
-sed -i 's|evoapicloud/evolution-api:v2.3.1|atendai/evolution-api:v2.2.3|' docker-compose.yml
+environment:
+  CONFIG_SESSION_PHONE_VERSION: "2.3000"
+```
+
+Depois reiniciar:
+```text
+docker compose down && docker compose up -d
+```
+
+Esse workaround foi reportado como funcional por usuarios na issue #2367.
+
+### Opcao B: Voltar para v2.3.1 (recomendado)
+O v2.2.3 tem esse bug critico sem correcao oficial. As opcoes mais estaveis sao:
+- **v2.3.1** - que ja estava em uso (tem o delay do Baileys v7, mas as edge functions ja lidam com isso)
+- **v2.3.7** - tem o fix oficial do bug #2365, mas pode ter outros problemas reportados
+
+Para voltar ao v2.3.1:
+```text
+sed -i 's|atendai/evolution-api:v2.2.3|evoapicloud/evolution-api:v2.3.1|' docker-compose.yml
 docker compose down && docker compose pull && docker compose up -d
 ```
+
+### Opcao C: Usar v2.3.7 com o fix oficial
+```text
+sed -i 's|atendai/evolution-api:v2.2.3|atendai/evolution-api:v2.3.7|' docker-compose.yml
+docker compose down && docker compose pull && docker compose up -d
+```
+
+## Mudancas no Codigo
+
+### Se escolher Opcao B (v2.3.1)
+- Reverter as mudancas feitas nas edge functions (restaurar retries originais)
+- Manter a logica de recovery simplificada que ja funciona
+
+### Se escolher Opcao C (v2.3.7)
+- As edge functions atuais ja sao compativeis
+- Nenhuma mudanca de codigo necessaria
+
+### Se escolher Opcao A (workaround)
+- Nenhuma mudanca de codigo necessaria
+- Apenas adicionar a variavel de ambiente e reiniciar o container
+
+## Recomendacao
+
+**Opcao B (voltar para v2.3.1)** e a mais segura porque:
+1. Ja estava funcionando antes (o problema era apenas o delay de inicializacao)
+2. As edge functions ja foram adaptadas para lidar com o delay do Baileys v7
+3. Nao depende de um workaround nao-oficial
+
+Apos escolher a opcao, as unicas mudancas necessarias no codigo serao reverter os timeouts de retry na edge function para os valores originais compatveis com v2.3.x (delays maiores para acomodar o Baileys v7).
 
