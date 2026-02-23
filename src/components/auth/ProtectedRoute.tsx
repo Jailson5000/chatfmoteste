@@ -3,12 +3,16 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompanyApproval } from "@/hooks/useCompanyApproval";
 import { useTenant } from "@/hooks/useTenant";
+import { useMaintenanceMode } from "@/hooks/useMaintenanceMode";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import PendingApproval from "@/pages/PendingApproval";
 import CompanyBlocked from "@/pages/CompanyBlocked";
 import TenantMismatch from "@/pages/TenantMismatch";
 import TrialExpired from "@/pages/TrialExpired";
 import CompanySuspended from "@/pages/CompanySuspended";
+import MaintenancePage from "@/pages/MaintenancePage";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -31,6 +35,7 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading, mustChangePassword } = useAuth();
   const [showRetry, setShowRetry] = useState(false);
+  const { isMaintenanceMode } = useMaintenanceMode();
   const { 
     approval_status, 
     rejection_reason, 
@@ -45,6 +50,18 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     loading: approvalLoading 
   } = useCompanyApproval();
   const { subdomain: currentSubdomain, isMainDomain, isLoading: tenantLoading } = useTenant();
+
+  // Check if user is a global admin (to bypass maintenance mode)
+  const { data: isGlobalAdmin } = useQuery({
+    queryKey: ["is-global-admin", user?.id],
+    queryFn: async () => {
+      if (!user?.id) return false;
+      const { data } = await supabase.rpc("is_admin", { _user_id: user.id });
+      return data === true;
+    },
+    enabled: !!user?.id && isMaintenanceMode,
+    staleTime: 60000,
+  });
 
   // Timer to show retry button after 10s of loading
   useEffect(() => {
@@ -83,6 +100,12 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   // Redirect to login if not authenticated
   if (!user) {
     return <Navigate to="/auth" replace />;
+  }
+
+  // BLOCK: Maintenance mode active (global admins bypass)
+  if (isMaintenanceMode && !isGlobalAdmin) {
+    console.log('[ProtectedRoute] Blocking: System in maintenance mode');
+    return <MaintenancePage />;
   }
 
   // Show loading while checking company approval status and tenant
