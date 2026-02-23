@@ -1,132 +1,146 @@
 
 
-## Diagnostico Completo: Mensagens Falham + Status Travado
+## Correcao: Restaurar Webhooks e Fluxo de Mensagens
 
-### O que os logs revelam
+### Diagnostico Final
 
-1. **As instancias WhatsApp estao GENUINAMENTE desconectadas na Evolution API** - o `refresh_status` consulta diretamente a Evolution API e retorna `connecting` ou `disconnected` para TODAS as instancias. Nenhuma esta `open`.
+A versao da Evolution API (v2.3.7) NAO e o problema. A causa raiz e que os webhooks configurados nas instancias da Evolution API estao com a URL errada (sem token de autenticacao), resultando em:
 
-2. **Envio de mensagem falha com "Connection Closed"** - quando a plataforma tenta enviar via Evolution API, o servidor retorna erro 400 "Connection Closed", confirmando que a sessao WhatsApp esta morta.
+1. ZERO eventos `messages.upsert` chegando na plataforma (mensagens nao sao recebidas)
+2. Eventos `connection.update` com `state: open` sendo rejeitados (status fica travado em "connecting")
+3. Chamadas da plataforma retornando "Invalid authorization token" (sessao JWT expirada)
 
-3. **Apos a falha de envio, o status muda para `disconnected`** - o codigo detecta "Connection Closed" e marca a instancia como desconectada no banco (linha 1914-1924), o que faz aparecer o banner vermelho "WhatsApp desconectado" no chat.
+### O que esta acontecendo nas instancias
 
-4. **Duas instancias nao existem mais na Evolution API** - `inst_n5572v68` e `inst_s10r2qh8` retornaram 404 ao reaplicar webhooks.
+| Instancia | Evolution API | Banco de Dados | Problema |
+|-----------|--------------|----------------|----------|
+| inst_ea9bfhx3 | Connected | connected | OK |
+| inst_0gkejsc5 | Connected | connected | OK |
+| inst_464pnw5n | Connected | connected | OK |
+| inst_d92ekkep | Connected | connecting | Webhook sem token |
+| inst_l26f156k | Connected | connecting | Webhook sem token |
+| inst_5fjooku6 | Connected | connecting | Webhook sem token |
+| inst_n5572v68 | Connected* | connecting | Webhook sem token |
+| inst_dxxw3z8c | Connecting | connecting | Instancia nao conectada |
 
-5. **Nenhum evento `messages.upsert` chegou** - zero logs de mensagens recebidas, confirmando que o bot nao recebe mensagens.
+### Plano de Correcao
 
-### Causa raiz
+**1. Adicionar endpoint de verificacao de webhook na edge function `evolution-api`**
 
-As sessoes WhatsApp (Baileys) dentro da Evolution API perderam a conexao. Isso pode ter ocorrido por:
-- Atualizacao da versao do WhatsApp Web (confirmado: v2.3000.1033105955)
-- Restart do container Docker sem persistencia de sessao
-- Sessoes expiradas
+Nova action `verify_webhook_config` que consulta a Evolution API para verificar qual URL de webhook esta configurada em cada instancia, facilitando diagnostico.
 
-### Problema no codigo: Botao "Reconectar" no chat NAO reconecta
+**2. Corrigir a funcao `global_configure_webhook` para lidar com formatos de API diferentes**
 
-O botao "Reconectar" na tela de conversas chama `refresh_status` (apenas verifica o status), nao tenta gerar QR code. Se o status nao voltar como `connected`, redireciona para `/connections`. Isso e confuso para o usuario -- ele espera que o botao RECONECTE, nao apenas verifique.
+A Evolution API v2.3.x usa o endpoint `PUT /webhook/set/{instance}` com um formato especifico. O codigo atual tenta dois formatos (com e sem wrapper `{webhook: ...}`), mas pode estar falhando silenciosamente. Adicionar logs detalhados da resposta e tentativa com o endpoint alternativo `POST /webhook/set/{instance}`.
 
-### Correcoes planejadas
+**3. Criar action `global_force_sync_all` que combina reaplicar webhooks + sync status**
 
-**Correcao 1: Botao "Reconectar" no chat deve tentar reconexao real**
+Uma unica action que:
+- Para cada instancia: configura webhook com URL correta (com token)
+- Verifica resposta da Evolution API e loga se falhou
+- Apos configurar todos, chama `sync-evolution-instances` para atualizar status
+- Retorna relatorio detalhado de sucesso/falha por instancia
 
-Arquivo: `src/pages/Conversations.tsx` (linha ~4414)
+**4. Adicionar botao "Forcar Sincronizacao Completa" no painel Global Admin**
 
-Ao inves de apenas chamar `refresh_status`, o botao deve:
-1. Primeiro chamar `refresh_status` para verificar se ja esta conectado
-2. Se nao estiver conectado, chamar `get_qrcode` (que chama `/instance/connect/` na Evolution API)
-3. Se retornar QR code, redirecionar para `/connections` com parametro para abrir o dialog de QR automaticamente
-4. Se retornar "connected", atualizar o status e fechar o banner
+No `useGlobalAdminInstances.tsx`, adicionar uma mutation que chama a nova action `global_force_sync_all`, mostrando progresso e resultado.
 
-**Correcao 2: Redirecionar para Connections com auto-open do QR dialog**
+### Detalhes Tecnicos
 
-Arquivo: `src/pages/Connections.tsx`
+**Arquivo 1: `supabase/functions/evolution-api/index.ts`**
 
-Adicionar suporte a query parameter `?reconnect=INSTANCE_ID` que automaticamente abre o dialog de QR code para a instancia especificada ao carregar a pagina.
+Adicionar nova action `verify_webhook_config` (apos o case `global_configure_webhook`):
 
-**Correcao 3: Instancias 404 devem ser marcadas no banco**
-
-Arquivo: `src/hooks/useGlobalAdminInstances.tsx`
-
-Quando o `reapplyAllWebhooks` receber 404 para uma instancia, marcar o status como `not_found_in_evolution` no banco para que o usuario saiba que a instancia precisa ser recriada.
-
-### Detalhes tecnicos
-
-**Arquivo 1: `src/pages/Conversations.tsx`** (botao Reconectar ~linha 4414)
-
-```text
-// Mudanca: tentar reconexao real antes de redirecionar
-onClick={async () => {
-  setIsReconnecting(true);
-  try {
-    // 1. Verificar status atual
-    const { data, error } = await supabase.functions.invoke("evolution-api", {
-      body: { action: "refresh_status", instanceId: instanceDisconnectedInfo.instanceId }
-    });
-    if (!error && data?.status === "connected") {
-      await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
-      toast({ title: "WhatsApp reconectado com sucesso!" });
-      return;
-    }
-    
-    // 2. Se nao conectado, redirecionar para Connections com auto-reconnect
-    navigate(`/connections?reconnect=${instanceDisconnectedInfo.instanceId}`);
-  } catch {
-    navigate(`/connections?reconnect=${instanceDisconnectedInfo.instanceId}`);
-  } finally {
-    setIsReconnecting(false);
-  }
-}}
-```
-
-**Arquivo 2: `src/pages/Connections.tsx`** (auto-open QR dialog)
-
-```text
-// Adicionar no inicio do componente:
-const [searchParams] = useSearchParams();
-const reconnectId = searchParams.get("reconnect");
-
-// useEffect para auto-abrir QR dialog
-useEffect(() => {
-  if (reconnectId && instances.length > 0) {
-    const instance = instances.find(i => i.id === reconnectId);
-    if (instance && instance.status !== "connected") {
-      handleConnectInstance(instance);
-    }
-    // Limpar o parametro da URL
-    navigate("/connections", { replace: true });
-  }
-}, [reconnectId, instances]);
-```
-
-**Arquivo 3: `src/hooks/useGlobalAdminInstances.tsx`** (marcar 404 no banco)
-
-```text
-// No loop do reapplyAllWebhooks, quando error contiver 404:
-if (error || !data?.success) {
-  const errorMsg = error?.message || data?.error || "";
-  // Se a instancia nao existe na Evolution API, marcar no banco
-  if (errorMsg.includes("404") || errorMsg.includes("does not exist")) {
-    await supabase
-      .from("whatsapp_instances")
-      .update({ status: "not_found_in_evolution", updated_at: new Date().toISOString() })
-      .eq("id", instance.id);
-  }
-  failed++;
+```typescript
+case "verify_webhook_config": {
+  // Buscar config atual do webhook na Evolution API
+  const response = await fetch(
+    `${apiUrl}/webhook/find/${instanceName}`,
+    { headers: { apikey: globalApiKey } }
+  );
+  const config = await response.json();
+  return { success: true, webhook_config: config };
 }
 ```
 
-### Acao imediata necessaria (fora do codigo)
+Modificar `global_configure_webhook` para incluir logs detalhados:
 
-Para restaurar as conexoes WhatsApp, e necessario ir na pagina de **Conexoes** da plataforma e clicar em **"Conectar"** no menu de cada instancia para gerar o QR code e escanear com o celular. As sessoes estao genuinamente desconectadas na Evolution API.
-
-Se o QR code nao for gerado, pode ser necessario reiniciar o container da Evolution API:
-```text
-docker restart evolution
+```typescript
+// Apos cada tentativa de configuracao, logar a resposta completa
+const responseText = await webhookResponse.text();
+console.log(`[Evolution API] Webhook config response for ${instanceName}:`, {
+  status: webhookResponse.status,
+  body: responseText.slice(0, 500)
+});
 ```
+
+**Arquivo 2: `src/hooks/useGlobalAdminInstances.tsx`**
+
+Adicionar funcao `forceSyncAll` que:
+1. Busca todas as instancias do banco
+2. Para cada uma, chama `global_configure_webhook` via edge function
+3. Espera 2 segundos
+4. Chama `sync-evolution-instances` para atualizar status
+5. Invalida queries para refrescar a UI
+
+```typescript
+const forceSyncAll = useMutation({
+  mutationFn: async () => {
+    const results = [];
+    for (const instance of instances) {
+      if (instance.status === 'not_found_in_evolution') continue;
+      
+      const { data, error } = await supabase.functions.invoke("evolution-api", {
+        body: {
+          action: "global_configure_webhook",
+          instanceName: instance.instance_name,
+          instanceId: instance.id,
+        }
+      });
+      
+      results.push({
+        instance: instance.instance_name,
+        success: !error && data?.success,
+        error: error?.message || data?.error
+      });
+    }
+    
+    // Aguardar e sincronizar
+    await new Promise(r => setTimeout(r, 3000));
+    await supabase.functions.invoke("sync-evolution-instances");
+    
+    return results;
+  },
+  onSuccess: (results) => {
+    queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+    const succeeded = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+    toast({
+      title: "Sincronizacao completa",
+      description: `${succeeded} OK, ${failed} falhas`
+    });
+  }
+});
+```
+
+**Arquivo 3: `src/pages/global-admin/GlobalAdminConnections.tsx`**
+
+Adicionar botao "Forcar Sync Completo" ao lado do botao existente "Reaplicar Webhooks".
+
+### Sequencia de execucao
+
+1. Adicionar logs detalhados no `global_configure_webhook`
+2. Adicionar action `verify_webhook_config`
+3. Criar mutation `forceSyncAll` no hook
+4. Adicionar botao na UI do Global Admin
+5. Deploy da edge function `evolution-api`
+6. Testar clicando no novo botao
 
 ### Resultado esperado
 
-1. O botao "Reconectar" no chat redireciona automaticamente para a pagina de Conexoes e abre o dialog de QR
-2. O usuario escaneia o QR code e a instancia volta a funcionar
-3. Instancias que nao existem mais na Evolution API sao marcadas claramente
-4. Mensagens voltam a ser enviadas e recebidas apos a reconexao
+1. Botao "Forcar Sync Completo" reconfigura TODOS os webhooks com a URL correta (com token)
+2. Sync automatico atualiza os status para `connected` onde a Evolution API confirma
+3. Eventos `messages.upsert` comecam a chegar com autenticacao valida
+4. Bot volta a receber e responder mensagens
+5. Log detalhado mostra exatamente quais instancias falharam e por que
+
