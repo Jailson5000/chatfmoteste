@@ -471,13 +471,55 @@ serve(async (req) => {
     const { data: rawInstances, error: fetchError } = await supabaseClient
       .from("whatsapp_instances")
       .select("id, instance_name, status, api_url, api_key, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at, manual_disconnect, awaiting_qr, last_webhook_event")
-      .in("status", ["connecting", "disconnected", "connected"])
+      .in("status", ["connecting", "disconnected", "connected", "awaiting_qr"])
       .not("api_url", "is", null)
       .not("api_key", "is", null);
 
     if (fetchError) {
       console.error("[Auto-Reconnect] Error fetching instances:", fetchError);
       throw fetchError;
+    }
+
+    // Separate awaiting_qr instances for status sync check
+    const awaitingQrInstances = (rawInstances || []).filter(instance => {
+      if (instance.awaiting_qr !== true) return false;
+      if (instance.manual_disconnect === true) return false;
+      // Only check if stuck for more than 30 seconds
+      const updatedAt = instance.disconnected_since ? new Date(instance.disconnected_since) : null;
+      const stuckThreshold = new Date(now.getTime() - 30 * 1000); // 30 seconds
+      // If no disconnected_since, use a generous check
+      if (updatedAt && updatedAt > stuckThreshold) return false;
+      return true;
+    });
+
+    // AUTO-SYNC: Check awaiting_qr instances against Evolution API
+    if (awaitingQrInstances.length > 0) {
+      console.log(`[Auto-Reconnect] 🔄 AUTO-SYNC: Checking ${awaitingQrInstances.length} awaiting_qr instances against Evolution API...`);
+      for (const instance of awaitingQrInstances) {
+        try {
+          const connectionCheck = await checkConnectionState(instance as InstanceToReconnect);
+          if (connectionCheck.isConnected) {
+            console.log(`[Auto-Reconnect] ✅ AUTO-SYNC: ${instance.instance_name} is actually connected! Updating DB...`);
+            await supabaseClient
+              .from("whatsapp_instances")
+              .update({
+                status: "connected",
+                awaiting_qr: false,
+                manual_disconnect: false,
+                disconnected_since: null,
+                last_alert_sent_at: null,
+                alert_sent_for_current_disconnect: false,
+                reconnect_attempts_count: 0,
+                updated_at: now.toISOString(),
+              })
+              .eq("id", instance.id);
+          } else {
+            console.log(`[Auto-Reconnect] ℹ️ AUTO-SYNC: ${instance.instance_name} still not connected (${connectionCheck.state})`);
+          }
+        } catch (err: any) {
+          console.warn(`[Auto-Reconnect] AUTO-SYNC error for ${instance.instance_name}: ${err?.message}`);
+        }
+      }
     }
 
     // Filter out instances that should NOT be auto-reconnected
