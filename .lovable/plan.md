@@ -1,33 +1,106 @@
 
 
-# Fix: Remover Auto-Sync que causa timeout no webhook
+# Corrigir Webhook do WhatsApp - Eventos Nao Registrados
 
-## Problema identificado
-O erro nao e da versao da Evolution API. O codigo de **AUTO-SYNC** adicionado na ultima alteracao esta causando timeouts:
-- O webhook espera 10 segundos (`setTimeout(10000)`) e depois faz outra requisicao HTTP
-- Isso excede o tempo limite de execucao da Edge Function
-- Resultado: erro "The signal has been aborted" e sobrecarga no VPS com multiplas requisicoes pendentes
+## Problema Identificado
 
-## Solucao
-Remover a funcao `scheduleStatusVerification` e sua chamada do webhook. Em vez disso, resolver o problema de sync de forma mais segura usando a Edge Function `auto-reconnect-instances` que ja roda como cron job separado.
+A funcao `buildWebhookConfig` no arquivo `supabase/functions/evolution-api/index.ts` (linha 179) usa chaves em **snake_case**:
 
-### Mudancas
+```text
+webhook_by_events: false
+webhook_base64: true
+```
 
-**Arquivo: `supabase/functions/evolution-webhook/index.ts`**
-1. Remover a funcao `scheduleStatusVerification` (linhas 1185-1285)
-2. Remover a chamada fire-and-forget no bloco `connection.update` (linhas 4396-4410)
-3. Manter o comportamento original: preservar `awaiting_qr` quando receber `connecting`, sem tentar verificar em background
+Porem, a Evolution API v2.2.3 espera **camelCase**:
 
-**Arquivo: `supabase/functions/auto-reconnect-instances/index.ts`**
-1. Adicionar logica para detectar instancias que estao em `awaiting_qr` ha mais de 30 segundos
-2. Para essas instancias, consultar a Evolution API e, se estiverem realmente conectadas (`open`), atualizar o banco para `connected`
-3. Isso roda como cron job independente, sem risco de timeout no webhook
+```text
+webhookByEvents: false
+webhookBase64: true
+```
 
-## Por que isso resolve
-- O webhook volta a ser leve e rapido (sem delays internos)
-- A verificacao de status acontece no cron job que tem tempo de execucao proprio
-- O VPS nao recebe rajadas de requisicoes extras durante eventos de reconexao
+Como resultado, a API ignora essas propriedades. O webhook URL e registrado, mas a lista de eventos nao e aplicada corretamente. Por isso:
+- Eventos `CONTACTS_UPDATE` chegam (comportamento default da API)
+- Eventos `MESSAGES_UPSERT` NAO chegam (nao foram registrados)
 
-## Sobre a versao da Evolution API
-Nao e necessario mudar a versao (v2.2.3 esta correta). O problema era exclusivamente o codigo de auto-sync dentro do webhook.
+## Evidencia
 
+1. Logs do `evolution-webhook`: 100% dos eventos sao `CONTACTS_UPDATE`, zero `MESSAGES_UPSERT`
+2. Resposta da criacao da instancia: `"webhook":{"webhookUrl":"..."}` -- sem lista de eventos
+
+## Correcao
+
+### Arquivo: `supabase/functions/evolution-api/index.ts`
+
+Alterar a funcao `buildWebhookConfig` (linhas 179-194) de:
+
+```typescript
+function buildWebhookConfig(webhookUrl: string) {
+  return {
+    enabled: true,
+    url: webhookUrl,
+    webhook_by_events: false,
+    webhook_base64: true,
+    events: [
+      "CONNECTION_UPDATE",
+      "QRCODE_UPDATED",
+      "MESSAGES_UPSERT",
+      "MESSAGES_DELETE",
+      "CONTACTS_UPDATE",
+    ],
+  };
+}
+```
+
+Para:
+
+```typescript
+function buildWebhookConfig(webhookUrl: string) {
+  return {
+    enabled: true,
+    url: webhookUrl,
+    webhookByEvents: false,
+    webhookBase64: true,
+    events: [
+      "CONNECTION_UPDATE",
+      "QRCODE_UPDATED",
+      "MESSAGES_UPSERT",
+      "MESSAGES_DELETE",
+      "CONTACTS_UPDATE",
+    ],
+  };
+}
+```
+
+Apenas 2 propriedades mudam:
+- `webhook_by_events` -> `webhookByEvents`
+- `webhook_base64` -> `webhookBase64`
+
+### Pos-deploy
+
+Apos o deploy automatico da Edge Function, sera necessario executar no VPS o comando de reaplicar webhook nas instancias conectadas:
+
+```bash
+curl -s -X POST \
+  -H "apikey: a3c56030f89efe1e5b4c033308c7e3c8f72d7492ac8bb46947be28df2e06ffed" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "webhook": {
+      "enabled": true,
+      "url": "https://jiragtersejnarxruqyd.supabase.co/functions/v1/evolution-webhook?token=19a165ec02bee752a7440f6dafd28638604308d7abd31135acbb8941ad6b2ad7",
+      "webhookByEvents": false,
+      "webhookBase64": true,
+      "events": ["CONNECTION_UPDATE","QRCODE_UPDATED","MESSAGES_UPSERT","MESSAGES_DELETE","CONTACTS_UPDATE"]
+    }
+  }' \
+  https://evo.fmoadv.com.br/webhook/set/inst_7jg7taxw
+```
+
+Repetir para `inst_eqblozqc` (trocar o nome da instancia no final da URL).
+
+Alternativamente, clicar em "Reaplicar Webhooks" no Painel Admin Global apos o deploy.
+
+## Impacto
+
+- Correcao minima: apenas 2 linhas mudam
+- Nenhuma outra funcionalidade e afetada
+- Apos reaplicar webhooks, as mensagens recebidas no WhatsApp devem aparecer imediatamente no sistema
