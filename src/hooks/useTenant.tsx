@@ -173,6 +173,15 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [subdomain, setSubdomain] = useState<string | null>(null);
 
   useEffect(() => {
+    const fetchWithTimeout = <T,>(promiseLike: PromiseLike<T>, timeoutMs = 15000): Promise<T> => {
+      return Promise.race([
+        Promise.resolve(promiseLike),
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+        )
+      ]);
+    };
+
     const detectTenant = async () => {
       try {
         const hostname = window.location.hostname;
@@ -191,12 +200,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           return;
         }
         
-        // Busca tenant pelo subdomínio
-        const { data, error: fetchError } = await supabase
-          .from('law_firms')
-          .select('id, name, subdomain, logo_url, email')
-          .eq('subdomain', finalSubdomain)
-          .single();
+        // Busca tenant pelo subdomínio com timeout de 15s
+        const { data, error: fetchError } = await fetchWithTimeout(
+          supabase
+            .from('law_firms')
+            .select('id, name, subdomain, logo_url, email')
+            .eq('subdomain', finalSubdomain)
+            .single()
+        );
         
         if (fetchError) {
           if (fetchError.code === 'PGRST116') {
@@ -218,9 +229,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         });
         setIsLoading(false);
         
-      } catch (err) {
-        console.error('Erro na detecção de tenant:', err);
-        setError('Erro inesperado ao detectar empresa.');
+      } catch (err: any) {
+        if (err?.message === 'TIMEOUT') {
+          console.warn('[useTenant] Query timed out after 15s');
+          setError('Servidor lento. Tente recarregar a página.');
+        } else {
+          console.error('Erro na detecção de tenant:', err);
+          setError('Erro inesperado ao detectar empresa.');
+        }
         setIsLoading(false);
       }
     };
