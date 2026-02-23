@@ -370,33 +370,83 @@ serve(async (req) => {
       const connectionCheck = await checkConnectionState(instance);
 
       if (connectionCheck.isConnected) {
-        console.log(`[Auto-Reconnect] Instance ${instance.instance_name} is actually connected in Evolution API - updating DB only`);
+        console.log(`[Auto-Reconnect] Instance ${instance.instance_name} reports connected via fetchInstances - verifying with /instance/connect...`);
         
-        // Update database to connected status - no restart needed!
-        await supabaseClient
-          .from("whatsapp_instances")
-          .update({
-            status: "connected",
-            disconnected_since: null,
-            reconnect_attempts_count: 0,
-            awaiting_qr: false,
-            manual_disconnect: false,
-            alert_sent_for_current_disconnect: false,
-            updated_at: now.toISOString(),
-          })
-          .eq("id", instance.id);
+        // VERIFY: Call /instance/connect to ensure socket is actually functional
+        // fetchInstances can report "open" even when the internal WebSocket is dead
+        let socketVerified = false;
+        try {
+          const verifyRes = await fetchWithTimeout(
+            `${normalizeUrl(instance.api_url)}/instance/connect/${encodeURIComponent(instance.instance_name)}`,
+            { method: "GET", headers: { apikey: instance.api_key, "Content-Type": "application/json" } },
+            10000
+          );
+          
+          if (verifyRes.ok) {
+            const verifyData = await verifyRes.json().catch(() => ({}));
+            const verifyState = verifyData?.instance?.state || verifyData?.state;
+            const hasQR = verifyData?.base64 || verifyData?.qrcode?.base64;
+            
+            if (hasQR) {
+              console.log(`[Auto-Reconnect] /instance/connect returned QR for ${instance.instance_name} - session expired despite "open" status`);
+              await supabaseClient.from("whatsapp_instances")
+                .update({ status: "awaiting_qr", awaiting_qr: true, updated_at: now.toISOString() })
+                .eq("id", instance.id);
+              
+              qrCodesNeeded.push({ instance_name: instance.instance_name, law_firm_id: instance.law_firm_id });
+              results.push({
+                instance_id: instance.id,
+                instance_name: instance.instance_name,
+                success: false,
+                action: "verify_failed",
+                message: "fetchInstances reported open but session expired - QR needed",
+              });
+              await new Promise(resolve => setTimeout(resolve, 500));
+              continue;
+            }
+            
+            if (verifyState === "open" || verifyState === "connected") {
+              socketVerified = true;
+              console.log(`[Auto-Reconnect] Socket verified for ${instance.instance_name} via /instance/connect (state: ${verifyState})`);
+            } else {
+              console.log(`[Auto-Reconnect] /instance/connect returned state=${verifyState} for ${instance.instance_name} - not fully connected`);
+            }
+          }
+        } catch (verifyErr: any) {
+          console.warn(`[Auto-Reconnect] /instance/connect verification failed for ${instance.instance_name}:`, verifyErr?.message);
+        }
         
-        results.push({
-          instance_id: instance.id,
-          instance_name: instance.instance_name,
-          success: true,
-          action: "status_sync",
-          message: `Instance was already connected (state: ${connectionCheck.state}) - database synced`,
-        });
+        if (socketVerified) {
+          // Socket is genuinely functional - update DB
+          await supabaseClient
+            .from("whatsapp_instances")
+            .update({
+              status: "connected",
+              disconnected_since: null,
+              reconnect_attempts_count: 0,
+              awaiting_qr: false,
+              manual_disconnect: false,
+              alert_sent_for_current_disconnect: false,
+              updated_at: now.toISOString(),
+            })
+            .eq("id", instance.id);
+          
+          results.push({
+            instance_id: instance.id,
+            instance_name: instance.instance_name,
+            success: true,
+            action: "status_sync",
+            message: `Socket verified via /instance/connect - database synced`,
+          });
+        } else {
+          // fetchInstances said "open" but socket verification failed - don't trust it
+          console.log(`[Auto-Reconnect] Socket NOT verified for ${instance.instance_name} - will proceed with reconnect attempt`);
+          // Don't continue - fall through to the reconnect logic below
+        }
         
         // Small delay between instances
         await new Promise(resolve => setTimeout(resolve, 500));
-        continue; // Skip to next instance, no restart needed
+        if (socketVerified) continue; // Only skip if verified
       }
 
       // STEP 2: If not connected, proceed with restart attempt
