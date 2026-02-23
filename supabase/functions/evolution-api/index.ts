@@ -1084,7 +1084,19 @@ serve(async (req) => {
             "Content-Type": "application/json",
           };
 
-          // === STEP 0: Check actual connectionState before declaring corrupted ===
+          // === STEP 0: Detect Evolution API version + Check connectionState ===
+          let detectedApiVersion = "unknown";
+          try {
+            const versionResp = await fetchWithTimeout(`${apiUrl}`, { method: "GET", headers: recoveryHeaders }, 5000);
+            if (versionResp.ok) {
+              const versionData = await versionResp.json();
+              detectedApiVersion = versionData?.version || "unknown";
+              console.log(`[Evolution API] 🏷️ Detected Evolution API version: ${detectedApiVersion}`);
+            }
+          } catch (_) {
+            console.warn(`[Evolution API] Could not detect API version`);
+          }
+
           try {
             console.log(`[Evolution API] Recovery Step 0: Checking connectionState for ${instance.instance_name}`);
             const stateResp = await fetchWithTimeout(
@@ -1194,7 +1206,7 @@ serve(async (req) => {
                 const l1Resp = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
                   method: "GET",
                   headers: recoveryHeaders,
-                }, 15000);
+                }, 10000);
 
                 if (l1Resp.ok) {
                   const l1Data = await l1Resp.json();
@@ -1282,7 +1294,7 @@ serve(async (req) => {
                 const l2Resp = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
                   method: "GET",
                   headers: recoveryHeaders,
-                }, 15000);
+                }, 10000);
 
                 if (l2Resp.ok) {
                   const l2Data = await l2Resp.json();
@@ -1431,8 +1443,8 @@ serve(async (req) => {
               }
             }
 
-            console.warn(`[Evolution API] All 3 recovery levels exhausted without QR code`);
-            throw new Error("Todas as tentativas de recuperação falharam. Aguarde 1 minuto e tente novamente.");
+            console.warn(`[Evolution API] All 3 recovery levels exhausted without QR code. API version: ${detectedApiVersion}`);
+            throw new Error(`Todas as tentativas de recuperação falharam. Versão da Evolution API detectada: ${detectedApiVersion}. ${detectedApiVersion !== "unknown" && !detectedApiVersion.startsWith("2.3.3") && !detectedApiVersion.startsWith("2.3.5") ? "⚠️ A versão da API pode ser incompatível - verifique o docker-compose.yml e pine uma versão estável (ex: v2.3.3)." : ""} Aguarde 1 minuto e tente novamente.`);
           } catch (recoveryError: any) {
             console.error(`[Evolution API] Recovery failed:`, recoveryError);
             throw new Error(recoveryError.message || `Sessão corrompida. Tentativa de recuperação falhou.`);
