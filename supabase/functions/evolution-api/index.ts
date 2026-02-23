@@ -63,6 +63,7 @@ type EvolutionAction =
   | "restart_instance" // Restart connection
   // New centralized management endpoints
   | "global_create_instance"
+  | "global_recreate_instance"
   | "global_delete_instance"
   | "global_get_qrcode"
   | "global_get_status"
@@ -3871,6 +3872,104 @@ serve(async (req) => {
             instance,
             qrCode,
             message: qrCode ? "Instance created, scan QR code" : "Instance created",
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      // Recreate a lost instance (exists in DB but not in Evolution API)
+      case "global_recreate_instance": {
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
+        }
+        
+        if (!body.instanceName) {
+          throw new Error("instanceName is required");
+        }
+
+        const apiUrl = normalizeUrl(globalApiUrl);
+        console.log(`[Evolution API] GLOBAL Recreating lost instance: ${body.instanceName} at ${apiUrl}`);
+
+        // Step 1: Create instance in Evolution API
+        const recreateResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
+          method: "POST",
+          headers: {
+            apikey: globalApiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            instanceName: body.instanceName,
+            qrcode: true,
+            integration: "WHATSAPP-BAILEYS",
+            webhook: buildWebhookConfig(WEBHOOK_URL),
+          }),
+        });
+
+        if (!recreateResponse.ok) {
+          const errorText = await safeReadResponseText(recreateResponse);
+          console.error(`[Evolution API] GLOBAL Recreate instance failed:`, errorText);
+          throw new Error(simplifyEvolutionError(recreateResponse.status, errorText));
+        }
+
+        const recreateData = await recreateResponse.json();
+        console.log(`[Evolution API] GLOBAL Recreate instance response:`, JSON.stringify(recreateData).slice(0, 500));
+
+        // Step 2: Configure settings (groupsIgnore, etc)
+        try {
+          await fetchWithTimeout(`${apiUrl}/settings/set/${body.instanceName}`, {
+            method: "POST",
+            headers: {
+              apikey: globalApiKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              rejectCall: false,
+              msgCall: "",
+              groupsIgnore: true,
+              alwaysOnline: false,
+              readMessages: false,
+              readStatus: false,
+              syncFullHistory: false,
+            }),
+          });
+          console.log(`[Evolution API] GLOBAL Settings configured for recreated instance ${body.instanceName}`);
+        } catch (settingsError) {
+          console.warn(`[Evolution API] GLOBAL Error configuring settings for recreated instance:`, settingsError);
+        }
+
+        // Step 3: Extract QR code if available
+        let qrCode: string | null = null;
+        if (recreateData.qrcode?.base64) {
+          qrCode = recreateData.qrcode.base64;
+        } else if (recreateData.qrcode && typeof recreateData.qrcode === "string") {
+          qrCode = recreateData.qrcode;
+        } else if (recreateData.base64) {
+          qrCode = recreateData.base64;
+        }
+
+        // Step 4: Update existing DB row status (DO NOT insert - row already exists)
+        const { error: updateError } = await supabaseClient
+          .from("whatsapp_instances")
+          .update({
+            status: "awaiting_qr",
+            api_url: apiUrl,
+            api_key: globalApiKey,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("instance_name", body.instanceName);
+
+        if (updateError) {
+          console.error(`[Evolution API] GLOBAL DB update error for recreated instance:`, updateError);
+        }
+
+        return new Response(
+          JSON.stringify({
+            success: true,
+            qrCode,
+            message: `Instance ${body.instanceName} recreated successfully`,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
