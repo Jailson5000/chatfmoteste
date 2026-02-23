@@ -1,114 +1,73 @@
 
+## Corrigir "Connection Closed" no Envio de Mensagens
 
-## Corrigir Ciclo de Desconexao: Webhook Desfaz o Trabalho do Auto-Reconnect
+### Diagnostico Completo (com provas dos logs)
 
-### Diagnostico com Provas dos Logs
+**Estado atual do banco:** Instancias marcadas como `connected` e `connecting` alternando constantemente.
 
-**O fix do auto-reconnect funcionou.** Nos logs de 14:55, o cron usou `fetchInstances` e sincronizou 2 instancias como `connected` corretamente:
-```
-14:55:08 fetchInstances state for inst_d92ekkep: open (connected: true)
-14:55:08 Instance inst_d92ekkep is actually connected - updating DB only
-14:55:06 fetchInstances state for inst_0gkejsc5: open (connected: true)
-14:55:06 Instance inst_0gkejsc5 is actually connected - updating DB only
-Summary: 2 successful (2 status syncs)
-```
-
-**Porem, 3 minutos depois (14:58), o WEBHOOK desfez tudo.** A Evolution API enviou eventos `connecting` (comportamento normal do Baileys para keep-alive) e nosso guard de 60 segundos permitiu o downgrade:
-```
-14:58:34 Downgrading to connecting - stale connection detected (180s since last update)
-14:58:34 Updated instance status to connecting
-```
-
-**Resultado no banco agora:**
-- inst_ea9bfhx3: `connected` (guard de 0s funcionou)
-- inst_464pnw5n: `connected` (guard de 0s funcionou)
-- inst_d92ekkep: `connected` (guard de 0s funcionou)
-- inst_l26f156k: `connecting` (webhook desfez)
-- inst_0gkejsc5: `connecting` (webhook desfez)
-- inst_5fjooku6: `connecting` (webhook desfez)
-- inst_7sw6k99c: `awaiting_qr` (webhook preservou status errado)
-
-### Causa Raiz
-
-O guard de 60 segundos esta ERRADO. A Evolution API v2.3.7 (Baileys) envia eventos `connecting` periodicamente como parte do keep-alive interno, mesmo para instancias perfeitamente conectadas. Apos 60 segundos, nosso webhook interpreta esses eventos como "desconexao real" e desfaz o status `connected`.
-
-O unico evento que indica desconexao real e `state: close`. O estado `connecting` e transitorio e NUNCA deve sobrescrever `connected`.
-
-### Sobre Versao da Evolution API
-
-A pesquisa na documentacao e GitHub mostra:
-- v2.3.7 corrigiu bugs criticos: "incoming message events not working after reconnection" e "waiting for message state after reconnection"
-- v2.3.6 tem esses bugs, o que causaria problemas piores
-- v2.3.7 tem regressao em botoes interativos (issue #2390), mas nao afeta mensagens de texto
-- O problema atual NAO e da versao da Evolution - e da nossa logica de webhook
-
-**Recomendacao: Manter v2.3.7** e corrigir apenas a logica do webhook.
-
-### Solucao
-
-**Arquivo: `supabase/functions/evolution-webhook/index.ts`**
-
-Remover completamente o guard de 60 segundos. Quando o webhook receber `connecting` e o banco mostrar `connected`, SEMPRE ignorar (apenas atualizar timestamps). Somente o evento `close` pode rebaixar de `connected` para `disconnected`.
-
-Mudanca nas linhas 4288-4314:
+**O que acontece passo a passo (comprovado nos logs):**
 
 ```text
-// ANTES (bugado - guard de 60s permite downgrade incorreto):
-} else if (instance.status === 'connected') {
-  const elapsedSeconds = (now - lastUpdate) / 1000;
-  if (elapsedSeconds < 60) {
-    // ignora
-  } else {
-    dbStatus = 'connecting'; // ERRADO - desfaz status real
-  }
-}
-
-// DEPOIS (correto - NUNCA rebaixar connected via connecting):
-} else if (instance.status === 'connected') {
-  logDebug('CONNECTION', 'Ignoring connecting event - instance is connected. Only close events can downgrade.', { requestId });
-  await supabaseClient.from('whatsapp_instances')
-    .update({ updated_at: new Date().toISOString(), last_webhook_event: 'connection.update' })
-    .eq('id', instance.id);
-  return new Response(JSON.stringify({ status: "ignored", reason: "connected_instance" }), {
-    status: 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
-}
+15:05:09 - auto-reconnect: fetchInstances = "open" -> marca DB como "connected" (CORRETO)
+15:05:22 - webhook: evento "connecting" recebido -> IGNORADO (nosso fix funciona!)
+15:06:10 - usuario envia mensagem via inst_0gkejsc5
+15:06:11 - Evolution retorna: {"message":["Error: Connection Closed"]}
+15:06:14 - retry apos 3s tambem falha -> marca DB como "disconnected"
+15:06:14 - frontend ve "disconnected" -> mostra banner vermelho "WhatsApp desconectado"
 ```
 
-Tambem na linha 4429-4435, adicionar de volta o guard `.neq('status', 'connected')` para updates do tipo `connecting`, como protecao contra race conditions:
+**Causa raiz:** A Evolution API v2.3.7 (Baileys) tem um bug onde `fetchInstances` reporta `connectionStatus: "open"` mas o socket WebSocket interno do WhatsApp esta quebrado. Quando se tenta enviar via `/message/sendText`, retorna "Connection Closed".
+
+O auto-reconnect ve "open" e apenas atualiza o banco sem verificar se o socket realmente funciona. A mensagem falha, marca como `disconnected`, e o ciclo recomeça.
+
+### Solucao em 2 Partes
+
+**Parte 1: Reconexao inteligente no envio (evolution-api/index.ts)**
+
+Quando "Connection Closed" ocorrer no envio de mensagem:
+1. Chamar `/instance/connect` para forcar o Baileys a reconectar o socket WhatsApp
+2. Esperar 5 segundos para a reconexao
+3. Tentar enviar a mensagem novamente
+4. So marcar como `disconnected` se a reconexao + retry tambem falharem
 
 ```text
-// Quando dbStatus e 'connecting', nao sobrescrever se DB ja esta 'connected'
-if (dbStatus === 'connecting') {
-  updateQuery = updateQuery.neq('status', 'connected');
-}
+// ANTES (atual):
+Connection Closed -> espera 3s -> retry direto -> falha -> marca disconnected
+
+// DEPOIS (corrigido):
+Connection Closed -> chama /instance/connect -> espera 5s -> retry -> 
+  se sucesso: marca connected, mensagem enviada
+  se falha: marca disconnected (desconexao real)
 ```
 
-### Logica Final de Transicao de Status
+**Parte 2: Auto-reconnect verifica conexao real (auto-reconnect-instances/index.ts)**
+
+Quando `fetchInstances` retorna "open" mas a instancia estava em `connecting`/`disconnected`:
+1. Chamar `/instance/connect` para garantir que o socket esta ativo
+2. So entao marcar como `connected` no banco
+3. Isto previne o cenario onde "open" no fetchInstances nao significa socket funcional
 
 ```text
-Evento webhook    | Status DB atual  | Acao
-------------------|------------------|---------------------------
-state: open       | qualquer         | -> connected (sempre)
-state: close      | qualquer         | -> disconnected (sempre)
-state: connecting | connected        | IGNORAR (keep-alive normal)
-state: connecting | connecting       | Manter connecting
-state: connecting | disconnected     | -> connecting
-state: connecting | awaiting_qr     | Preservar awaiting_qr
-state: qr         | qualquer         | -> awaiting_qr
+// ANTES:
+fetchInstances = "open" -> atualiza DB para "connected" (sem verificar socket)
+
+// DEPOIS:
+fetchInstances = "open" -> chama /instance/connect -> verifica resposta -> 
+  se state "open"/"connected": marca connected
+  se retorna QR: marca awaiting_qr
 ```
 
-### Impacto
+### Arquivos Editados
+
+1. `supabase/functions/evolution-api/index.ts` - Adicionar chamada a `/instance/connect` antes do retry no caso "Connection Closed" (tanto em send_message_async quanto send_message)
+2. `supabase/functions/auto-reconnect-instances/index.ts` - Chamar `/instance/connect` quando fetchInstances retorna "open" para garantir socket funcional
+
+### Impacto Esperado
 
 | Antes | Depois |
 |---|---|
-| Webhook desfaz connected apos 60s | connected so muda com evento `close` ou `open` |
-| Auto-reconnect fixa, webhook estraga | Ambos trabalham em harmonia |
-| Instancias "flickering" entre connected/connecting | Status estavel |
-| Mensagens nao fluem (sessao instavel) | Sessoes permanecem estaveis, mensagens fluem |
-
-### Arquivo editado
-
-- `supabase/functions/evolution-webhook/index.ts`
-
+| "Connection Closed" -> retry falha -> marca disconnected | "Connection Closed" -> reconnect socket -> retry com sucesso |
+| auto-reconnect confia em fetchInstances "open" | auto-reconnect forca reconexao real do socket |
+| Instancias flip-flop connected/disconnected a cada mensagem | Instancias estabilizam apos primeira reconexao |
+| Mensagens falham constantemente | Mensagens entregues apos reconexao automatica transparente |
+| Banner vermelho aparece a cada envio | Banner so aparece se desconexao real confirmada |
