@@ -803,7 +803,35 @@ serve(async (req) => {
             } else {
               const createError = await safeReadResponseText(createResponse);
               console.error(`[Evolution API] Failed to recreate instance:`, createError);
-              throw new Error("Não foi possível recriar a instância no servidor Evolution. Tente novamente.");
+              
+              // If 403 "name in use", try logout+connect instead
+              if (createResponse.status === 403) {
+                console.log(`[Evolution API] 403 on create - trying logout+connect fallback...`);
+                try {
+                  await fetchWithTimeout(`${apiUrl}/instance/logout/${instance.instance_name}`, {
+                    method: "DELETE",
+                    headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                  }, 10000).catch(() => {});
+                  
+                  await new Promise(resolve => setTimeout(resolve, 3000));
+                  
+                  const fallbackConnect = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+                    method: "GET",
+                    headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                  });
+                  
+                  if (fallbackConnect.ok) {
+                    qrResponse = fallbackConnect;
+                    console.log(`[Evolution API] Logout+connect fallback succeeded`);
+                  } else {
+                    throw new Error("Instância existe no servidor mas não gera QR. Aguarde alguns minutos e tente novamente.");
+                  }
+                } catch (fallbackErr: any) {
+                  throw new Error(fallbackErr.message || "Não foi possível recriar a instância.");
+                }
+              } else {
+                throw new Error("Não foi possível recriar a instância no servidor Evolution. Tente novamente.");
+              }
             }
           } catch (recreateError: any) {
             console.error(`[Evolution API] Recreate error:`, recreateError);
@@ -843,93 +871,146 @@ serve(async (req) => {
 
         if (isCorruptedSession) {
           console.log(`[Evolution API] 🔧 CORRUPTED SESSION DETECTED for ${instance.instance_name} - Response: ${JSON.stringify(qrData).slice(0, 200)}`);
-          console.log(`[Evolution API] Executing delete+recreate recovery...`);
+
+          const recoveryHeaders = {
+            apikey: instance.api_key || "",
+            "Content-Type": "application/json",
+          };
 
           try {
-            // Step 1: Delete corrupted instance from Evolution
-            console.log(`[Evolution API] Step 1: Deleting corrupted instance ${instance.instance_name}...`);
+            // === ATTEMPT 1: Logout + Connect (preferred - keeps instance registration) ===
+            console.log(`[Evolution API] Recovery Step 1: Logout + Connect for ${instance.instance_name}`);
+            
+            // Logout (best-effort - clears Baileys session files)
+            try {
+              const logoutResp = await fetchWithTimeout(`${apiUrl}/instance/logout/${instance.instance_name}`, {
+                method: "DELETE",
+                headers: recoveryHeaders,
+              }, 10000);
+              console.log(`[Evolution API] Logout response: ${logoutResp.status}`);
+            } catch (e) {
+              console.warn(`[Evolution API] Logout failed (non-fatal):`, e);
+            }
+
+            // Wait for Baileys to clear session files
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Try connect to get fresh QR
+            const connectResp = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+              method: "GET",
+              headers: recoveryHeaders,
+            }, 15000);
+
+            if (connectResp.ok) {
+              const connectData = await connectResp.json();
+              console.log(`[Evolution API] Connect after logout response:`, JSON.stringify(connectData).slice(0, 300));
+              const recoveredQr = connectData.base64 || connectData.qrcode?.base64 || connectData.qrcode || connectData.code || null;
+              
+              if (recoveredQr) {
+                console.log(`[Evolution API] ✅ Logout+Connect recovery successful - QR code obtained!`);
+                await supabaseClient
+                  .from("whatsapp_instances")
+                  .update({ 
+                    status: "awaiting_qr", 
+                    awaiting_qr: true,
+                    manual_disconnect: false,
+                    reconnect_attempts_count: 0,
+                    updated_at: new Date().toISOString() 
+                  })
+                  .eq("id", body.instanceId);
+
+                return new Response(
+                  JSON.stringify({
+                    success: true,
+                    qrCode: recoveredQr,
+                    status: "awaiting_qr",
+                    message: "Sessão recuperada - escaneie o QR code",
+                    recovered: true,
+                  }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                );
+              }
+              console.log(`[Evolution API] Logout+Connect did not return QR, falling back to delete+recreate`);
+            } else {
+              console.log(`[Evolution API] Connect after logout failed (${connectResp.status}), falling back to delete+recreate`);
+            }
+
+            // === ATTEMPT 2: Delete + Recreate (fallback with retry) ===
+            console.log(`[Evolution API] Recovery Step 2: Delete + Recreate for ${instance.instance_name}`);
+            
             const deleteResponse = await fetchWithTimeout(`${apiUrl}/instance/delete/${instance.instance_name}`, {
               method: "DELETE",
-              headers: {
-                apikey: instance.api_key || "",
-                "Content-Type": "application/json",
-              },
+              headers: recoveryHeaders,
             }, 15000);
             console.log(`[Evolution API] Delete response: ${deleteResponse.status}`);
 
-            // Wait for Evolution to fully clear the session
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Wait longer for async deletion
+            await new Promise(resolve => setTimeout(resolve, 5000));
 
-            // Step 2: Recreate instance from scratch
-            console.log(`[Evolution API] Step 2: Recreating instance ${instance.instance_name}...`);
-            const recreateResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
-              method: "POST",
-              headers: {
-                apikey: instance.api_key || "",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                instanceName: instance.instance_name,
-                token: instance.api_key,
-                qrcode: true,
-                integration: "WHATSAPP-BAILEYS",
-                webhook: buildWebhookConfig(WEBHOOK_URL),
-              }),
-            }, 30000);
+            // Try create with retry on 403
+            let recreateSuccess = false;
+            for (let attempt = 1; attempt <= 2; attempt++) {
+              console.log(`[Evolution API] Recreate attempt ${attempt} for ${instance.instance_name}...`);
+              const recreateResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
+                method: "POST",
+                headers: recoveryHeaders,
+                body: JSON.stringify({
+                  instanceName: instance.instance_name,
+                  token: instance.api_key,
+                  qrcode: true,
+                  integration: "WHATSAPP-BAILEYS",
+                  webhook: buildWebhookConfig(WEBHOOK_URL),
+                }),
+              }, 30000);
 
-            if (!recreateResponse.ok) {
+              if (recreateResponse.ok) {
+                console.log(`[Evolution API] Recreate succeeded on attempt ${attempt}`);
+                recreateSuccess = true;
+                break;
+              }
+
               const recreateError = await safeReadResponseText(recreateResponse);
-              console.error(`[Evolution API] Recreate failed:`, recreateError);
-              throw new Error("Não foi possível recriar a instância. Tente novamente.");
+              console.warn(`[Evolution API] Recreate attempt ${attempt} failed: ${recreateResponse.status} - ${recreateError.slice(0, 200)}`);
+              
+              if (recreateResponse.status === 403 && attempt < 2) {
+                console.log(`[Evolution API] 403 "name in use" - waiting 5s before retry...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
+              } else {
+                break;
+              }
             }
 
-            const recreateData = await recreateResponse.json();
-            console.log(`[Evolution API] Recreate response:`, JSON.stringify(recreateData).slice(0, 500));
+            if (!recreateSuccess) {
+              throw new Error("Não foi possível recriar a instância após múltiplas tentativas. Aguarde alguns minutos e tente novamente.");
+            }
 
-            // Step 3: Configure settings (groupsIgnore)
+            // Configure settings (groupsIgnore)
             try {
-              const settingsPayload = {
-                rejectCall: false,
-                msgCall: "",
-                groupsIgnore: true,
-                alwaysOnline: false,
-                readMessages: false,
-                readStatus: false,
-                syncFullHistory: false,
-              };
               await fetchWithTimeout(`${apiUrl}/settings/set/${instance.instance_name}`, {
                 method: "POST",
-                headers: {
-                  apikey: instance.api_key || "",
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify(settingsPayload),
+                headers: recoveryHeaders,
+                body: JSON.stringify({
+                  rejectCall: false, msgCall: "", groupsIgnore: true,
+                  alwaysOnline: false, readMessages: false, readStatus: false, syncFullHistory: false,
+                }),
               });
-              console.log(`[Evolution API] Settings configured for recreated instance`);
             } catch (e) {
               console.warn(`[Evolution API] Settings config failed (non-fatal):`, e);
             }
 
-            // Step 4: Configure webhook
+            // Configure webhook
             await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
               method: "POST",
-              headers: {
-                apikey: instance.api_key || "",
-                "Content-Type": "application/json",
-              },
+              headers: recoveryHeaders,
               body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
             }).catch(e => console.warn("[Evolution API] Webhook config failed:", e));
 
-            // Wait for initialization
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // Step 5: Get fresh QR code
+            // Get fresh QR code
             const freshQrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
               method: "GET",
-              headers: {
-                apikey: instance.api_key || "",
-                "Content-Type": "application/json",
-              },
+              headers: recoveryHeaders,
             });
 
             if (freshQrResponse.ok) {
@@ -938,8 +1019,7 @@ serve(async (req) => {
               qrCode = freshData.base64 || freshData.qrcode?.base64 || freshData.qrcode || freshData.code || null;
               
               if (qrCode) {
-                console.log(`[Evolution API] ✅ Recovery successful - QR code obtained!`);
-                // Update DB status
+                console.log(`[Evolution API] ✅ Delete+Recreate recovery successful - QR code obtained!`);
                 await supabaseClient
                   .from("whatsapp_instances")
                   .update({ 
