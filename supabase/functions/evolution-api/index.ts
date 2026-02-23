@@ -1968,10 +1968,21 @@ serve(async (req) => {
                 } catch { /* ignore parse errors */ }
 
                 if (mediaIsConnectionClosed && instanceId) {
-                  // Do NOT call /instance/connect here - it restarts the Baileys socket
-                  // and causes a destabilization loop. Mark as disconnected and let the
-                  // auto-reconnect cron handle recovery properly.
-                  console.warn(`[Evolution API] Media Connection Closed for ${instanceId} - marking as disconnected (no /instance/connect call)`);
+                  // Force logout to invalidate stale Evolution session cache.
+                  // Without this, fetchInstances keeps reporting "open" even though
+                  // the Baileys socket is dead, causing an infinite reconnect loop.
+                  console.warn(`[Evolution API] Media Connection Closed for ${instanceId} - forcing logout then marking disconnected`);
+                  
+                  try {
+                    const logoutRes = await fetchWithTimeout(
+                      `${apiUrl}/instance/logout/${instance.instance_name}`,
+                      { method: "DELETE", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } },
+                      10000
+                    );
+                    console.log(`[Evolution API] Logout response for ${instance.instance_name}: ${logoutRes.status}`);
+                  } catch (logoutErr: any) {
+                    console.warn(`[Evolution API] Logout failed (non-blocking): ${logoutErr?.message}`);
+                  }
                   
                   await supabaseClient.from("whatsapp_instances")
                     .update({ 
@@ -2075,10 +2086,21 @@ serve(async (req) => {
                 );
 
                 if (isConnectionClosed && instanceId) {
-                  // Do NOT call /instance/connect here - it restarts the Baileys socket
-                  // and causes a destabilization loop. Mark as disconnected and let the
-                  // auto-reconnect cron handle recovery properly.
-                  console.warn(`[Evolution API] Connection Closed for ${instanceId} - marking as disconnected (no /instance/connect call)`);
+                  // Force logout to invalidate stale Evolution session cache.
+                  // Without this, fetchInstances keeps reporting "open" even though
+                  // the Baileys socket is dead, causing an infinite reconnect loop.
+                  console.warn(`[Evolution API] Connection Closed for ${instanceId} - forcing logout then marking disconnected`);
+                  
+                  try {
+                    const logoutRes = await fetchWithTimeout(
+                      `${apiUrl}/instance/logout/${instance.instance_name}`,
+                      { method: "DELETE", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } },
+                      10000
+                    );
+                    console.log(`[Evolution API] Logout response for ${instance.instance_name}: ${logoutRes.status}`);
+                  } catch (logoutErr: any) {
+                    console.warn(`[Evolution API] Logout failed (non-blocking): ${logoutErr?.message}`);
+                  }
                   
                   errorReason = "Conexão perdida - reconexão automática em andamento";
                   
@@ -2086,9 +2108,8 @@ serve(async (req) => {
                     .from("whatsapp_instances")
                     .update({ status: 'disconnected', disconnected_since: new Date().toISOString(), updated_at: new Date().toISOString() })
                     .eq("id", instanceId)
-                    .not("status", "in", '("disconnected")'); // Don't overwrite if already disconnected
+                    .not("status", "in", '("disconnected")');
 
-                  // Do NOT call /instance/connect here - let the cron handle it to avoid server overload
                   errorReason = "Conexão temporariamente indisponível. Tentando reconectar...";
                 } else if (Array.isArray(errorMessages)) {
                   // Check for "number not on WhatsApp" error
