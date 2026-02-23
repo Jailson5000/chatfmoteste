@@ -1978,8 +1978,9 @@ serve(async (req) => {
                       10000
                     );
                     const connectData = await connectRes.json().catch(() => ({}));
-                    const connectState = connectData?.instance?.state || connectData?.state;
-                    console.log(`[Evolution API] Reconnect response for media: state=${connectState}, status=${connectRes.status}`);
+                     console.log(`[Evolution API] Reconnect raw response for media:`, JSON.stringify(connectData).slice(0, 500));
+                     const connectState = connectData?.instance?.state || connectData?.instance?.status || connectData?.instance?.connectionStatus || connectData?.state || connectData?.status;
+                     console.log(`[Evolution API] Reconnect response for media: state=${connectState}, status=${connectRes.status}`);
                   } catch (connectErr: any) {
                     console.warn(`[Evolution API] Reconnect call failed for media:`, connectErr?.message);
                   }
@@ -2120,8 +2121,9 @@ serve(async (req) => {
                       10000
                     );
                     const connectData = await connectRes.json().catch(() => ({}));
-                    const connectState = connectData?.instance?.state || connectData?.state;
-                    console.log(`[Evolution API] Reconnect response: state=${connectState}, status=${connectRes.status}`);
+                     console.log(`[Evolution API] Reconnect raw response:`, JSON.stringify(connectData).slice(0, 500));
+                     const connectState = connectData?.instance?.state || connectData?.instance?.status || connectData?.instance?.connectionStatus || connectData?.state || connectData?.status;
+                     console.log(`[Evolution API] Reconnect response: state=${connectState}, status=${connectRes.status}`);
                     
                     // If QR code returned, session is dead - skip retry
                     if (connectData?.base64 || connectData?.qrcode?.base64) {

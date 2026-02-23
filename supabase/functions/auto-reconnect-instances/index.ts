@@ -114,9 +114,11 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
 
     if (connectResponse.ok) {
       const data = await connectResponse.json().catch(() => ({}));
+      console.log(`[Auto-Reconnect] /instance/connect raw response for ${instance.instance_name}:`, JSON.stringify(data).slice(0, 500));
       
       // Check if we got connected or need QR code
-      const state = data?.instance?.state || data?.state;
+      // Evolution API v2.3.7 returns "status" not "state" in /instance/connect response
+      const state = data?.instance?.state || data?.instance?.status || data?.instance?.connectionStatus || data?.state || data?.status;
       const qrcode = data?.base64 || data?.qrcode?.base64;
       
       if (state === "open" || state === "connected") {
@@ -384,7 +386,9 @@ serve(async (req) => {
           
           if (verifyRes.ok) {
             const verifyData = await verifyRes.json().catch(() => ({}));
-            const verifyState = verifyData?.instance?.state || verifyData?.state;
+            console.log(`[Auto-Reconnect] /instance/connect verify raw response for ${instance.instance_name}:`, JSON.stringify(verifyData).slice(0, 500));
+            // Evolution API v2.3.7 returns "status" not "state" in /instance/connect response
+            const verifyState = verifyData?.instance?.state || verifyData?.instance?.status || verifyData?.instance?.connectionStatus || verifyData?.state || verifyData?.status;
             const hasQR = verifyData?.base64 || verifyData?.qrcode?.base64;
             
             if (hasQR) {
