@@ -1935,6 +1935,87 @@ export default function Conversations() {
     try {
       toast({ title: "Baixando mídia..." });
 
+      // Helper: check if URL is a public storage URL
+      const isPublicStorageUrl = (url: string) =>
+        url.includes('supabase.co/storage/v1/object/public/');
+
+      // Helper: derive extension from MIME type
+      const getExtensionFromMime = (mime: string): string => {
+        const mimeToExt: Record<string, string> = {
+          'audio/ogg': '.ogg', 'audio/ogg; codecs=opus': '.ogg',
+          'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/wav': '.wav', 'audio/webm': '.webm',
+          'video/mp4': '.mp4', 'video/webm': '.webm',
+          'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp',
+          'application/pdf': '.pdf', 'application/msword': '.doc',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+          'application/vnd.ms-excel': '.xls',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+        };
+        const normalizedMime = mime.toLowerCase().split(';')[0].trim();
+        return mimeToExt[normalizedMime] || mimeToExt[mime.toLowerCase()] || '';
+      };
+
+      // Helper: trigger browser download from blob
+      const downloadBlob = (blob: Blob, fileName: string) => {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      };
+
+      // Helper: generate safe filename
+      const buildFileName = (mimeType: string | null) => {
+        const extension = getExtensionFromMime(mimeType || '');
+        const idSuffix = whatsappMessageId.slice(0, 8);
+        let prefix = 'arquivo';
+        if (mimeType?.startsWith('audio/')) prefix = 'audio';
+        else if (mimeType?.startsWith('video/')) prefix = 'video';
+        else if (mimeType?.startsWith('image/')) prefix = 'imagem';
+        else if (mimeType?.includes('pdf') || mimeType?.includes('word') || mimeType?.includes('document')) prefix = 'documento';
+        return `${prefix}_${idSuffix}${extension}`;
+      };
+
+      // 1. Check if message already has a persisted media_url
+      const msg = messages.find(m => m.whatsapp_message_id === whatsappMessageId);
+      const mediaUrl = msg?.media_url;
+
+      // 2. If public Storage URL, download directly
+      if (mediaUrl && isPublicStorageUrl(mediaUrl)) {
+        const resp = await fetch(mediaUrl);
+        if (!resp.ok) throw new Error("Falha ao baixar mídia do storage");
+        const blob = await resp.blob();
+        const mimeType = blob.type || msg?.media_mime_type || null;
+        downloadBlob(blob, _fileName || buildFileName(mimeType));
+        toast({ title: "Download concluído" });
+        return;
+      }
+
+      // 3. If internal chat file, generate signed URL and download
+      if (mediaUrl && (mediaUrl.startsWith('internal-chat-files://') || mediaUrl.includes('/internal-chat-files/'))) {
+        let filePath = mediaUrl;
+        if (mediaUrl.startsWith('internal-chat-files://')) {
+          filePath = mediaUrl.replace('internal-chat-files://', '');
+        } else {
+          const parts = mediaUrl.split('/internal-chat-files/');
+          filePath = parts[parts.length - 1];
+        }
+        const { data: signedData, error: signedError } = await supabase.storage
+          .from('internal-chat-files')
+          .createSignedUrl(filePath, 60);
+        if (signedError || !signedData?.signedUrl) throw new Error("Falha ao gerar URL de download");
+        const resp = await fetch(signedData.signedUrl);
+        if (!resp.ok) throw new Error("Falha ao baixar arquivo interno");
+        const blob = await resp.blob();
+        downloadBlob(blob, _fileName || buildFileName(blob.type || msg?.media_mime_type || null));
+        toast({ title: "Download concluído" });
+        return;
+      }
+
+      // 4. Fallback: decrypt via Evolution API
       const response = await supabase.functions.invoke("evolution-api", {
         body: {
           action: "get_media",
@@ -1949,46 +2030,7 @@ export default function Conversations() {
 
       const { base64, mimetype } = response.data;
       const dataUrl = `data:${mimetype || "application/octet-stream"};base64,${base64}`;
-
-      // Derive extension from MIME type for consistent downloads
-      const getExtensionFromMime = (mime: string): string => {
-        const mimeToExt: Record<string, string> = {
-          'audio/ogg': '.ogg',
-          'audio/ogg; codecs=opus': '.ogg',
-          'audio/mpeg': '.mp3',
-          'audio/mp4': '.m4a',
-          'audio/wav': '.wav',
-          'audio/webm': '.webm',
-          'video/mp4': '.mp4',
-          'video/webm': '.webm',
-          'image/jpeg': '.jpg',
-          'image/png': '.png',
-          'image/gif': '.gif',
-          'image/webp': '.webp',
-          'application/pdf': '.pdf',
-          'application/msword': '.doc',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
-          'application/vnd.ms-excel': '.xls',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
-        };
-        const normalizedMime = mime.toLowerCase().split(';')[0].trim();
-        return mimeToExt[normalizedMime] || mimeToExt[mime.toLowerCase()] || '';
-      };
-
-      // Generate safe filename based on MIME type
-      const extension = getExtensionFromMime(mimetype || '');
-      const idSuffix = whatsappMessageId.slice(0, 8);
-      
-      // Determine prefix based on MIME type
-      let prefix = 'arquivo';
-      if (mimetype?.startsWith('audio/')) prefix = 'audio';
-      else if (mimetype?.startsWith('video/')) prefix = 'video';
-      else if (mimetype?.startsWith('image/')) prefix = 'imagem';
-      else if (mimetype?.includes('pdf') || mimetype?.includes('word') || mimetype?.includes('document')) prefix = 'documento';
-      
-      const safeFileName = `${prefix}_${idSuffix}${extension}`;
-
-      // Create download link
+      const safeFileName = _fileName || buildFileName(mimetype);
       const link = document.createElement("a");
       link.href = dataUrl;
       link.download = safeFileName;
@@ -2005,7 +2047,7 @@ export default function Conversations() {
         variant: "destructive",
       });
     }
-  }, [toast]);
+  }, [toast, messages]);
 
   const handleSendMedia = async (file: File, mediaType: "image" | "audio" | "video" | "document") => {
     if (!selectedConversationId || !selectedConversation || isSending) return;
