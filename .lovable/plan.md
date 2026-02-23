@@ -1,50 +1,81 @@
 
-## Aplicar Correcoes Pendentes
+## Corrigir Envio/Recebimento de Mensagens + Auto-Reconexao
 
-### O que sera feito
+### Diagnostico
 
-**1. Configurar o segredo CRON_SECRET**
-- Adicionar a variavel `CRON_SECRET` com o valor `df10c830608d54dbc1b84ff5b907280a3dba2f4ba5879ef96bad3feeb5069f53` nos segredos do projeto
-- Isso permitira chamar a funcao `sync-evolution-instances` via curl/cron sem precisar de login
+A Evolution API na VPS (`evo.fmoadv.com.br`) esta com as sessoes WhatsApp (Baileys) quebradas:
+- O endpoint `/instance/fetchInstances` reporta "open", mas os sockets reais estao fechados
+- Ao tentar enviar mensagem, retorna `Error: Connection Closed`
+- Nenhum evento `MESSAGES_UPSERT` esta chegando (sem recebimento)
+- Dezenas de eventos `connection.update` com `state: connecting` estao sendo disparados
 
-**2. Atualizar status das 7 instancias no banco**
-- As 7 instancias que a Evolution API mostra como "open" serao atualizadas para "connected"
-- Os campos `awaiting_qr`, `disconnected_since` e `reconnect_attempts_count` serao resetados
+### Acao imediata necessaria (na VPS)
 
-| Instancia | Status Atual | Novo Status |
-|---|---|---|
-| inst_ea9bfhx3 | connecting | connected |
-| inst_0gkejsc5 | connecting | connected |
-| inst_5fjooku6 | connecting | connected |
-| inst_464pnw5n | connecting | connected |
-| inst_l26f156k | connecting | connected |
-| inst_d92ekkep | awaiting_qr | connected |
-| inst_n5572v68 | awaiting_qr | connected |
+Voce precisa reiniciar a Evolution API ou forcar reconexao das instancias:
 
-### Resultado
-- O painel mostrara as 7 instancias como "Conectado" imediatamente
-- Voce podera sincronizar manualmente a qualquer momento com:
+```bash
+# Opcao 1: Reiniciar o container da Evolution
+docker restart evolution-api
 
-```
-curl -s -X POST "https://jiragtersejnarxruqyd.supabase.co/functions/v1/sync-evolution-instances" \
-  -H "x-cron-secret: df10c830608d54dbc1b84ff5b907280a3dba2f4ba5879ef96bad3feeb5069f53" \
-  -H "Content-Type: application/json"
+# Opcao 2: Forcar reconexao de cada instancia via API
+curl -s -X DELETE "https://evo.fmoadv.com.br/instance/logout/inst_l26f156k" \
+  -H "apikey: SUA_API_KEY"
+# Depois reconectar:
+curl -s -X GET "https://evo.fmoadv.com.br/instance/connect/inst_l26f156k" \
+  -H "apikey: SUA_API_KEY"
 ```
 
-### Detalhes Tecnicos
+### Melhoria no codigo (prevencao futura)
 
-**SQL a ser executado:**
-```sql
-UPDATE whatsapp_instances
-SET 
-  status = 'connected',
-  awaiting_qr = false,
-  manual_disconnect = false,
-  disconnected_since = NULL,
-  reconnect_attempts_count = 0,
-  updated_at = now()
-WHERE instance_name IN (
-  'inst_ea9bfhx3', 'inst_0gkejsc5', 'inst_5fjooku6',
-  'inst_464pnw5n', 'inst_l26f156k', 'inst_d92ekkep', 'inst_n5572v68'
-);
+Alterar a Edge Function `evolution-api` para que, ao detectar o erro "Connection Closed" durante o envio:
+
+1. Atualizar o status da instancia no banco para `disconnected`
+2. Tentar automaticamente chamar o endpoint `/instance/restart` da Evolution API
+3. Informar o usuario que a instancia perdeu conexao e precisa ser reconectada
+
+### Detalhes tecnicos
+
+**Arquivo**: `supabase/functions/evolution-api/index.ts`
+
+Na secao de tratamento de erro do background send (linha ~1895-1927), adicionar deteccao do erro "Connection Closed":
+
+```typescript
+// Dentro do bloco de erro do background send
+if (sendResponse.status === 400) {
+  try {
+    const errorJson = JSON.parse(errorText);
+    const messages = errorJson?.response?.message || errorJson?.message || [];
+    const isConnectionClosed = messages.some(
+      (m: string) => typeof m === 'string' && m.includes('Connection Closed')
+    );
+    
+    if (isConnectionClosed && instanceId) {
+      // Atualizar status no banco para refletir a realidade
+      await supabaseClient
+        .from("whatsapp_instances")
+        .update({ 
+          status: 'disconnected', 
+          disconnected_since: new Date().toISOString() 
+        })
+        .eq("id", instanceId);
+      
+      // Tentar reconexao automatica em background
+      try {
+        await fetch(
+          `${apiUrl}/instance/restart/${instance.instance_name}`,
+          { method: "PUT", headers: { apikey: instance.api_key || "" } }
+        );
+      } catch {}
+      
+      errorReason = "Conexao WhatsApp perdida. Reconectando automaticamente...";
+    }
+  } catch {}
+}
 ```
+
+**Tambem no webhook** (`evolution-webhook/index.ts`): Ajustar para aceitar o estado `close` vindo do webhook e marcar como `disconnected` no banco, mesmo que o status atual seja `connected`. Isso garante que desconexoes reais sejam registradas.
+
+### Resultado esperado
+
+1. **Imediato**: Apos reiniciar a Evolution API na VPS, as instancias devem reconectar e voltar a enviar/receber
+2. **Futuro**: Se uma conexao cair novamente, o sistema detectara o erro "Connection Closed", atualizara o status no banco e tentara reconectar automaticamente
