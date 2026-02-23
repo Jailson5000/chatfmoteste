@@ -657,15 +657,18 @@ serve(async (req) => {
           console.warn(`[Evolution API] Error auto-configuring settings:`, settingsError);
         }
 
-        // Extract QR code from response - handle various formats
-        let qrCode: string | null = null;
-        if (createData.qrcode?.base64) {
-          qrCode = createData.qrcode.base64;
-        } else if (createData.qrcode && typeof createData.qrcode === "string") {
-          qrCode = createData.qrcode;
-        } else if (createData.base64) {
-          qrCode = createData.base64;
-        }
+        // Extract QR code from response - handle various v2.3.x formats
+        console.log(`[Evolution API] create_instance qrcode field:`, JSON.stringify(createData?.qrcode).slice(0, 500));
+        const _extractQr = (d: any): string | null => {
+          if (d?.qrcode?.base64) return d.qrcode.base64;
+          if (typeof d?.qrcode?.qrcode === "string" && d.qrcode.qrcode.length > 10) return d.qrcode.qrcode;
+          if (typeof d?.qrcode === "string" && d.qrcode.length > 10) return d.qrcode;
+          if (d?.base64) return d.base64;
+          if (typeof d?.code === "string" && d.code.length > 10) return d.code;
+          if (typeof d?.qrcode?.code === "string" && d.qrcode.code.length > 10) return d.qrcode.code;
+          return null;
+        };
+        let qrCode: string | null = _extractQr(createData);
 
         // If no QR code from create response, retry with /instance/connect endpoint
         // Baileys v7 needs more time to initialize the WebSocket session
@@ -802,8 +805,17 @@ serve(async (req) => {
               try {
                 const createData = await createResponse.json();
                 console.log(`[Evolution API] Instance recreated successfully. Create response keys: ${Object.keys(createData)}`);
-                createQrCode = createData?.qrcode?.base64 || createData?.base64 || 
-                  (typeof createData?.qrcode === "string" ? createData.qrcode : null) || createData?.code || null;
+                console.log(`[Evolution API] 404-recreate qrcode field:`, JSON.stringify(createData?.qrcode).slice(0, 500));
+                const _extractQr2 = (d: any): string | null => {
+                  if (d?.qrcode?.base64) return d.qrcode.base64;
+                  if (typeof d?.qrcode?.qrcode === "string" && d.qrcode.qrcode.length > 10) return d.qrcode.qrcode;
+                  if (typeof d?.qrcode === "string" && d.qrcode.length > 10) return d.qrcode;
+                  if (d?.base64) return d.base64;
+                  if (typeof d?.code === "string" && d.code.length > 10) return d.code;
+                  if (typeof d?.qrcode?.code === "string" && d.qrcode.code.length > 10) return d.qrcode.code;
+                  return null;
+                };
+                createQrCode = _extractQr2(createData);
                 if (createQrCode) {
                   console.log(`[Evolution API] ✅ QR code extracted directly from /instance/create response!`);
                 }
@@ -1189,6 +1201,17 @@ serve(async (req) => {
             return data?.base64 || data?.qrcode?.base64 || data?.qrcode || data?.code || null;
           };
 
+          // Robust helper to extract QR from /instance/create response (covers all v2.3.x formats)
+          const extractQrFromCreateResponse = (data: any): string | null => {
+            if (data?.qrcode?.base64) return data.qrcode.base64;
+            if (typeof data?.qrcode?.qrcode === "string" && data.qrcode.qrcode.length > 10) return data.qrcode.qrcode;
+            if (typeof data?.qrcode === "string" && data.qrcode.length > 10) return data.qrcode;
+            if (data?.base64) return data.base64;
+            if (typeof data?.code === "string" && data.code.length > 10) return data.code;
+            if (typeof data?.qrcode?.code === "string" && data.qrcode.code.length > 10) return data.qrcode.code;
+            return null;
+          };
+
           // Helper to return QR success response
           const returnQrSuccess = async (recoveredQr: string, level: string) => {
             console.log(`[Evolution API] ✅ ${level} recovery successful - QR code obtained!`);
@@ -1368,8 +1391,8 @@ serve(async (req) => {
                 try {
                   const recreateData = await recreateResponse.json();
                   console.log(`[Evolution API] Level 3 - Create response keys: ${Object.keys(recreateData)}`);
-                  const inlineQr = recreateData?.qrcode?.base64 || recreateData?.base64 || 
-                    (typeof recreateData?.qrcode === "string" ? recreateData.qrcode : null) || recreateData?.code || null;
+                  console.log(`[Evolution API] Level 3 qrcode field:`, JSON.stringify(recreateData?.qrcode).slice(0, 500));
+                  const inlineQr = extractQrFromCreateResponse(recreateData);
                   if (inlineQr) {
                     console.log(`[Evolution API] ✅ Level 3 - QR extracted from /instance/create response!`);
                     // Configure settings and webhook before returning
@@ -3881,14 +3904,17 @@ serve(async (req) => {
           console.warn(`[Evolution API] GLOBAL Error auto-configuring settings:`, settingsError);
         }
 
-        let qrCode: string | null = null;
-        if (createData.qrcode?.base64) {
-          qrCode = createData.qrcode.base64;
-        } else if (createData.qrcode && typeof createData.qrcode === "string") {
-          qrCode = createData.qrcode;
-        } else if (createData.base64) {
-          qrCode = createData.base64;
-        }
+        console.log(`[Evolution API] global_create qrcode field:`, JSON.stringify(createData?.qrcode).slice(0, 500));
+        const _extractQrGlobal = (d: any): string | null => {
+          if (d?.qrcode?.base64) return d.qrcode.base64;
+          if (typeof d?.qrcode?.qrcode === "string" && d.qrcode.qrcode.length > 10) return d.qrcode.qrcode;
+          if (typeof d?.qrcode === "string" && d.qrcode.length > 10) return d.qrcode;
+          if (d?.base64) return d.base64;
+          if (typeof d?.code === "string" && d.code.length > 10) return d.code;
+          if (typeof d?.qrcode?.code === "string" && d.qrcode.code.length > 10) return d.qrcode.code;
+          return null;
+        };
+        let qrCode: string | null = _extractQrGlobal(createData);
 
         const instanceId = createData.instance?.instanceId || createData.instanceId || body.instanceName;
 
@@ -3985,15 +4011,18 @@ serve(async (req) => {
           console.warn(`[Evolution API] GLOBAL Error configuring settings for recreated instance:`, settingsError);
         }
 
-        // Step 3: Extract QR code if available
-        let qrCode: string | null = null;
-        if (recreateData.qrcode?.base64) {
-          qrCode = recreateData.qrcode.base64;
-        } else if (recreateData.qrcode && typeof recreateData.qrcode === "string") {
-          qrCode = recreateData.qrcode;
-        } else if (recreateData.base64) {
-          qrCode = recreateData.base64;
-        }
+        // Step 3: Extract QR code if available (robust v2.3.x extraction)
+        console.log(`[Evolution API] global_recreate qrcode field:`, JSON.stringify(recreateData?.qrcode).slice(0, 500));
+        const _extractQrGlobalR = (d: any): string | null => {
+          if (d?.qrcode?.base64) return d.qrcode.base64;
+          if (typeof d?.qrcode?.qrcode === "string" && d.qrcode.qrcode.length > 10) return d.qrcode.qrcode;
+          if (typeof d?.qrcode === "string" && d.qrcode.length > 10) return d.qrcode;
+          if (d?.base64) return d.base64;
+          if (typeof d?.code === "string" && d.code.length > 10) return d.code;
+          if (typeof d?.qrcode?.code === "string" && d.qrcode.code.length > 10) return d.qrcode.code;
+          return null;
+        };
+        let qrCode: string | null = _extractQrGlobalR(recreateData);
 
         // Step 4: Update existing DB row status (DO NOT insert - row already exists)
         const { error: updateError } = await supabaseClient
