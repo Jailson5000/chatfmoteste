@@ -173,17 +173,51 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
 }
 
 // Check if instance is actually connected on Evolution API before attempting restart
-// This catches cases where the DB is out of sync but session is still active
+// Uses fetchInstances (same as Evolution Manager UI) as PRIMARY source
 async function checkConnectionState(instance: InstanceToReconnect): Promise<{
   isConnected: boolean;
   state: string;
 }> {
   const apiUrl = normalizeUrl(instance.api_url);
-  
+
+  // PRIMARY: fetchInstances (same source as Evolution Manager UI)
   try {
-    console.log(`[Auto-Reconnect] Checking connection state for ${instance.instance_name}...`);
-    
-    const statusResponse = await fetchWithTimeout(
+    const fetchUrl = `${apiUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instance.instance_name)}`;
+    console.log(`[Auto-Reconnect] Checking via fetchInstances for ${instance.instance_name}...`);
+
+    const response = await fetchWithTimeout(fetchUrl, {
+      method: "GET",
+      headers: {
+        apikey: instance.api_key,
+        "Content-Type": "application/json",
+      },
+    }, 10000);
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`[Auto-Reconnect] fetchInstances raw for ${instance.instance_name}:`, JSON.stringify(data).slice(0, 300));
+
+      const instances = Array.isArray(data) ? data : data?.instances || [data];
+      const found = instances.find((i: any) =>
+        i?.instanceName === instance.instance_name ||
+        i?.name === instance.instance_name
+      ) || instances[0];
+
+      if (found) {
+        const state = found.connectionStatus || found.status || found.state || "unknown";
+        const isConnected = state === "open" || state === "connected";
+        console.log(`[Auto-Reconnect] fetchInstances state for ${instance.instance_name}: ${state} (connected: ${isConnected})`);
+        return { isConnected, state };
+      }
+    }
+  } catch (e: any) {
+    console.warn(`[Auto-Reconnect] fetchInstances failed for ${instance.instance_name}:`, e.message);
+  }
+
+  // FALLBACK: connectionState (may be inaccurate in Evolution v2.3+)
+  try {
+    console.log(`[Auto-Reconnect] Falling back to connectionState for ${instance.instance_name}...`);
+    const stateResponse = await fetchWithTimeout(
       `${apiUrl}/instance/connectionState/${encodeURIComponent(instance.instance_name)}`,
       {
         method: "GET",
@@ -195,22 +229,18 @@ async function checkConnectionState(instance: InstanceToReconnect): Promise<{
       10000
     );
 
-    if (!statusResponse.ok) {
-      console.log(`[Auto-Reconnect] Connection state check returned ${statusResponse.status}`);
-      return { isConnected: false, state: "unknown" };
+    if (stateResponse.ok) {
+      const data = await stateResponse.json();
+      const state = data.state || data.instance?.state || "unknown";
+      const isConnected = state === "open" || state === "connected";
+      console.log(`[Auto-Reconnect] connectionState for ${instance.instance_name}: ${state} (connected: ${isConnected})`);
+      return { isConnected, state };
     }
-
-    const data = await statusResponse.json();
-    const state = data.state || data.instance?.state || "unknown";
-    const isConnected = state === "open" || state === "connected";
-    
-    console.log(`[Auto-Reconnect] Connection state for ${instance.instance_name}: ${state} (connected: ${isConnected})`);
-    
-    return { isConnected, state };
-  } catch (error: any) {
-    console.log(`[Auto-Reconnect] Connection state check failed for ${instance.instance_name}:`, error.message);
-    return { isConnected: false, state: "error" };
+  } catch (e: any) {
+    console.error(`[Auto-Reconnect] Both endpoints failed for ${instance.instance_name}:`, e.message);
   }
+
+  return { isConnected: false, state: "error" };
 }
 
 serve(async (req) => {
