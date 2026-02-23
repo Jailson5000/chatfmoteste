@@ -726,6 +726,7 @@ serve(async (req) => {
         console.log(`[Evolution API] Get QR code response status: ${qrResponse.status}`);
 
         // If 404 - instance doesn't exist in Evolution API, recreate it
+        let wasRecreatedFrom404 = false;
         if (qrResponse.status === 404) {
           console.log(`[Evolution API] Instance ${instance.instance_name} not found in Evolution, recreating...`);
           
@@ -789,10 +790,108 @@ serve(async (req) => {
                 body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
               }).catch(e => console.warn("[Evolution API] Webhook config failed:", e));
               
-              // Wait a moment for Evolution to initialize
-              await new Promise(resolve => setTimeout(resolve, 1000));
+              // Wait for Baileys v7 to fully initialize the session (needs more than 1s)
+              console.log(`[Evolution API] Waiting 5s for Baileys v7 to initialize after recreate...`);
+              await new Promise(resolve => setTimeout(resolve, 5000));
               
-              // Try to get QR code again
+              // Try to get QR code with retries (Baileys v7 may need extra time)
+              let qrObtainedAfterRecreate = false;
+              for (let connectAttempt = 1; connectAttempt <= 3; connectAttempt++) {
+                console.log(`[Evolution API] Post-recreate connect attempt ${connectAttempt}/3 for ${instance.instance_name}`);
+                
+                qrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+                  method: "GET",
+                  headers: {
+                    apikey: instance.api_key || "",
+                    "Content-Type": "application/json",
+                  },
+                });
+                
+                if (qrResponse.ok) {
+                  const tempData = await qrResponse.json();
+                  console.log(`[Evolution API] Post-recreate attempt ${connectAttempt} response: ${JSON.stringify(tempData).slice(0, 300)}`);
+                  
+                  // Check if we got a QR code
+                  const tempQr = tempData.base64 || tempData.qrcode?.base64 || 
+                    (typeof tempData.qrcode === "string" ? tempData.qrcode : null) || tempData.code;
+                  
+                  if (tempQr) {
+                    console.log(`[Evolution API] ✅ QR code obtained on post-recreate attempt ${connectAttempt}!`);
+                    qrObtainedAfterRecreate = true;
+                    // Return success immediately
+                    return new Response(
+                      JSON.stringify({
+                        success: true,
+                        qrCode: tempQr,
+                        status: "awaiting_qr",
+                        pairingCode: tempData.pairingCode || null,
+                      }),
+                      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                    );
+                  }
+                  
+                  // Check if already connected
+                  const tempState = tempData.state || tempData.status || tempData.instance?.state;
+                  if (tempState === "open" || tempState === "connected") {
+                    console.log(`[Evolution API] ✅ Instance connected after recreate!`);
+                    qrObtainedAfterRecreate = true;
+                    return new Response(
+                      JSON.stringify({
+                        success: true,
+                        qrCode: null,
+                        status: "connected",
+                        message: "Instância reconectada com sucesso",
+                      }),
+                      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                    );
+                  }
+                  
+                  // {"count":0} or no QR - wait and retry
+                  if (connectAttempt < 3) {
+                    console.log(`[Evolution API] No QR yet (attempt ${connectAttempt}), waiting 5s before retry...`);
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                  }
+                } else {
+                  console.warn(`[Evolution API] Post-recreate connect attempt ${connectAttempt} failed: ${qrResponse.status}`);
+                  if (connectAttempt < 3) {
+                    await new Promise(resolve => setTimeout(resolve, 5000));
+                  }
+                }
+              }
+              
+              // All 3 attempts failed - check connectionState before giving up
+              try {
+                const stateCheck = await fetchWithTimeout(
+                  `${apiUrl}/instance/connectionState/${instance.instance_name}`,
+                  { method: "GET", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } },
+                  10000
+                );
+                if (stateCheck.ok) {
+                  const stateInfo = await stateCheck.json();
+                  const currentState = stateInfo?.instance?.state || stateInfo?.state || "unknown";
+                  console.log(`[Evolution API] Post-recreate connectionState: ${currentState}`);
+                  
+                  if (currentState === "connecting") {
+                    console.log(`[Evolution API] Instance is still initializing after recreate - returning informative message`);
+                    return new Response(
+                      JSON.stringify({
+                        success: false,
+                        error: "Instância recriada com sucesso, mas o WhatsApp ainda está inicializando. Aguarde 30 segundos e clique em 'Gerar QR Code' novamente.",
+                        retryable: true,
+                      }),
+                      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                    );
+                  }
+                }
+              } catch (stateErr) {
+                console.warn(`[Evolution API] Post-recreate connectionState check error:`, stateErr);
+              }
+              
+              // Flag to prevent corrupted session cascade
+              console.log(`[Evolution API] Post-recreate: all connect attempts returned no QR. Setting wasRecreatedFrom404 flag.`);
+              wasRecreatedFrom404 = true;
+              
+              // Re-fetch last qrResponse for downstream processing (won't have QR but needed for flow)
               qrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
                 method: "GET",
                 headers: {
@@ -870,6 +969,19 @@ serve(async (req) => {
           (qrData.count === 0 || (Object.keys(qrData).length <= 2 && !qrData.base64 && !qrData.qrcode));
 
         if (isCorruptedSession) {
+          // GUARD: If we just recreated from 404, don't cascade into another recovery cycle
+          if (wasRecreatedFrom404) {
+            console.log(`[Evolution API] ⚠️ Skipping corrupted session recovery - instance was just recreated from 404. Baileys still initializing.`);
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: "A instância foi recriada com sucesso, mas o WhatsApp ainda está inicializando a sessão. Aguarde 30 segundos e clique em 'Gerar QR Code' novamente.",
+                retryable: true,
+              }),
+              { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+          
           console.log(`[Evolution API] 🔧 POSSIBLE CORRUPTED SESSION for ${instance.instance_name} - Response: ${JSON.stringify(qrData).slice(0, 200)}`);
 
           const recoveryHeaders = {
