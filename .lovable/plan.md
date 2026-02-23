@@ -1,71 +1,39 @@
 
-# Recriar instancias na Evolution API apos reset de volumes
+# Corrigir QR Code - Extrair da resposta de criacao
 
-## Problema
+## Problema identificado
 
-Apos o `docker compose down -v`, o banco de dados interno da Evolution API foi apagado. Todas as 8 instancias que existiam la dentro foram perdidas. No banco de dados da plataforma, elas continuam registradas mas com status `not_found_in_evolution`.
+Na Evolution API v2.3.3, quando uma instancia e criada com `qrcode: true`, o QR code vem **na propria resposta do `/instance/create`**. Porem, o codigo atual **descarta essa resposta** e tenta obter o QR via `/instance/connect` separadamente, que retorna `{"count":0}`.
 
-Os botoes "Reaplicar Webhooks" e "Sincronizacao Completa" **ignoram** instancias com status `not_found_in_evolution` (filtro explicito no codigo), por isso 0 de 8 sao processadas.
+Isso afeta 3 pontos no codigo:
 
-O QR code ja funciona no Manager da Evolution (v2.3.3 esta OK), entao o problema e apenas que as instancias precisam ser recriadas la dentro.
+1. **Level 3 recovery** (linha 1344): `recreateResponse.ok` e verificado, mas o body nunca e lido para extrair o QR
+2. **404 recreate** (linha 799): o create response e verificado como ok, mas o QR da resposta do create nao e extraido diretamente
+3. **global_recreate_instance** (linha 3917): este ja extrai o QR corretamente, mas nao tenta retry se nao veio na primeira resposta
 
 ## Solucao
 
-Adicionar uma funcao "Recriar Instancias Perdidas" que:
+Modificar `supabase/functions/evolution-api/index.ts` em 2 pontos criticos:
 
-1. Seleciona todas as instancias com status `not_found_in_evolution`
-2. Para cada uma, chama `global_create_instance` na Evolution API (apenas cria, sem inserir no banco pois ja existe)
-3. Configura o webhook
-4. Atualiza o status no banco para `awaiting_qr`
+### 1. Level 3 recovery (linhas 1329-1348)
 
-## Alteracoes
+Apos `recreateResponse.ok`, **ler o body e extrair o QR code**. Se o QR vier na resposta do create, retornar imediatamente sem precisar chamar `/instance/connect`.
 
-### 1. Edge Function: `supabase/functions/evolution-api/index.ts`
+### 2. 404 recreate flow (linhas 799-810)
 
-Adicionar nova action `global_recreate_instance` que:
-- Recebe `instanceName` (obrigatorio)
-- Cria a instancia na Evolution API via `/instance/create`
-- Configura settings (groupsIgnore, etc)
-- Configura webhook
-- NAO insere no banco (a row ja existe)
-- Atualiza o status da instancia existente para `awaiting_qr`
-- Retorna sucesso com QR code se disponivel
+Apos o create bem-sucedido, **extrair o QR do response body do create** e retornar imediatamente se disponivel, antes de tentar os 3 connect attempts.
 
-### 2. Hook: `src/hooks/useGlobalAdminInstances.tsx`
-
-Adicionar mutation `recreateAllLostInstances` que:
-- Filtra instancias com status `not_found_in_evolution`
-- Para cada uma, chama a nova action `global_recreate_instance`
-- Exibe progresso e resultado via toast
-- Invalida queries para atualizar a UI
-
-### 3. Pagina: `src/pages/global-admin/GlobalAdminConnections.tsx`
-
-Adicionar botao "Recriar Instancias Perdidas" visivel quando existem instancias com status `not_found_in_evolution`. O botao ficara junto aos existentes (Reaplicar Webhooks, Sincronizacao Completa).
-
-## Fluxo esperado
+## Detalhe tecnico
 
 ```text
-Botao "Recriar Instancias Perdidas" clicado
-  |
-  v
-Para cada instancia "not_found_in_evolution":
-  |
-  +-- POST /instance/create (Evolution API)
-  +-- POST /settings/set (groupsIgnore=true)
-  +-- POST /webhook/set (webhook URL)
-  +-- UPDATE whatsapp_instances SET status='awaiting_qr'
-  |
-  v
-Toast: "6 de 8 instancias recriadas. Escaneie os QR Codes."
-  |
-  v
-Usuarios podem gerar QR code normalmente pela plataforma
+ANTES (bugado):
+  POST /instance/create  -->  response.ok? sim  -->  descarta body  -->  wait 3s  -->  GET /instance/connect  -->  {"count":0}  -->  FALHA
+
+DEPOIS (corrigido):
+  POST /instance/create  -->  response.ok? sim  -->  le body  -->  tem QR?  -->  sim  -->  RETORNA QR
+                                                                          -->  nao  -->  wait 3s  -->  GET /instance/connect (fallback)
 ```
 
-## Escopo
+## Arquivo modificado
 
-- 3 arquivos modificados
-- 1 nova action na edge function (~60 linhas)
-- 1 nova mutation no hook (~40 linhas)
-- 1 novo botao na pagina (~10 linhas)
+- `supabase/functions/evolution-api/index.ts` - 2 blocos alterados (~15 linhas cada)
