@@ -462,7 +462,7 @@ export function useGlobalAdminInstances() {
   // Reapply webhooks on all connected instances
   const reapplyAllWebhooks = useMutation({
     mutationFn: async () => {
-      const connectedInstances = instances.filter((i) => i.status === "connected");
+      const connectedInstances = instances.filter((i) => ["connected", "connecting"].includes(i.status));
       console.log("[useGlobalAdminInstances] Reapplying webhooks on", connectedInstances.length, "instances");
 
       let success = 0;

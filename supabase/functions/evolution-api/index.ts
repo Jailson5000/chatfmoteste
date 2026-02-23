@@ -228,8 +228,11 @@ function extractRejectCallFlag(payload: any): boolean {
   return false;
 }
 
-// Get the webhook URL for this project
-const WEBHOOK_URL = `${Deno.env.get("SUPABASE_URL")}/functions/v1/evolution-webhook`;
+// Get the webhook URL for this project (include auth token in query string)
+const EVOLUTION_WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN") || "";
+const WEBHOOK_URL = EVOLUTION_WEBHOOK_TOKEN
+  ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/evolution-webhook?token=${EVOLUTION_WEBHOOK_TOKEN}`
+  : `${Deno.env.get("SUPABASE_URL")}/functions/v1/evolution-webhook`;
 
 /**
  * Check if a phone number is already connected on another instance.
@@ -1197,7 +1200,8 @@ serve(async (req) => {
 
         console.log(`[Evolution API] Refreshing status for instance: ${body.instanceId}`);
 
-        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+        // Use isGlobalAdmin to allow global admins to refresh any instance
+        const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
         const apiUrl = normalizeUrl(instance.api_url);
 
         const statusResponse = await fetchWithTimeout(`${apiUrl}/instance/connectionState/${instance.instance_name}`, {
