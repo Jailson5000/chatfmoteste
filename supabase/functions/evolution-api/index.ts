@@ -666,6 +666,54 @@ serve(async (req) => {
           qrCode = createData.base64;
         }
 
+        // If no QR code from create response, retry with /instance/connect endpoint
+        // Baileys v7 needs more time to initialize the WebSocket session
+        if (!qrCode) {
+          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect (Baileys v7 init delay)`);
+          const maxRetries = 4;
+          const retryDelayMs = 5000;
+
+          // Initial wait for Baileys to initialize
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              console.log(`[Evolution API] QR retry attempt ${attempt}/${maxRetries} for ${body.instanceName}`);
+              const connectResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${body.instanceName}`, {
+                method: "GET",
+                headers: { apikey: apiKey },
+              });
+
+              if (connectResponse.ok) {
+                const connectData = await connectResponse.json();
+                console.log(`[Evolution API] Connect response attempt ${attempt}:`, JSON.stringify(connectData).substring(0, 200));
+
+                if (connectData.base64) {
+                  qrCode = connectData.base64;
+                  console.log(`[Evolution API] QR code obtained on retry attempt ${attempt}`);
+                  break;
+                } else if (connectData.qrcode?.base64) {
+                  qrCode = connectData.qrcode.base64;
+                  console.log(`[Evolution API] QR code obtained on retry attempt ${attempt}`);
+                  break;
+                }
+              } else {
+                console.warn(`[Evolution API] Connect response not ok on attempt ${attempt}: ${connectResponse.status}`);
+              }
+            } catch (retryError) {
+              console.warn(`[Evolution API] QR retry attempt ${attempt} failed:`, retryError);
+            }
+
+            if (attempt < maxRetries) {
+              await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+            }
+          }
+
+          if (!qrCode) {
+            console.log(`[Evolution API] QR code not available after ${maxRetries} retries. Frontend will handle.`);
+          }
+        }
+
         const instanceId = createData.instance?.instanceId || createData.instanceId || body.instanceName;
 
         console.log(`[Evolution API] Saving instance to database. QR Code available: ${!!qrCode}`);
