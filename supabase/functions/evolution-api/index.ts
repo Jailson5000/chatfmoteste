@@ -2068,13 +2068,13 @@ serve(async (req) => {
                     console.error(`[Evolution API] Retry fetch failed:`, retryErr);
                   }
 
-                  // Retry also failed - mark as CONNECTING (not disconnected) to avoid cascade
-                  console.error(`[Evolution API] Retry also failed for ${instanceId} - marking as connecting`);
+                  // Retry also failed - mark as DISCONNECTED so auto-reconnect cron handles it
+                  console.error(`[Evolution API] Retry also failed for ${instanceId} - marking as disconnected`);
                   await supabaseClient
                     .from("whatsapp_instances")
-                    .update({ status: 'connecting', updated_at: new Date().toISOString() })
+                    .update({ status: 'disconnected', disconnected_since: new Date().toISOString(), updated_at: new Date().toISOString() })
                     .eq("id", instanceId)
-                    .not("status", "in", '("disconnected","connecting")'); // Don't overwrite if already worse or same
+                    .not("status", "in", '("disconnected")'); // Don't overwrite if already disconnected
 
                   // Do NOT call /instance/connect here - let the cron handle it to avoid server overload
                   errorReason = "Conexão temporariamente indisponível. Tentando reconectar...";
@@ -2097,7 +2097,7 @@ serve(async (req) => {
                   .from("messages")
                   .update({ 
                     status: "failed",
-                    content: `❌ ${errorReason}: ${body.message}`,
+                    // Keep original content intact - user will see "failed" status badge in UI
                   })
                   .eq("id", tempMessageId);
                 console.log(`[Evolution API] Message marked as failed: ${errorReason}`, { tempMessageId });
@@ -2128,7 +2128,7 @@ serve(async (req) => {
                 .from("messages")
                 .update({ 
                   status: "failed",
-                  content: `❌ Erro ao enviar: ${body.message}`,
+                  // Keep original content intact - user will see "failed" status badge in UI
                 })
                 .eq("id", tempMessageId);
             }
