@@ -40,7 +40,7 @@ interface EvolutionHealthResult {
   };
 }
 
-const EVOLUTION_TIMEOUT_MS = 10000;
+const EVOLUTION_TIMEOUT_MS = 15000;
 
 async function fetchWithTimeout(
   url: string,
@@ -158,7 +158,7 @@ serve(async (req) => {
       message = `Erro de conexão: ${error}`;
     } else if (response) {
       if (response.ok) {
-        if (latency > 3000) {
+        if (latency > 5000) {
           healthStatus = "unstable";
           message = `API respondendo com latência elevada (${latency}ms)`;
         } else {
