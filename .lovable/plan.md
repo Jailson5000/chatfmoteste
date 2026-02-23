@@ -1,63 +1,79 @@
 
-
-# Correcao: Instancias em Loop Causando Bloqueio do WhatsApp
+# Correcao: Instancias Recriadas Pegam Sessao Antiga do Disco
 
 ## Diagnostico
 
-O problema principal e que as instancias na Evolution API ficam tentando reconectar automaticamente ao WhatsApp a cada 1-2 segundos. Com 7 instancias + 1 fantasma (`inst_a7n22orl`), sao ~14 webhooks/segundo chegando no sistema, e dezenas de tentativas de conexao por minuto ao WhatsApp. O WhatsApp detecta essa atividade repetitiva e bloqueia temporariamente, mostrando "tente mais tarde" ao escanear o QR.
+Ao deletar instancias via API e recria-las com `global_recreate_instance`, a Evolution API v2.2.3 reutiliza os arquivos de sessao do disco (`/evolution/instances/{instanceName}/session*`). Resultado: a instancia vai direto para "connecting" (tentando reconectar com sessao antiga) em vez de gerar um QR code novo.
 
-## Causa Raiz
+A screenshot confirma que `inst_5fjooku6` (que usou `get_qrcode` com recovery Level 2 - logout + connect) gerou QR com sucesso. Ja as instancias recriadas via `global_recreate` nao passam por logout, entao ficam presas.
 
-1. **Instancias orfas na Evolution API** - As instancias foram deletadas anteriormente, mas a Evolution API as recriou automaticamente ou a exclusao nao foi efetiva. Elas continuam tentando reconectar ao WhatsApp em loop infinito.
-2. **`inst_a7n22orl` fantasma** - Deletada do banco de dados mas ainda ativa na Evolution API, gerando erros PGRST116 a cada segundo.
-3. **Threshold de saude muito agressivo** - O health check marca como "Instavel" acima de 3000ms, mas com 7+ instancias em loop, a resposta naturalmente demora mais.
+## Mudancas Tecnicas
 
-## Solucao em 2 Partes
+### Arquivo: `supabase/functions/evolution-api/index.ts`
 
-### Parte 1: Ajustar Health Check (Codigo)
+**Correcao no `global_recreate_instance` (linhas ~3814-3835):**
 
-**Arquivo:** `supabase/functions/evolution-health/index.ts`
+Antes de chamar `/instance/create`, adicionar dois passos:
+1. Tentar `/instance/logout/{instanceName}` (DELETE) para invalidar a sessao
+2. Tentar `/instance/delete/{instanceName}` (DELETE) para remover a instancia e limpar arquivos
+3. Aguardar 2 segundos
+4. Entao chamar `/instance/create`
 
-- **Linha 43**: Aumentar `EVOLUTION_TIMEOUT_MS` de `10000` para `15000`
-- **Linha 161**: Aumentar threshold de latencia de `3000` para `5000`
+```typescript
+// Step 0: Clean up any existing instance (logout + delete to clear session files)
+console.log(`[Evolution API] global_recreate: Cleaning up existing instance ${body.instanceName}...`);
+try {
+  await fetchWithTimeout(`${apiUrl}/instance/logout/${body.instanceName}`, {
+    method: "DELETE",
+    headers: { apikey: globalApiKey },
+  }, 5000);
+} catch (_) { /* ignore - may not exist */ }
 
-Isso evita falsos alarmes de "Instavel" quando o servidor esta sob carga normal.
+try {
+  await fetchWithTimeout(`${apiUrl}/instance/delete/${body.instanceName}`, {
+    method: "DELETE",
+    headers: { apikey: globalApiKey },
+  }, 5000);
+} catch (_) { /* ignore - may not exist */ }
 
-### Parte 2: Limpeza Manual das Instancias (VPS)
+await new Promise(resolve => setTimeout(resolve, 2000));
 
-Essa e a acao mais critica. Todas as instancias precisam ser deletadas da Evolution API para parar o loop de reconexao. Apos a limpeza, aguardar 5+ minutos para o rate limit do WhatsApp expirar, e so entao gerar novos QR codes.
-
-Comandos para executar no VPS:
-
-```bash
-# 1. Verificar quais instancias existem na Evolution API
-curl -s "https://evo.fmoadv.com.br/instance/fetchInstances" \
-  -H "apikey: a3c56030f89efe1e5b4c033308c7e3c8f72d7492ac8bb46947be28df2e06ffed" | jq '.[].instance.instanceName'
-
-# 2. Deletar TODAS as instancias para parar o loop
-for inst in inst_a7n22orl inst_l26f156k inst_s10r2qh8 inst_464pnw5n inst_d92ekkep inst_0gkejsc5 inst_5fjooku6 inst_ea9bfhx3; do
-  echo "Deleting $inst..."
-  curl -s -X DELETE "https://evo.fmoadv.com.br/instance/delete/$inst" \
-    -H "apikey: a3c56030f89efe1e5b4c033308c7e3c8f72d7492ac8bb46947be28df2e06ffed"
-  echo ""
-done
-
-# 3. Confirmar que nao sobrou nenhuma
-curl -s "https://evo.fmoadv.com.br/instance/fetchInstances" \
-  -H "apikey: a3c56030f89efe1e5b4c033308c7e3c8f72d7492ac8bb46947be28df2e06ffed" | jq '.[].instance.instanceName'
+// Step 1: Create instance in Evolution API (original code continues)
 ```
 
-### Apos a Limpeza
+Isso garante que sessoes antigas sejam limpas antes de recriar a instancia.
 
-1. Aguardar **5 minutos** (rate limit do WhatsApp)
-2. Ir em cada empresa no painel e clicar **"Gerar QR Code"**
-3. A edge function vai recriar a instancia na Evolution API com sessao limpa
-4. Escanear o QR imediatamente (expira em ~40s)
+### Acao Manual no VPS (Critica)
+
+Os arquivos de sessao das instancias atuais precisam ser limpos manualmente:
+
+```bash
+# Parar containers, limpar sessoes, reiniciar
+cd /var/www/miauchat  # ou onde esta o docker-compose
+
+# Ver sessoes existentes
+docker exec evolution-api ls -la /evolution/instances/
+
+# Remover sessoes corrompidas de TODAS as instancias
+docker exec evolution-api rm -rf /evolution/instances/inst_*/
+
+# Reiniciar o container para limpar cache em memoria
+docker restart evolution-api
+
+# Aguardar 30 segundos para inicializar
+sleep 30
+
+# Verificar que nao ha instancias residuais
+curl -s "https://evo.fmoadv.com.br/instance/fetchInstances" \
+  -H "apikey: a3c56030f89efe1e5b4c033308c7e3c8f72d7492ac8bb46947be28df2e06ffed"
+```
+
+Apos isso, aguardar 5 minutos e usar "Gerar QR Code" em cada empresa.
+
+### Deploy
+Redeployar a edge function `evolution-api`.
 
 ## Resultado Esperado
-
-- Health check mostrara "Online" para latencias ate 5 segundos
-- Sem mais webhooks em loop apos deletar as instancias
-- WhatsApp permitira novas conexoes apos o periodo de espera
-- QR codes serao gerados com sucesso
-
+1. `global_recreate` faz logout+delete antes de criar, evitando sessoes residuais
+2. Apos limpeza do VPS, todas as instancias geram QR codes limpos
+3. Sem mais loops de "connecting" causados por sessoes corrompidas
