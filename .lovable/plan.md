@@ -1,60 +1,56 @@
 
-# Implementar Modo de Manutencao Funcional
+# Fix: QR Code Connection Failing on Evolution API v2.3.1
 
-## Problema
-O toggle "Modo de Manutencao" no painel do Admin Global salva o valor `maintenance_mode = true` no banco de dados, mas **nenhum componente lê essa configuracao**. Os clientes continuam acessando o sistema normalmente, mesmo com o modo ativado.
+## Problem Identified
 
-## Solucao
+The `get_qrcode` action in the `evolution-api` edge function has an overly aggressive "corrupted session recovery" system with 3 levels of retries (Level 1: 3 retries x 5s, Level 2: logout + 2 retries x 5s, Level 3: delete + recreate + 2 retries x 5s). Total execution time exceeds ~70 seconds, which hits the edge function timeout limit (~60s).
 
-Criar 3 componentes e integrar no fluxo de protecao de rotas:
+Additionally, the version compatibility check on line 1516 only whitelists v2.3.3 and v2.3.5, incorrectly flagging v2.3.1 as "incompatible".
 
-### 1. Hook `useMaintenanceMode`
-- Novo arquivo: `src/hooks/useMaintenanceMode.tsx`
-- Consulta a tabela `system_settings` buscando a chave `maintenance_mode`
-- Faz polling a cada 30 segundos para detectar mudancas em tempo real
-- Retorna `{ isMaintenanceMode, isLoading }`
-- **NAO** requer autenticacao (usa query publica ou acesso anon)
+The real issue: after a fresh Evolution API restart (DB wiped), Baileys v7 needs extra time to initialize WebSocket sessions. The `/instance/connect` endpoint returns `{count:0}` during this period. Instead of waiting patiently, the code cascades through destructive recovery levels (logout, delete+recreate), making things worse.
 
-### 2. Pagina `MaintenancePage`
-- Novo arquivo: `src/pages/MaintenancePage.tsx`
-- Tela fullscreen com icone de ferramenta/engrenagem
-- Exibe mensagem: "Sistema em manutencao. Estamos trabalhando para melhorar sua experiencia."
-- Mostra logo do MiauChat
-- Visual similar as outras paginas de bloqueio (PendingApproval, CompanySuspended)
+## Solution
 
-### 3. Integracao no `ProtectedRoute`
-- Arquivo: `src/components/auth/ProtectedRoute.tsx`
-- Adicionar verificacao de `maintenance_mode` **antes** de todos os outros checks
-- Se `maintenance_mode === true`, renderiza `MaintenancePage`
-- **Excecao**: Administradores Globais (verificados via `is_admin()`) podem continuar acessando normalmente
+Simplify the corrupted session recovery to be fast and non-destructive:
 
-## Sequencia de verificacao no ProtectedRoute
+### Changes to `supabase/functions/evolution-api/index.ts`
+
+1. **Replace the 3-level recovery cascade (lines ~1241-1516)** with a simpler approach:
+   - Level 1: Try `/instance/connect` 3 times with 3-second delays (total ~12s)
+   - If still no QR and state is "connecting", return a **retryable response** (not an error) telling the frontend to poll again
+   - Level 2 (only if state is NOT "connecting"): Single logout + connect attempt
+   - Remove Level 3 entirely (delete+recreate is too destructive for a timing issue)
+
+2. **Fix version compatibility check (line 1516)**: Add v2.3.1 to the list of compatible versions, or better, remove the version-specific check entirely since the recovery logic will be simpler and version-agnostic.
+
+3. **Reduce recovery timeouts**: Each retry should use 8-second timeout max (not 10-15s), and delays between retries should be 3s (not 5s). This keeps total execution under 40 seconds.
+
+### Technical Details
+
+The key insight is that `{count:0}` from `/instance/connect` is NOT a corrupted session -- it's Baileys still initializing. The frontend already has polling logic (pollCount/maxPolls shown in QRCodeDialog). We should let the frontend handle the retry timing instead of blocking the edge function for 70+ seconds.
+
+**New recovery flow:**
 
 ```text
-1. Auth loading?         --> Spinner
-2. Nao autenticado?      --> /auth
-3. MANUTENCAO ATIVA?     --> MaintenancePage (exceto global admins)
-4. Pending approval?     --> PendingApproval
-5. Rejected?             --> CompanyBlocked
-6. Suspended?            --> CompanySuspended
-7. Trial expired?        --> TrialExpired
-8. Subdomain mismatch?   --> TenantMismatch
-9. Must change password? --> /change-password
-10. OK                   --> children
+/instance/connect returns {count:0}
+   |
+   +-> Check connectionState
+   |     |
+   |     +-> "open"/"connected" -> Return success
+   |     +-> "connecting" -> Return {retryable: true} immediately
+   |     +-> other state -> Continue to Level 1
+   |
+   +-> Level 1: 3x connect attempts (3s delay each, ~12s total)
+   |     |
+   |     +-> QR found -> Return success
+   |     +-> No QR -> Continue
+   |
+   +-> Level 2: Logout + 2x connect (3s delay, ~10s total)
+   |     |
+   |     +-> QR found -> Return success
+   |     +-> No QR -> Return {retryable: true, error: "Aguarde..."}
+   |
+   (No Level 3 - no delete/recreate)
 ```
 
-## Detalhes tecnicos
-
-### Hook `useMaintenanceMode`
-- Usa `useQuery` com `queryKey: ["maintenance-mode"]`
-- `refetchInterval: 30000` (30s) para captar desativacao em tempo real
-- Consulta: `supabase.from("system_settings").select("value").eq("key", "maintenance_mode").single()`
-
-### Verificacao de admin no ProtectedRoute
-- Usa o hook `useAdminAuth` ja existente para verificar `is_admin()`
-- Se o usuario for admin global, ignora o bloqueio de manutencao
-
-### Arquivos modificados/criados
-1. **Novo**: `src/hooks/useMaintenanceMode.tsx` (~25 linhas)
-2. **Novo**: `src/pages/MaintenancePage.tsx` (~50 linhas)
-3. **Editado**: `src/components/auth/ProtectedRoute.tsx` - adicionar check de manutencao apos autenticacao
+This keeps total execution under ~30 seconds and lets the client retry via its polling mechanism.
