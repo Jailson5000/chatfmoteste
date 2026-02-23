@@ -1,64 +1,67 @@
 
+## Corrigir Exclusao de Instancia Bloqueada por Conflito de Unicidade
 
-## Corrigir Download de Midia pelo Menu de Acoes
+### Problema
 
-### Problema Encontrado
+Ao tentar excluir a instancia "MiauChat" (e8be455b), o sistema tenta definir `whatsapp_instance_id = NULL` em todos os clientes vinculados. Porem, existe um cliente "Gabrielle Martins" (telefone 556384017428) que ja possui um registro com `whatsapp_instance_id = NULL` na mesma law_firm. Isso viola o indice unico `idx_clients_phone_norm_law_firm_no_instance`, que impede dois clientes com o mesmo telefone e `whatsapp_instance_id IS NULL`.
 
-O botao "Baixar" no menu de acoes da mensagem (tres pontinhos) usa a funcao `handleDownloadMedia` que SEMPRE chama a Evolution API para descriptografar a midia. Isso ignora completamente o `media_url` da mensagem, que frequentemente ja eh uma URL publica do Storage (midia persistida).
+### Dados do Problema
 
-Resultado: quando a midia original do WhatsApp ja expirou (apos ~48h), o download falha com "Falha ao baixar midia" mesmo que a copia esteja disponivel no Storage.
-
-O `DocumentViewer`, `ImageViewer`, `AudioPlayer` e `VideoPlayer` ja tratam isso corretamente - eles verificam se a URL eh publica antes de tentar descriptografar. Mas o menu "Baixar" nao usa essa logica.
+- Law firm: 8a6549cb (MIAUCHAT)
+- Instancia "MIAU" (f3df33db) - conectada, mesmo numero
+- Instancia "MiauChat" (e8be455b) - conectando, instancia duplicada
+- Cliente conflitante: "Gabrielle Martins" (556384017428) existe com instance=NULL e com instance=MiauChat
 
 ### Correcao
 
-**Arquivo: `src/pages/Conversations.tsx` (funcao `handleDownloadMedia`)**
+**Arquivo: `supabase/functions/evolution-api/index.ts` (caso `delete_instance`)**
 
-Adicionar verificacao do `media_url` da mensagem antes de chamar a Evolution API:
+Antes de definir `whatsapp_instance_id = NULL`, o sistema deve:
 
-1. Buscar a mensagem pelo `whatsappMessageId` na lista de mensagens local
-2. Se a mensagem tem `media_url` que eh uma URL publica do Storage, baixar diretamente dela
-3. Se a URL eh de arquivo interno (`internal-chat-files`), gerar signed URL e baixar
-4. Somente como fallback, chamar a Evolution API para descriptografar
+1. Buscar outra instancia ativa da mesma law_firm para reatribuir os clientes
+2. Se existir outra instancia, tentar mover os clientes para ela (ignorando conflitos de unicidade)
+3. Para clientes que nao podem ser movidos (ja existem na instancia destino), simplesmente deleta-los (sao duplicatas)
+4. Somente como fallback, tentar o comportamento atual de definir NULL
 
 ```text
-const handleDownloadMedia = useCallback(async (whatsappMessageId, conversationId, _fileName) => {
-  try {
-    toast({ title: "Baixando midia..." });
+// Dentro do case "delete_instance", ANTES de nullificar clientes:
 
-    // 1. Buscar mensagem local para verificar se ja tem media_url publica
-    const msg = messages.find(m => m.whatsapp_message_id === whatsappMessageId);
-    const mediaUrl = msg?.media_url;
-    
-    // 2. Se tem URL publica do Storage, baixar diretamente
-    if (mediaUrl && isPublicStorageUrl(mediaUrl)) {
-      const response = await fetch(mediaUrl);
-      const blob = await response.blob();
-      // ... gerar nome e baixar via blob
-      return;
-    }
-    
-    // 3. Se eh arquivo interno, usar signed URL
-    if (mediaUrl && (mediaUrl.startsWith('internal-chat-files://') || mediaUrl.includes('/internal-chat-files/'))) {
-      // ... extrair path, gerar signed URL, baixar
-      return;
-    }
+// 1. Buscar outra instancia ativa na mesma law_firm
+const { data: otherInstance } = await supabaseClient
+  .from("whatsapp_instances")
+  .select("id")
+  .eq("law_firm_id", lawFirmId)
+  .neq("id", body.instanceId)
+  .limit(1)
+  .single();
 
-    // 4. Fallback: descriptografar via Evolution API
-    const response = await supabase.functions.invoke("evolution-api", { ... });
-    // ... logica atual
-  }
-});
+if (otherInstance) {
+  // 2. Tentar mover clientes para a outra instancia
+  // Primeiro, identificar clientes que JA existem na outra instancia (mesmo phone)
+  // e deletar os duplicados da instancia sendo removida
+  // Depois, mover os restantes
+}
+
+// 3. Para clientes que nao podem ser movidos, deletar conversations primeiro
+//    e depois deletar o cliente duplicado
+
+// 4. Fallback: tentar NULL com tratamento de erro
 ```
 
-**Arquivo: `src/components/kanban/KanbanChatPanel.tsx` (mesma funcao)**
+A logica detalhada:
 
-Aplicar a mesma correcao na funcao `handleDownloadMedia` do painel Kanban, que tem a mesma logica duplicada.
+- Buscar todos os clientes da instancia a ser deletada
+- Para cada cliente, verificar se ja existe um com mesmo telefone na instancia destino ou com NULL
+- Se existe duplicata: mover conversas para o cliente existente e deletar o duplicado
+- Se nao existe: reatribuir para a outra instancia (ou NULL se nao houver outra)
 
-### O que muda
+### Detalhes Tecnicos
 
-- Download de midias ja persistidas no Storage funciona mesmo quando a midia original do WhatsApp expirou
-- Menos chamadas desnecessarias a Evolution API (mais rapido)
-- Fallback para Evolution API continua funcionando para midias ainda nao persistidas
-- Dois arquivos editados com a mesma correcao
+O codigo na edge function `evolution-api/index.ts` (linhas 1030-1049) sera substituido por uma logica mais robusta que:
 
+1. Usa uma query SQL para identificar conflitos ANTES de tentar o update
+2. Resolve conflitos por merge (mover conversas + deletar duplicata)
+3. Move clientes restantes para outra instancia ativa, se existir
+4. Somente define NULL como ultimo recurso, e trata o erro 23505 graciosamente
+
+Isso resolve tanto o caso imediato (MiauChat) quanto previne o problema para qualquer exclusao futura de instancias com clientes duplicados.
