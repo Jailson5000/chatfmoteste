@@ -1,39 +1,76 @@
 
-# Corrigir QR Code - Extrair da resposta de criacao
+# Corrigir extracao de QR Code da resposta do /instance/create
 
-## Problema identificado
+## Diagnostico
 
-Na Evolution API v2.3.3, quando uma instancia e criada com `qrcode: true`, o QR code vem **na propria resposta do `/instance/create`**. Porem, o codigo atual **descarta essa resposta** e tenta obter o QR via `/instance/connect` separadamente, que retorna `{"count":0}`.
+Os logs mostram claramente o problema:
 
-Isso afeta 3 pontos no codigo:
-
-1. **Level 3 recovery** (linha 1344): `recreateResponse.ok` e verificado, mas o body nunca e lido para extrair o QR
-2. **404 recreate** (linha 799): o create response e verificado como ok, mas o QR da resposta do create nao e extraido diretamente
-3. **global_recreate_instance** (linha 3917): este ja extrai o QR corretamente, mas nao tenta retry se nao veio na primeira resposta
-
-## Solucao
-
-Modificar `supabase/functions/evolution-api/index.ts` em 2 pontos criticos:
-
-### 1. Level 3 recovery (linhas 1329-1348)
-
-Apos `recreateResponse.ok`, **ler o body e extrair o QR code**. Se o QR vier na resposta do create, retornar imediatamente sem precisar chamar `/instance/connect`.
-
-### 2. 404 recreate flow (linhas 799-810)
-
-Apos o create bem-sucedido, **extrair o QR do response body do create** e retornar imediatamente se disponivel, antes de tentar os 3 connect attempts.
-
-## Detalhe tecnico
-
-```text
-ANTES (bugado):
-  POST /instance/create  -->  response.ok? sim  -->  descarta body  -->  wait 3s  -->  GET /instance/connect  -->  {"count":0}  -->  FALHA
-
-DEPOIS (corrigido):
-  POST /instance/create  -->  response.ok? sim  -->  le body  -->  tem QR?  -->  sim  -->  RETORNA QR
-                                                                          -->  nao  -->  wait 3s  -->  GET /instance/connect (fallback)
+```
+Level 3 - Create response keys: instance,hash,webhook,websocket,rabbitmq,nats,sqs,settings,qrcode
 ```
 
-## Arquivo modificado
+O campo `qrcode` EXISTE na resposta, mas a extracao falha porque `qrcode.base64` retorna `undefined`. A estrutura real do objeto `qrcode` na v2.3.3 e diferente do esperado - mas o codigo nunca loga o conteudo real desse campo, entao nao sabemos a estrutura exata.
 
-- `supabase/functions/evolution-api/index.ts` - 2 blocos alterados (~15 linhas cada)
+Alem disso, o `/instance/connect/{name}` continua retornando `{"count":0}`, confirmando que esse endpoint nao funciona de forma confiavel na v2.3.3.
+
+## Solucao em 2 partes
+
+### 1. Adicionar debug log do campo qrcode
+
+Em TODOS os pontos que fazem `/instance/create`, logar `JSON.stringify(recreateData.qrcode).slice(0, 500)` para ver a estrutura real.
+
+### 2. Expandir a funcao de extracao para cobrir todas as estruturas possiveis
+
+Criar uma funcao `extractQrFromCreateResponse(data)` que tenta todas as combinacoes possiveis:
+
+```text
+data.qrcode.base64
+data.qrcode.qrcode          (qrcode aninhado)
+data.qrcode (se for string)
+data.base64
+data.code
+data.qrcode.code             (texto do QR, nao imagem)
+```
+
+E aplica-la em 5 pontos do codigo:
+- `create_instance` (linha 662)
+- `get_qrcode` 404-recreate (linha 805)
+- Level 3 recovery (linha 1371)
+- `global_create_instance` (linha 3885)
+- `global_recreate_instance` (linha 3990)
+
+## Detalhes tecnicos
+
+### Arquivo: `supabase/functions/evolution-api/index.ts`
+
+1. **Nova funcao helper** (adicionar perto da linha 1188, junto ao `extractQrFromResponse` existente):
+
+```typescript
+function extractQrFromCreateResponse(data: any): string | null {
+  // Try qrcode.base64 (expected format)
+  if (data?.qrcode?.base64) return data.qrcode.base64;
+  // Try qrcode.qrcode (nested)
+  if (typeof data?.qrcode?.qrcode === "string" && data.qrcode.qrcode.length > 10) return data.qrcode.qrcode;
+  // Try qrcode as string
+  if (typeof data?.qrcode === "string" && data.qrcode.length > 10) return data.qrcode;
+  // Try top-level base64
+  if (data?.base64) return data.base64;
+  // Try top-level code
+  if (typeof data?.code === "string" && data.code.length > 10) return data.code;
+  // Try qrcode.code (text QR value - can be used to generate image)
+  if (typeof data?.qrcode?.code === "string" && data.qrcode.code.length > 10) return data.qrcode.code;
+  return null;
+}
+```
+
+2. **Debug logs** em cada ponto de criacao: logar o campo `qrcode` completo para diagnosticar a estrutura exata
+
+3. **Substituir** todas as 5 instancias de extracao manual por chamadas a `extractQrFromCreateResponse(createData)`
+
+### Escopo
+
+- 1 arquivo modificado: `supabase/functions/evolution-api/index.ts`
+- 1 nova funcao helper (~12 linhas)
+- 5 blocos de extracao substituidos
+- 5 debug logs adicionados
+- Deploy automatico da edge function
