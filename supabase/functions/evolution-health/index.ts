@@ -97,21 +97,20 @@ serve(async (req) => {
       }
     );
 
-    // Get user from token
+    // Validate JWT using getClaims (local validation, no network call)
     const token = authHeader.replace("Bearer ", "");
-    const {
-      data: { user },
-      error: authError,
-    } = await supabaseUser.auth.getUser(token);
+    const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
 
-    if (authError || !user) {
-      console.error("[Evolution Health] Auth error:", authError?.message);
+    if (claimsError || !claimsData?.claims) {
+      console.error("[Evolution Health] Claims error:", claimsError?.message);
       throw new Error("Invalid authorization token");
     }
 
+    const userId = claimsData.claims.sub as string;
+
     // Check if user is admin
     const { data: adminRole } = await supabaseAdmin.rpc("is_admin", {
-      _user_id: user.id,
+      _user_id: userId,
     });
 
     if (!adminRole) {
