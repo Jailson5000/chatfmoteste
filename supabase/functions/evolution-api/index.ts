@@ -1304,11 +1304,12 @@ serve(async (req) => {
             } catch (_) {}
 
             // ====================================================================
-            // LEVEL 2 - Logout + Connect (only if NOT "connecting")
-            // Single logout + 2 connect attempts = ~10s total
+            // LEVEL 2 - Logout + Delete + Create + Connect (full session cleanup)
+            // Forces Evolution API to remove corrupted session files from disk
             // ====================================================================
-            console.log(`[Evolution API] 🔄 LEVEL 2: Logout + Connect for ${instance.instance_name}`);
+            console.log(`[Evolution API] 🔄 LEVEL 2: Logout + Delete + Recreate for ${instance.instance_name}`);
             
+            // Step 1: Logout (non-fatal)
             try {
               const logoutResp = await fetchWithTimeout(`${apiUrl}/instance/logout/${instance.instance_name}`, {
                 method: "DELETE",
@@ -1319,7 +1320,92 @@ serve(async (req) => {
               console.warn(`[Evolution API] Level 2 - Logout failed (non-fatal):`, e);
             }
 
+            // Step 2: Delete instance to force removal of session files from disk
+            try {
+              const deleteResp = await fetchWithTimeout(`${apiUrl}/instance/delete/${instance.instance_name}`, {
+                method: "DELETE",
+                headers: recoveryHeaders,
+              }, 8000);
+              console.log(`[Evolution API] Level 2 - Delete response: ${deleteResp.status}`);
+            } catch (e) {
+              console.warn(`[Evolution API] Level 2 - Delete failed (non-fatal):`, e);
+            }
+
+            // Step 3: Wait for Evolution API to clean up
             await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Step 4: Recreate instance with webhook config
+            let l2CreateQr: string | null = null;
+            try {
+              const createResp = await fetchWithTimeout(`${apiUrl}/instance/create`, {
+                method: "POST",
+                headers: recoveryHeaders,
+                body: JSON.stringify({
+                  instanceName: instance.instance_name,
+                  token: instance.api_key,
+                  qrcode: true,
+                  integration: "WHATSAPP-BAILEYS",
+                  webhook: buildWebhookConfig(WEBHOOK_URL),
+                }),
+              }, 30000);
+              
+              if (createResp.ok) {
+                const createData = await createResp.json();
+                console.log(`[Evolution API] Level 2 - Instance recreated. Keys: ${Object.keys(createData)}`);
+                l2CreateQr = extractQrFromResponse(createData);
+                if (!l2CreateQr) {
+                  // Try nested qrcode object
+                  l2CreateQr = createData?.qrcode?.base64 || createData?.qrcode?.qrcode || null;
+                }
+                if (l2CreateQr) {
+                  console.log(`[Evolution API] ✅ Level 2 - QR extracted from create response!`);
+                }
+              } else {
+                console.warn(`[Evolution API] Level 2 - Create failed: ${createResp.status}`);
+              }
+            } catch (e: any) {
+              console.warn(`[Evolution API] Level 2 - Create error:`, e?.message);
+            }
+
+            // Step 5: Configure settings (groupsIgnore=true)
+            try {
+              await fetchWithTimeout(`${apiUrl}/settings/set/${instance.instance_name}`, {
+                method: "POST",
+                headers: recoveryHeaders,
+                body: JSON.stringify({
+                  rejectCall: false,
+                  msgCall: "",
+                  groupsIgnore: true,
+                  alwaysOnline: false,
+                  readMessages: false,
+                  readStatus: false,
+                  syncFullHistory: false,
+                }),
+              }, 8000);
+              console.log(`[Evolution API] Level 2 - Settings configured`);
+            } catch (e) {
+              console.warn(`[Evolution API] Level 2 - Settings config failed (non-fatal):`, e);
+            }
+
+            // Step 6: Configure webhook
+            try {
+              await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
+                method: "POST",
+                headers: recoveryHeaders,
+                body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+              }, 8000);
+              console.log(`[Evolution API] Level 2 - Webhook configured`);
+            } catch (e) {
+              console.warn(`[Evolution API] Level 2 - Webhook config failed (non-fatal):`, e);
+            }
+
+            // If QR was extracted from create, return immediately
+            if (l2CreateQr) {
+              return await returnQrSuccess(l2CreateQr, "Level 2 (create)");
+            }
+
+            // Step 7: Wait then try connect to get QR
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
             for (let l2 = 1; l2 <= 2; l2++) {
               console.log(`[Evolution API] Level 2 - connect attempt ${l2}/2...`);
