@@ -1197,12 +1197,14 @@ serve(async (req) => {
                 if (currentState === "connecting") {
                   const { data: dbInstance } = await supabaseClient
                     .from("whatsapp_instances")
-                    .select("awaiting_qr")
+                    .select("awaiting_qr, status")
                     .eq("id", body.instanceId)
                     .single();
 
-                  if (dbInstance?.awaiting_qr) {
-                    console.log(`[Evolution API] ⏳ Instance is "connecting" + awaiting_qr=true. Proceeding to Level 1 recovery to force QR generation.`);
+                  const shouldForceRecovery = dbInstance?.awaiting_qr === true || dbInstance?.status === 'awaiting_qr';
+
+                  if (shouldForceRecovery) {
+                    console.log(`[Evolution API] ⏳ Instance is "connecting" + awaiting_qr/status=awaiting_qr. Proceeding to Level 1 recovery to force QR generation.`);
                     // Nao retorna - continua para o Level 1 recovery abaixo
                   } else {
                     console.log(`[Evolution API] ⏳ Instance is "connecting" - Baileys still initializing. Returning retryable.`);
@@ -1273,16 +1275,30 @@ serve(async (req) => {
                   return await returnConnectedSuccess("Instância reconectada após Level 1");
                 }
                 if (postL1RealState === "connecting") {
-                  console.log(`[Evolution API] ⏳ Still "connecting" after Level 1 - returning retryable`);
-                  return new Response(
-                    JSON.stringify({
-                      success: false,
-                      error: "WhatsApp está inicializando. Aguarde e tente novamente em 10 segundos.",
-                      retryable: true,
-                      connectionState: "connecting",
-                    }),
-                    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-                  );
+                  // Check if we should force Level 2 instead of returning retryable
+                  const { data: postL1Db } = await supabaseClient
+                    .from("whatsapp_instances")
+                    .select("awaiting_qr, status")
+                    .eq("id", body.instanceId)
+                    .single();
+
+                  const shouldForceLevel2 = postL1Db?.awaiting_qr === true || postL1Db?.status === 'awaiting_qr';
+
+                  if (shouldForceLevel2) {
+                    console.log(`[Evolution API] ⏳ Still "connecting" after Level 1 + awaiting_qr=true. Forcing Level 2 (logout + connect).`);
+                    // NAO retorna - continua para Level 2 abaixo
+                  } else {
+                    console.log(`[Evolution API] ⏳ Still "connecting" after Level 1 - returning retryable`);
+                    return new Response(
+                      JSON.stringify({
+                        success: false,
+                        error: "WhatsApp está inicializando. Aguarde e tente novamente em 10 segundos.",
+                        retryable: true,
+                        connectionState: "connecting",
+                      }),
+                      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                    );
+                  }
                 }
               }
             } catch (_) {}
