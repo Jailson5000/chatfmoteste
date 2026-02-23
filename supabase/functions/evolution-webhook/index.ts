@@ -157,6 +157,143 @@ async function recordTTSUsage(
 }
 
 /**
+ * Persist media to Supabase Storage so it remains available after WhatsApp CDN URLs expire (~48h).
+ * Downloads the media via Evolution API's getBase64FromMediaMessage endpoint and uploads to chat-media bucket.
+ * Returns the permanent public URL or null if persistence fails (caller should fall back to original URL).
+ */
+async function persistMediaToStorage(
+  supabaseClient: any,
+  evolutionBaseUrl: string,
+  evolutionApiKey: string,
+  instanceName: string,
+  messageKey: any,
+  messagePayload: any,
+  lawFirmId: string,
+  conversationId: string,
+  messageId: string,
+  mimeType: string
+): Promise<string | null> {
+  try {
+    if (!evolutionBaseUrl || !evolutionApiKey || !instanceName) {
+      logDebug('MEDIA_PERSIST', 'Missing Evolution API config, skipping persistence', {});
+      return null;
+    }
+
+    const endpoint = `${evolutionBaseUrl}/chat/getBase64FromMediaMessage/${instanceName}`;
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': evolutionApiKey,
+      },
+      body: JSON.stringify({
+        message: { key: messageKey, message: messagePayload },
+        convertToMp4: false,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      logDebug('MEDIA_PERSIST', 'Evolution API returned error', { status: response.status, error: errText.slice(0, 200) });
+      return null;
+    }
+
+    const mediaData = await response.json();
+    const base64Data = mediaData.base64;
+
+    if (!base64Data) {
+      logDebug('MEDIA_PERSIST', 'No base64 data returned from Evolution API', {});
+      return null;
+    }
+
+    // Convert base64 to Uint8Array
+    const binaryStr = atob(base64Data);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+
+    // Map mimeType to file extension
+    const extMap: Record<string, string> = {
+      'application/pdf': '.pdf',
+      'image/jpeg': '.jpg',
+      'image/png': '.png',
+      'image/gif': '.gif',
+      'image/webp': '.webp',
+      'audio/ogg': '.ogg',
+      'audio/ogg; codecs=opus': '.ogg',
+      'audio/mpeg': '.mp3',
+      'audio/mp4': '.m4a',
+      'audio/aac': '.aac',
+      'video/mp4': '.mp4',
+      'video/3gpp': '.3gp',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+      'application/msword': '.doc',
+      'application/vnd.ms-excel': '.xls',
+      'text/plain': '.txt',
+      'text/csv': '.csv',
+    };
+    
+    // Normalize mimeType for lookup (remove parameters like "; codecs=opus")
+    const baseMime = mimeType.split(';')[0].trim().toLowerCase();
+    const ext = extMap[mimeType] || extMap[baseMime] || '.bin';
+
+    // Safe message ID for file path (remove special chars)
+    const safeMessageId = messageId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const storagePath = `${lawFirmId}/${conversationId}/${safeMessageId}${ext}`;
+
+    // Upload to chat-media bucket
+    const { error: uploadError } = await supabaseClient.storage
+      .from('chat-media')
+      .upload(storagePath, bytes, {
+        contentType: baseMime || 'application/octet-stream',
+        upsert: true,
+      });
+
+    if (uploadError) {
+      logDebug('MEDIA_PERSIST', 'Storage upload failed', { error: uploadError.message, path: storagePath });
+      return null;
+    }
+
+    // Get public URL
+    const { data: publicUrlData } = supabaseClient.storage
+      .from('chat-media')
+      .getPublicUrl(storagePath);
+
+    const publicUrl = publicUrlData?.publicUrl;
+    
+    if (publicUrl) {
+      logDebug('MEDIA_PERSIST', 'Media persisted successfully', { 
+        path: storagePath, 
+        mimeType: baseMime,
+        sizeBytes: bytes.length,
+      });
+    }
+
+    return publicUrl || null;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      logDebug('MEDIA_PERSIST', 'Media persistence timed out (15s)', { messageId });
+    } else {
+      logDebug('MEDIA_PERSIST', 'Error persisting media', { 
+        error: err instanceof Error ? err.message : String(err),
+        messageId,
+      });
+    }
+    return null;
+  }
+}
+
+/**
  * Record AI conversation usage when AI first assumes a conversation in current billing period.
  * Business Rule: 1 conversation = 1 count, regardless of message count.
  * Only counts once per conversation per billing period.
@@ -5422,6 +5559,50 @@ serve(async (req) => {
             logDebug('CTWA', 'Ad metadata saved successfully', { 
               requestId,
               conversationId: conversation.id 
+            });
+          }
+        }
+
+        // ========================================================================
+        // MEDIA PERSISTENCE: Download from WhatsApp CDN and save to Storage
+        // This ensures media remains accessible after the CDN URL expires (~48h)
+        // ========================================================================
+        if (mediaUrl && ['image', 'document', 'audio', 'video', 'ptt', 'sticker'].includes(messageType) && !isFromMe) {
+          try {
+            const evolutionBaseUrlRaw = Deno.env.get('EVOLUTION_BASE_URL') ?? '';
+            const evolutionBaseUrl = evolutionBaseUrlRaw.replace(/\/+$/, '');
+            const evolutionApiKey = Deno.env.get('EVOLUTION_GLOBAL_API_KEY') ?? '';
+
+            const persistedUrl = await persistMediaToStorage(
+              supabaseClient,
+              evolutionBaseUrl,
+              evolutionApiKey,
+              instance.instance_name,
+              data.key,
+              data.message,
+              conversation.law_firm_id,
+              conversation.id,
+              data.key.id,
+              mediaMimeType
+            );
+
+            if (persistedUrl) {
+              logDebug('MEDIA_PERSIST', 'Replaced temporary URL with permanent Storage URL', {
+                requestId,
+                messageType,
+                originalUrl: mediaUrl.substring(0, 60) + '...',
+              });
+              mediaUrl = persistedUrl;
+            } else {
+              logDebug('MEDIA_PERSIST', 'Persistence failed, keeping original URL as fallback', {
+                requestId,
+                messageType,
+              });
+            }
+          } catch (persistError) {
+            logDebug('MEDIA_PERSIST', 'Unexpected error during persistence, keeping original URL', {
+              requestId,
+              error: persistError instanceof Error ? persistError.message : String(persistError),
             });
           }
         }
