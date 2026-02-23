@@ -1,67 +1,114 @@
 
-## Corrigir Exclusao de Instancia Bloqueada por Conflito de Unicidade
+
+## Remover Movimentacao Automatica e Mostrar Aviso ao Abrir Conversa
 
 ### Problema
 
-Ao tentar excluir a instancia "MiauChat" (e8be455b), o sistema tenta definir `whatsapp_instance_id = NULL` em todos os clientes vinculados. Porem, existe um cliente "Gabrielle Martins" (telefone 556384017428) que ja possui um registro com `whatsapp_instance_id = NULL` na mesma law_firm. Isso viola o indice unico `idx_clients_phone_norm_law_firm_no_instance`, que impede dois clientes com o mesmo telefone e `whatsapp_instance_id IS NULL`.
+Quando uma instancia eh excluida, o sistema move automaticamente os clientes para outra instancia ou seta NULL. O comportamento desejado eh:
 
-### Dados do Problema
+1. **Nao mover automaticamente** - apenas setar NULL e guardar a referencia em `last_whatsapp_instance_id`
+2. **Ao abrir a conversa**, mostrar um banner informando que o cliente estava em uma instancia excluida
+3. **Dar a opcao de mover** para outra instancia ativa, usando o mesmo fluxo de transferencia de instancia ja existente
 
-- Law firm: 8a6549cb (MIAUCHAT)
-- Instancia "MIAU" (f3df33db) - conectada, mesmo numero
-- Instancia "MiauChat" (e8be455b) - conectando, instancia duplicada
-- Cliente conflitante: "Gabrielle Martins" (556384017428) existe com instance=NULL e com instance=MiauChat
+### Correcoes
 
-### Correcao
+**1. Edge Function `evolution-api/index.ts` - Simplificar `delete_instance`**
 
-**Arquivo: `supabase/functions/evolution-api/index.ts` (caso `delete_instance`)**
+Remover toda a logica de "smart reassignment" (linhas ~1030-1220) que faz merge automatico de clientes e conversas. Substituir por uma logica simples:
 
-Antes de definir `whatsapp_instance_id = NULL`, o sistema deve:
+- Setar `whatsapp_instance_id = NULL` e `last_whatsapp_instance_id = instanceId` nos clientes
+- Setar `whatsapp_instance_id = NULL` e `last_whatsapp_instance_id = instanceId` nas conversas
+- Tratar o erro de unicidade (23505) graciosamente: se um cliente ja existe com NULL, simplesmente pular (nao falhar a exclusao inteira)
+- A estrategia: usar SQL direto via RPC ou tratar erros individualmente
 
-1. Buscar outra instancia ativa da mesma law_firm para reatribuir os clientes
-2. Se existir outra instancia, tentar mover os clientes para ela (ignorando conflitos de unicidade)
-3. Para clientes que nao podem ser movidos (ja existem na instancia destino), simplesmente deleta-los (sao duplicatas)
-4. Somente como fallback, tentar o comportamento atual de definir NULL
+Para resolver o conflito de unicidade ao setar NULL, a abordagem sera:
+- Tentar o update em batch
+- Se falhar com erro 23505, processar cliente por cliente: para cada conflito, manter o cliente existente e mover as conversas do duplicado para ele, depois deletar o duplicado
+- Isso so acontece para o caso especifico de clientes duplicados (mesmo telefone com NULL)
 
-```text
-// Dentro do case "delete_instance", ANTES de nullificar clientes:
+**2. Frontend `Conversations.tsx` - Melhorar o banner de instancia excluida**
 
-// 1. Buscar outra instancia ativa na mesma law_firm
-const { data: otherInstance } = await supabaseClient
-  .from("whatsapp_instances")
-  .select("id")
-  .eq("law_firm_id", lawFirmId)
-  .neq("id", body.instanceId)
-  .limit(1)
-  .single();
+O banner atual (linha ~4440) ja detecta quando `instanceDisconnectedInfo.deleted === true`, mas:
 
-if (otherInstance) {
-  // 2. Tentar mover clientes para a outra instancia
-  // Primeiro, identificar clientes que JA existem na outra instancia (mesmo phone)
-  // e deletar os duplicados da instancia sendo removida
-  // Depois, mover os restantes
-}
+- Atualmente so mostra texto: "WhatsApp sem conexao. A conexao foi excluida ou desvinculada."
+- **Mudar** para mostrar um banner amarelo/laranja (nao vermelho) com a mensagem: "Este cliente estava vinculado a uma conexao que foi excluida. Selecione outra conexao para continuar."
+- **Adicionar um Select** (dropdown) com as instancias ativas disponiveis, usando o mesmo mecanismo de `changeWhatsAppInstance.mutate()` que ja existe no header
+- Quando o usuario selecionar uma instancia, disparar a mesma logica de transferencia (com verificacao de conflito)
 
-// 3. Para clientes que nao podem ser movidos, deletar conversations primeiro
-//    e depois deletar o cliente duplicado
+**3. Frontend - Garantir que o Select de instancia no header funciona para conversas orfas**
 
-// 4. Fallback: tentar NULL com tratamento de erro
-```
-
-A logica detalhada:
-
-- Buscar todos os clientes da instancia a ser deletada
-- Para cada cliente, verificar se ja existe um com mesmo telefone na instancia destino ou com NULL
-- Se existe duplicata: mover conversas para o cliente existente e deletar o duplicado
-- Se nao existe: reatribuir para a outra instancia (ou NULL se nao houver outra)
+O select de instancia no header (linha ~3942) ja aparece quando `instanceDisconnectedInfo` existe. O valor atual sera vazio ("") quando `whatsapp_instance_id` eh NULL, entao o usuario ja pode selecionar uma nova instancia por ali tambem. Verificar que isso funciona corretamente.
 
 ### Detalhes Tecnicos
 
-O codigo na edge function `evolution-api/index.ts` (linhas 1030-1049) sera substituido por uma logica mais robusta que:
+**Edge Function (`supabase/functions/evolution-api/index.ts`):**
 
-1. Usa uma query SQL para identificar conflitos ANTES de tentar o update
-2. Resolve conflitos por merge (mover conversas + deletar duplicata)
-3. Move clientes restantes para outra instancia ativa, se existir
-4. Somente define NULL como ultimo recurso, e trata o erro 23505 graciosamente
+Substituir linhas ~1030-1220 (toda a logica de smart reassignment) por:
 
-Isso resolve tanto o caso imediato (MiauChat) quanto previne o problema para qualquer exclusao futura de instancias com clientes duplicados.
+```text
+// Simple approach: set NULL with last_whatsapp_instance_id tracking
+// Handle uniqueness conflicts by merging only conflicting records
+
+// 1. Try batch update for clients
+const { error: clientsError } = await supabaseClient
+  .from("clients")
+  .update({ 
+    whatsapp_instance_id: null, 
+    last_whatsapp_instance_id: body.instanceId 
+  })
+  .eq("whatsapp_instance_id", body.instanceId)
+  .eq("law_firm_id", lawFirmId);
+
+if (clientsError?.code === "23505") {
+  // Uniqueness conflict - process individually
+  // Fetch clients, for each one that conflicts:
+  // - Find existing client with same phone + NULL instance
+  // - Move conversations/tags/actions to existing client
+  // - Delete the duplicate
+  // - Then retry the batch update
+}
+
+// 2. Same for conversations
+const { error: convsError } = await supabaseClient
+  .from("conversations")
+  .update({
+    whatsapp_instance_id: null,
+    last_whatsapp_instance_id: body.instanceId
+  })
+  .eq("whatsapp_instance_id", body.instanceId)
+  .eq("law_firm_id", lawFirmId);
+
+// Handle conversation conflicts similarly
+```
+
+**Frontend (`src/pages/Conversations.tsx`):**
+
+No banner de instancia excluida (~linha 4440), adicionar um Select dropdown:
+
+```text
+// Change from red banner to amber/warning banner
+// Add instance selector dropdown
+{instanceDisconnectedInfo?.deleted && (
+  <div className="... bg-amber-500/10 text-amber-600 ...">
+    <span>
+      <AlertTriangle />
+      Este cliente estava em uma conexao excluida. Selecione outra:
+    </span>
+    <Select onValueChange={(value) => {
+      // Use same changeWhatsAppInstance logic
+      // Check for conflicts, show dialog if needed
+    }}>
+      {whatsappInstances
+        .filter(i => i.status === 'connected')
+        .map(inst => <SelectItem .../>)}
+    </Select>
+  </div>
+)}
+```
+
+### Resumo
+
+- Edge function: simplificar para apenas NULL + tracking (sem mover automatico)
+- Frontend: banner amarelo com dropdown para escolher instancia manualmente
+- Reutilizar toda a logica de transferencia de instancia ja existente
+- Conflitos de unicidade tratados apenas no caso de duplicatas reais (merge + delete)
