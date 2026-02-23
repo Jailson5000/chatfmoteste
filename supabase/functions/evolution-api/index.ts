@@ -1902,10 +1902,54 @@ serve(async (req) => {
               
               if (!mediaResponse.ok) {
                 console.error(`[Evolution API] Media send failed:`, mediaResponseText);
+                
+                // Check for Connection Closed - retry once after 3s
+                let mediaIsConnectionClosed = false;
+                try {
+                  const mediaErrJson = JSON.parse(mediaResponseText);
+                  const mediaErrMsgs = mediaErrJson?.response?.message || mediaErrJson?.message || [];
+                  const mediaErrArray = Array.isArray(mediaErrMsgs) ? mediaErrMsgs : [mediaErrMsgs];
+                  mediaIsConnectionClosed = mediaErrArray.some(
+                    (m: unknown) => typeof m === 'string' && m.includes('Connection Closed')
+                  );
+                } catch { /* ignore parse errors */ }
+
+                if (mediaIsConnectionClosed && instanceId) {
+                  console.warn(`[Evolution API] Media Connection Closed for ${instanceId} - retrying in 3s...`);
+                  await new Promise(resolve => setTimeout(resolve, 3000));
+                  try {
+                    const mediaRetry = await fetch(mediaEndpoint, {
+                      method: "POST",
+                      headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                      body: JSON.stringify(mediaPayload),
+                    });
+                    if (mediaRetry.ok) {
+                      const retryText = await mediaRetry.text();
+                      let retryData: Record<string, unknown> = {};
+                      try { retryData = JSON.parse(retryText); } catch { /* */ }
+                      const retryMsgId = (retryData as any).key?.id || (retryData as any).messageId || (retryData as any).id || crypto.randomUUID();
+                      console.log(`[Evolution API] Media retry succeeded! whatsapp_message_id: ${retryMsgId}`);
+                      if (conversationId) {
+                        await supabaseClient.from("messages")
+                          .update({ whatsapp_message_id: retryMsgId, status: "sent", message_type: mediaTypeRaw.toLowerCase() as any, content: caption || `[${mediaTypeRaw}]`, media_url: mediaUrl })
+                          .eq("id", tempMessageId);
+                      }
+                      return; // Success on retry
+                    }
+                  } catch (retryErr) {
+                    console.error(`[Evolution API] Media retry fetch failed:`, retryErr);
+                  }
+                  // Retry failed - mark as connecting
+                  await supabaseClient.from("whatsapp_instances")
+                    .update({ status: 'connecting', updated_at: new Date().toISOString() })
+                    .eq("id", instanceId)
+                    .not("status", "in", '("disconnected","connecting")');
+                }
+
                 if (conversationId) {
                   await supabaseClient
                     .from("messages")
-                    .update({ status: "failed", content: `❌ Falha ao enviar mídia: ${caption || mediaTypeRaw}` })
+                    .update({ status: "failed", content: `❌ ${mediaIsConnectionClosed ? 'Conexão temporariamente indisponível' : 'Falha ao enviar mídia'}: ${caption || mediaTypeRaw}` })
                     .eq("id", tempMessageId);
                 }
                 return;
@@ -1995,30 +2039,45 @@ serve(async (req) => {
                 );
 
                 if (isConnectionClosed && instanceId) {
-                  console.error(`[Evolution API] Connection Closed detected for instance ${instanceId} - marking as disconnected`);
-                  // Update instance status in DB to reflect reality
+                  // RETRY: Connection Closed is often transient - wait 3s and try again
+                  console.warn(`[Evolution API] Connection Closed for ${instanceId} - retrying in 3s...`);
+                  await new Promise(resolve => setTimeout(resolve, 3000));
+
+                  try {
+                    const retryResponse = await fetch(
+                      `${apiUrl}/message/sendText/${instance.instance_name}`,
+                      {
+                        method: "POST",
+                        headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+                        body: JSON.stringify(sendPayload),
+                      }
+                    );
+
+                    if (retryResponse.ok) {
+                      const retryData = await retryResponse.json();
+                      const retryWhatsAppId = retryData.key?.id || retryData.messageId || retryData.id;
+                      console.log(`[Evolution API] Retry succeeded! whatsapp_message_id: ${retryWhatsAppId}`);
+                      if (conversationId && retryWhatsAppId) {
+                        await supabaseClient.from("messages")
+                          .update({ whatsapp_message_id: retryWhatsAppId, status: "sent" })
+                          .eq("id", tempMessageId);
+                      }
+                      return; // Success on retry - don't mark instance
+                    }
+                  } catch (retryErr) {
+                    console.error(`[Evolution API] Retry fetch failed:`, retryErr);
+                  }
+
+                  // Retry also failed - mark as CONNECTING (not disconnected) to avoid cascade
+                  console.error(`[Evolution API] Retry also failed for ${instanceId} - marking as connecting`);
                   await supabaseClient
                     .from("whatsapp_instances")
-                    .update({ 
-                      status: 'disconnected', 
-                      disconnected_since: new Date().toISOString(),
-                      updated_at: new Date().toISOString(),
-                    })
-                    .eq("id", instanceId);
-                  
-                  // Attempt automatic reconnection in background
-                  try {
-                    const connectUrl = `${apiUrl}/instance/connect/${encodeURIComponent(instance.instance_name)}`;
-                    console.log(`[Evolution API] Attempting auto-reconnect: ${connectUrl}`);
-                    await fetch(connectUrl, {
-                      method: "GET",
-                      headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-                    });
-                  } catch (reconnectErr) {
-                    console.error(`[Evolution API] Auto-reconnect failed:`, reconnectErr);
-                  }
-                  
-                  errorReason = "Conexão WhatsApp perdida. Reconectando automaticamente...";
+                    .update({ status: 'connecting', updated_at: new Date().toISOString() })
+                    .eq("id", instanceId)
+                    .not("status", "in", '("disconnected","connecting")'); // Don't overwrite if already worse or same
+
+                  // Do NOT call /instance/connect here - let the cron handle it to avoid server overload
+                  errorReason = "Conexão temporariamente indisponível. Tentando reconectar...";
                 } else if (Array.isArray(errorMessages)) {
                   // Check for "number not on WhatsApp" error
                   const notOnWhatsApp = errorMessages.find((m: any) => m.exists === false);
