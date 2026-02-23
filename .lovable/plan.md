@@ -1,36 +1,91 @@
 
-## Corrigir Status das Instancias Travadas + refresh_status do Admin Global
 
-### Problema 1: refresh_status nao funciona para Admin Global
+## Correcao Critica: Mensagens Nao Chegam + Status Travado em "Conectando"
 
-A funcao `refresh_status` na Edge Function `evolution-api` chama `getInstanceById(supabaseClient, lawFirmId, body.instanceId)` **sem passar o parametro `isGlobalAdmin`**. Como o admin global nao pertence ao law_firm das instancias, o filtro `law_firm_id` causa "Instance not found" para quase todas.
+### Diagnostico Definitivo
 
-**Correcao**: Passar `isGlobalAdmin` na chamada do `refresh_status`, igual ja e feito no `refresh_phone` (linha 1256).
+Apos analise profunda dos logs e do codigo, foram identificados 3 problemas interligados:
 
-### Problema 2: Webhook URL sem token de autenticacao
+**Problema 1 - Mensagens nao chegam**: O botao "Reaplicar Webhooks" NUNCA foi executado com sucesso (nao ha logs de `global_configure_webhook`). A configuracao de webhook no lado da Evolution API pode estar incompleta, sem incluir o evento `MESSAGES_UPSERT`. Por isso, apesar dos eventos de `connection.update` chegarem, nenhum evento de mensagem e recebido.
 
-A funcao `buildWebhookConfig` configura a URL do webhook como `https://...supabase.co/functions/v1/evolution-webhook` **sem incluir o token de autenticacao na query string**. A Evolution API envia webhooks duplicados (comportamento conhecido), e o webhook que nao tem o token e rejeitado. Para as instancias `inst_l26f156k` e `inst_n5572v68`, os eventos `open` foram perdidos e so os `connecting` foram processados.
+**Problema 2 - Status fica travado em "connecting"**: Existe uma condicao de corrida (race condition) no webhook handler. O `sync-evolution-instances` atualiza o status para `connected`, mas milissegundos depois, um evento `connecting` chega via webhook, le o status antigo do banco e sobrescreve de volta para `connecting`. O codigo existente que ignora `connecting` quando status e `connected` (linha 4146) nao protege contra este cenario de timing.
 
-**Correcao**: Alterar `buildWebhookConfig` para incluir `?token=EVOLUTION_WEBHOOK_TOKEN` na URL, e depois reaplicar webhooks.
+**Problema 3 - Bug no updatePayload**: No handler de `connection.update`, quando o estado e `close`, o codigo tenta acessar `updatePayload` na linha 4163 antes de ser declarado na linha 4170. Isso causa um ReferenceError (temporal dead zone) e impede o processamento correto de desconexoes.
 
-### Problema 3: Reaplicar Webhooks ignora instancias "connecting"
+### Correcoes Planejadas
 
-O hook `useGlobalAdminInstances` filtra apenas instancias com `status === "connected"` para reaplicar webhooks. Instancias travadas como "connecting" sao ignoradas.
+**Arquivo 1: `supabase/functions/evolution-webhook/index.ts`**
 
-**Correcao**: Incluir instancias com status "connecting" no filtro de reaplicacao.
+Correcao A - Mover declaracao de `updatePayload` para ANTES do switch de estados (antes da linha 4130):
+```text
+// Mover de linha 4170 para antes da linha 4130
+const updatePayload: Record<string, unknown> = { 
+  updated_at: new Date().toISOString() 
+};
+// O campo 'status' sera adicionado ao final do switch
+```
 
-### Detalhes tecnicos
+Correcao B - Proteger contra race condition na atualizacao de `connecting`:
+Na linha 4274, quando `dbStatus === 'connecting'`, adicionar `.neq('status', 'connected')` para que o UPDATE so aconteca se o status atual nao for `connected`:
+```text
+// Linha 4274 - Atualizar de:
+const { error: updateError } = await supabaseClient
+  .from('whatsapp_instances')
+  .update(updatePayload)
+  .eq('id', instance.id);
 
-**Arquivo 1**: `supabase/functions/evolution-api/index.ts`
-- Linha ~1200: Adicionar `isGlobalAdmin` na chamada `getInstanceById`
-- Linha ~177-192: Alterar `buildWebhookConfig` para receber e incluir o token na URL
+// Para (quando dbStatus === 'connecting'):
+let updateQuery = supabaseClient
+  .from('whatsapp_instances')
+  .update(updatePayload)
+  .eq('id', instance.id);
+  
+// Nao permitir downgrade de 'connected' para 'connecting'
+if (dbStatus === 'connecting') {
+  updateQuery = updateQuery.neq('status', 'connected');
+}
 
-**Arquivo 2**: `src/hooks/useGlobalAdminInstances.tsx`
-- Linha do `reapplyAllWebhooks`: Mudar filtro de `status === "connected"` para incluir `"connecting"` tambem
+const { error: updateError } = await updateQuery;
+```
+
+**Arquivo 2: `src/hooks/useGlobalAdminInstances.tsx`**
+
+Correcao C - Incluir TODOS os status no filtro de reaplicacao e chamar sync apos:
+```text
+// Linha 465 - Mudar de:
+const connectedInstances = instances.filter((i) => 
+  ["connected", "connecting"].includes(i.status));
+
+// Para:
+const targetInstances = instances.filter((i) => 
+  !["not_found_in_evolution"].includes(i.status));
+```
+
+Correcao D - Apos reaplicar webhooks, chamar `sync-evolution-instances` para forcar sincronizacao de status:
+```text
+// No onSuccess (linha 494), apos o toast:
+queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+
+// Chamar sync apos 3 segundos (tempo para Evolution API processar os webhooks)
+setTimeout(async () => {
+  await supabase.functions.invoke("sync-evolution-instances");
+  queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+}, 3000);
+```
+
+### Sequencia de execucao
+
+1. Corrigir o bug do `updatePayload` (temporal dead zone)
+2. Adicionar protecao contra race condition no UPDATE
+3. Atualizar filtro e adicionar sync automatico no reapply
+4. Fazer deploy da edge function `evolution-webhook`
+5. Fazer deploy da edge function `evolution-api` (se necessario)
 
 ### Resultado esperado
 
-1. O admin global conseguira atualizar o status de todas as instancias via "Refresh Status"
-2. Os webhooks serao configurados com autenticacao correta, garantindo que eventos `open` sejam processados
-3. Instancias travadas como "connecting" tambem terao seus webhooks reaplicados
-4. Apos as correcoes, clicar "Reaplicar Webhooks" deve resolver o status de `inst_l26f156k` e `inst_n5572v68`
+1. Ao clicar "Reaplicar Webhooks", TODAS as instancias terao seus webhooks configurados com a URL correta (com token) e com TODOS os eventos (incluindo MESSAGES_UPSERT)
+2. Apos reaplicacao, o sync automatico atualizara os status para `connected`
+3. A protecao contra race condition impedira que eventos `connecting` sobrescrevam o status `connected`
+4. Mensagens voltarao a chegar pelo webhook
+5. O bot voltara a responder normalmente
+
