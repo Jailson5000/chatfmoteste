@@ -1,120 +1,152 @@
 
-## Corrigir Instancias Conectadas que Nao Enviam/Recebem Mensagens
 
-### Diagnostico Completo
+## Corrigir Sincronizacao de Status das Instancias WhatsApp
 
-Analisando os logs, banco de dados e codigo, identifiquei 3 problemas interligados:
+### Problema Raiz Identificado (com provas)
 
-**Problema 1: Guard excessivo no webhook mascara desconexoes reais**
+Testei as instancias diretamente chamando a Edge Function `refresh_status` e obtive os seguintes resultados:
 
-No `evolution-webhook`, linhas 4288-4296, quando o banco mostra uma instancia como `connected` e a Evolution API envia um evento `connecting`, o webhook faz um `return` imediato sem processar nada. Isso foi adicionado para evitar "flickering" na UI, mas tem um efeito colateral grave:
+- `inst_464pnw5n` (WhatsApp Central Atendimento) - Evolution retorna `state: "close"` - marcado como `disconnected`
+- `inst_5fjooku6` (FMOANTIGO63) - Evolution retorna `state: "close"` - marcado como `disconnected`
+- `inst_7sw6k99c` (MIAU) - Evolution retorna `state: "connecting"` - marcado como `connecting`
 
-- Quando a sessao WhatsApp cai e a Evolution API tenta reconectar, ela envia eventos `connecting`
-- Nosso webhook ignora esses eventos porque o banco diz `connected`
-- O banco fica mostrando `connected` para uma instancia que NAO esta conectada
-- Nenhuma mensagem chega (webhook so recebe `connection.update`, zero `messages.upsert`)
-- Ao tentar enviar, falha com "Connection Closed"
+Porem, o painel Manager da Evolution API mostra essas mesmas instancias como "Connected". Isso acontece porque:
 
-Os logs confirmam: TODAS as instancias estao recebendo apenas `connection.update` com `state: connecting`, e o webhook diz "Ignoring connecting state - instance already connected".
+**O endpoint `connectionState` da Evolution API v2.3+ e INSTAVEL** - ele retorna dados desatualizados (stale). O painel Manager da Evolution usa o endpoint `fetchInstances` que retorna o `connectionStatus` real.
 
-**Problema 2: Mensagem do usuario e destruida no erro**
-
-Quando o envio falha, o conteudo original da mensagem e substituido por:
+O codigo atual do `refresh_status` usa APENAS o endpoint `connectionState`:
+```text
+GET /instance/connectionState/{instanceName}
 ```
-"Conexao WhatsApp perdida. Reconectando automaticamente...: <mensagem original>"
+
+Mas deveria usar o `fetchInstances` que e o mesmo endpoint que o Manager UI usa:
+```text
+GET /instance/fetchInstances?instanceName={instanceName}
 ```
-Isso sobrescreve o campo `content` da mensagem, destruindo o texto original do usuario na interface.
 
-**Problema 3: Retry de 3s nao e suficiente quando a instancia esta genuinamente desconectada**
+Este endpoint retorna `connectionStatus: "open"` quando conectado, que e o status correto.
 
-O retry com delay de 3 segundos funciona para erros transientes rapidos, mas quando a instancia perdeu a sessao WhatsApp, 3 segundos nao sao suficientes para reconectar.
+### Correcao
 
-### Solucao
+**Arquivo: `supabase/functions/evolution-api/index.ts`**
 
-**Arquivo 1: `supabase/functions/evolution-webhook/index.ts`**
+Reescrever o case `refresh_status` (linhas 1279-1333) para:
 
-Substituir o guard nas linhas 4288-4296 por uma logica baseada em tempo. Em vez de ignorar completamente o `connecting` quando o banco diz `connected`, verificar ha quanto tempo a instancia esta `connected`. Se a ultima atualizacao do status foi ha mais de 60 segundos, permitir a transicao para `connecting` (desconexao real). Se foi ha menos de 60 segundos, manter o guard (reconexao rapida normal da Evolution API).
+1. Usar `fetchInstances?instanceName=X` como endpoint PRIMARIO (mesmo que o Manager UI)
+2. Manter `connectionState` como FALLBACK caso fetchInstances falhe
+3. Adicionar logging detalhado da resposta da Evolution API para diagnostico futuro
+4. Quando o status real for `connected`, tambem limpar flags de desconexao (disconnected_since, awaiting_qr)
 
 ```text
-// ANTES (bugado - mascara desconexoes reais):
-} else if (instance.status === 'connected') {
-  logDebug('CONNECTION', 'Ignoring connecting state...');
-  return new Response(...); // RETURN EARLY - nunca processa
-}
+case "refresh_status": {
+  if (!body.instanceId) throw new Error("instanceId is required");
 
-// DEPOIS (permite detectar desconexoes reais):
-} else if (instance.status === 'connected') {
-  const lastUpdate = new Date(instance.updated_at).getTime();
-  const now = Date.now();
-  const elapsedSeconds = (now - lastUpdate) / 1000;
+  const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
+  const apiUrl = normalizeUrl(instance.api_url);
 
-  if (elapsedSeconds < 60) {
-    // Reconexao rapida normal - ignorar para evitar flickering
-    logDebug('CONNECTION', 'Ignoring connecting (recent connection)');
-    // Atualizar apenas last_webhook_event e updated_at, sem mudar status
-    await supabaseClient.from('whatsapp_instances')
-      .update({ updated_at: new Date().toISOString(), last_webhook_event: 'connection.update' })
-      .eq('id', instance.id);
-    return new Response(...);
-  } else {
-    // Instancia "connected" ha mais de 60s mas recebendo connecting
-    // = desconexao real que nao gerou evento "close"
-    dbStatus = 'connecting';
-    logDebug('CONNECTION', 'Downgrading to connecting (stale connection)');
+  let dbStatus = "disconnected";
+  let evolutionState = "unknown";
+  let sourceEndpoint = "none";
+
+  // PRIMARY: Use fetchInstances (same as Evolution Manager UI)
+  try {
+    const fetchUrl = `${apiUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instance.instance_name)}`;
+    const fetchResponse = await fetchWithTimeout(fetchUrl, {
+      method: "GET",
+      headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
+    });
+
+    if (fetchResponse.ok) {
+      const fetchData = await fetchResponse.json();
+      console.log(`[Evolution API] fetchInstances raw response:`, JSON.stringify(fetchData).slice(0, 500));
+
+      // Parse response (can be array or object)
+      const instances = Array.isArray(fetchData) ? fetchData : fetchData?.instances || [fetchData];
+      const found = instances.find(i => i?.instanceName === instance.instance_name || i?.name === instance.instance_name) || instances[0];
+
+      if (found) {
+        // connectionStatus is what Manager UI uses
+        evolutionState = found.connectionStatus || found.status || found.state || "unknown";
+        sourceEndpoint = "fetchInstances";
+      }
+    }
+  } catch (e) {
+    console.warn(`[Evolution API] fetchInstances failed, trying connectionState:`, e.message);
   }
+
+  // FALLBACK: connectionState endpoint
+  if (sourceEndpoint === "none") {
+    try {
+      const stateResponse = await fetchWithTimeout(
+        `${apiUrl}/instance/connectionState/${instance.instance_name}`,
+        { method: "GET", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } }
+      );
+      if (stateResponse.ok) {
+        const stateData = await stateResponse.json();
+        console.log(`[Evolution API] connectionState raw:`, JSON.stringify(stateData));
+        evolutionState = stateData.state || stateData.instance?.state || "unknown";
+        sourceEndpoint = "connectionState";
+      }
+    } catch (e) {
+      console.error(`[Evolution API] Both endpoints failed:`, e.message);
+    }
+  }
+
+  // Map Evolution state to our DB status
+  if (evolutionState === "open" || evolutionState === "connected") {
+    dbStatus = "connected";
+  } else if (evolutionState === "connecting" || evolutionState === "qr") {
+    dbStatus = "connecting";
+  } else if (evolutionState === "close" || evolutionState === "closed") {
+    dbStatus = "disconnected";
+  }
+
+  // Build update payload with proper flag cleanup
+  const updatePayload: Record<string, unknown> = {
+    status: dbStatus,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (dbStatus === "connected") {
+    updatePayload.disconnected_since = null;
+    updatePayload.awaiting_qr = false;
+    updatePayload.reconnect_attempts_count = 0;
+  } else if (dbStatus === "disconnected") {
+    if (!instance.disconnected_since) {
+      updatePayload.disconnected_since = new Date().toISOString();
+    }
+  }
+
+  const { data: updatedInstance } = await supabaseClient
+    .from("whatsapp_instances")
+    .update(updatePayload)
+    .eq("id", body.instanceId)
+    .select()
+    .single();
+
+  console.log(`[Evolution API] Status refreshed: ${dbStatus} (source: ${sourceEndpoint}, evolution: ${evolutionState})`);
+
+  return new Response(JSON.stringify({
+    success: true, status: dbStatus, evolutionState, sourceEndpoint, instance: updatedInstance,
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 ```
 
-Tambem remover o guard redundante `.neq('status', 'connected')` nas linhas 4419-4421, pois a logica acima ja controla quando permitir ou nao a transicao.
+### Resumo
 
-**Arquivo 2: `supabase/functions/evolution-api/index.ts`**
-
-Correcao 1 - Nao destruir o conteudo da mensagem no erro (linhas ~2096-2102):
-
-```text
-// ANTES:
-.update({ 
-  status: "failed",
-  content: `[erro]: ${body.message}`,  // DESTROI o conteudo original
-})
-
-// DEPOIS:
-.update({ 
-  status: "failed",
-  // Manter content original, usuario vera o status "failed" na UI
-})
-```
-
-Mesma correcao no catch generico (linhas ~2127-2133).
-
-Correcao 2 - Quando retry falha e a instancia esta genuinamente desconectada, marcar como `disconnected` (nao `connecting`), para que o auto-reconnect cron trate adequadamente:
-
-```text
-// ANTES (linhas ~2071-2077):
-.update({ status: 'connecting' })
-
-// DEPOIS:
-.update({ status: 'disconnected', disconnected_since: new Date().toISOString() })
-```
-
-### Resumo das Mudancas
-
-| Problema | Antes | Depois |
-|---|---|---|
-| Guard no webhook | Ignora TODOS os `connecting` quando DB=connected | Ignora apenas se connected < 60s (normal flickering) |
-| Conteudo da mensagem | Sobrescrito com erro | Mantido original, apenas status=failed |
-| Guard .neq no webhook | Bloqueia DB update connected->connecting | Removido (logica de tempo ja controla) |
-| Status no send failure | `connecting` | `disconnected` (permite auto-reconnect) |
+| Antes | Depois |
+|---|---|
+| Usa `connectionState` (instavel, retorna "close" para instancias conectadas) | Usa `fetchInstances` como primario (mesmo do Manager UI) |
+| Sem logging da resposta | Log completo da resposta da Evolution API |
+| Nao limpa flags ao reconectar | Limpa disconnected_since, awaiting_qr quando connected |
+| Um unico endpoint, sem fallback | fetchInstances primario + connectionState como fallback |
 
 ### Impacto
 
-- Instancias que perderam a conexao serao detectadas em ate 60 segundos
-- O status no banco refletira o estado real da Evolution API
-- Mensagens falhadas manterao o conteudo original visivel na interface
-- O cron auto-reconnect tratara instancias desconectadas corretamente
-- O flickering rapido durante reconexoes normais continua bloqueado (threshold de 60s)
+- O botao "Atualizar Status" vai refletir o mesmo estado que o Manager da Evolution mostra
+- Instancias que estao realmente conectadas serao marcadas como `connected` corretamente
+- Diagnostico facilitado com logs detalhados das respostas da API
 
-### Arquivos editados
+### Arquivo editado
 
-- `supabase/functions/evolution-webhook/index.ts`
 - `supabase/functions/evolution-api/index.ts`
