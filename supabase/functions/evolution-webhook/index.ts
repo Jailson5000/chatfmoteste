@@ -4286,29 +4286,17 @@ serve(async (req) => {
             dbStatus = 'awaiting_qr';
             logDebug('CONNECTION', `Preserving awaiting_qr status (ignoring connecting state)`, { requestId });
           } else if (instance.status === 'connected') {
-            // TIME-BASED GUARD: Only ignore "connecting" if instance was recently updated (< 60s)
-            // If connected for > 60s but receiving "connecting", it's a real disconnection
-            const lastUpdate = new Date(instance.updated_at).getTime();
-            const now = Date.now();
-            const elapsedSeconds = (now - lastUpdate) / 1000;
-
-            if (elapsedSeconds < 60) {
-              // Recent connection - normal Evolution API flickering, ignore
-              logDebug('CONNECTION', `Ignoring connecting state - instance recently connected (${Math.round(elapsedSeconds)}s ago)`, { requestId });
-              // Still update timestamps so we keep tracking webhook activity
-              await supabaseClient.from('whatsapp_instances')
-                .update({ updated_at: new Date().toISOString(), last_webhook_event: 'connection.update' })
-                .eq('id', instance.id);
-              return new Response(JSON.stringify({ status: "ignored", reason: "recently_connected" }), {
-                status: 200,
-                headers: { ...corsHeaders, "Content-Type": "application/json" },
-              });
-            } else {
-              // Instance "connected" for > 60s but receiving "connecting" events
-              // = real disconnection that didn't generate a "close" event
-              dbStatus = 'connecting';
-              logDebug('CONNECTION', `Downgrading to connecting - stale connection detected (${Math.round(elapsedSeconds)}s since last update)`, { requestId });
-            }
+            // NEVER downgrade from connected to connecting via webhook events.
+            // Evolution API v2.3.7 (Baileys) sends periodic "connecting" events as keep-alive,
+            // even for perfectly connected instances. Only "close" events indicate real disconnection.
+            logDebug('CONNECTION', `Ignoring connecting event - instance is connected. Only close events can downgrade.`, { requestId });
+            await supabaseClient.from('whatsapp_instances')
+              .update({ updated_at: new Date().toISOString(), last_webhook_event: 'connection.update' })
+              .eq('id', instance.id);
+            return new Response(JSON.stringify({ status: "ignored", reason: "connected_instance_protected" }), {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
           } else {
             dbStatus = 'connecting';
           }
@@ -4431,8 +4419,11 @@ serve(async (req) => {
           .update(updatePayload)
           .eq('id', instance.id);
         
-        // NOTE: The time-based guard above already controls connected->connecting transitions
-        // No need for .neq('status', 'connected') guard here - it was causing real disconnections to be masked
+        // RACE CONDITION SAFETY: When setting status to 'connecting', never overwrite 'connected'
+        // This protects against race conditions where auto-reconnect sets connected but webhook hasn't processed yet
+        if (dbStatus === 'connecting') {
+          updateQuery = updateQuery.neq('status', 'connected');
+        }
         
         const { error: updateError } = await updateQuery;
 
