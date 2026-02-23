@@ -864,18 +864,84 @@ serve(async (req) => {
         console.log(`[Evolution API] QR Code extracted: ${!!qrCode}, Status: ${status}, Raw keys: ${Object.keys(qrData).join(',')}`);
 
         // CORRUPTED SESSION DETECTION: {"count":0} or no QR + not connected
-        // This means the Baileys session is corrupted and cannot generate a QR code
+        // This means the Baileys session may be corrupted OR the instance is actually connected
         const isCorruptedSession = !qrCode && 
           status !== "open" && status !== "connected" &&
           (qrData.count === 0 || (Object.keys(qrData).length <= 2 && !qrData.base64 && !qrData.qrcode));
 
         if (isCorruptedSession) {
-          console.log(`[Evolution API] 🔧 CORRUPTED SESSION DETECTED for ${instance.instance_name} - Response: ${JSON.stringify(qrData).slice(0, 200)}`);
+          console.log(`[Evolution API] 🔧 POSSIBLE CORRUPTED SESSION for ${instance.instance_name} - Response: ${JSON.stringify(qrData).slice(0, 200)}`);
 
           const recoveryHeaders = {
             apikey: instance.api_key || "",
             "Content-Type": "application/json",
           };
+
+          // === STEP 0: Check actual connectionState before declaring corrupted ===
+          try {
+            console.log(`[Evolution API] Recovery Step 0: Checking connectionState for ${instance.instance_name}`);
+            const stateResp = await fetchWithTimeout(
+              `${apiUrl}/instance/connectionState/${instance.instance_name}`,
+              { method: "GET", headers: recoveryHeaders },
+              10000
+            );
+
+            if (stateResp.ok) {
+              const stateData = await stateResp.json();
+              const realState = stateData?.instance?.state || stateData?.state || stateData?.connectionStatus || "unknown";
+              console.log(`[Evolution API] connectionState response: ${JSON.stringify(stateData).slice(0, 300)}, realState: ${realState}`);
+
+              if (realState === "open" || realState === "connected") {
+                console.log(`[Evolution API] ✅ Instance is actually CONNECTED! Updating DB and returning success.`);
+                
+                // Extract phone number from the state response
+                const phone = extractPhoneFromPayload(stateData);
+                
+                const updateData: Record<string, any> = {
+                  status: "connected",
+                  awaiting_qr: false,
+                  manual_disconnect: false,
+                  reconnect_attempts_count: 0,
+                  updated_at: new Date().toISOString(),
+                };
+                if (phone) {
+                  updateData.phone_number = phone;
+                }
+
+                await supabaseClient
+                  .from("whatsapp_instances")
+                  .update(updateData)
+                  .eq("id", body.instanceId);
+
+                // Also try to fetch phone from fetchInstances if not found
+                if (!phone) {
+                  const fetchedPhone = await fetchConnectedPhoneNumber(apiUrl, instance.api_key || "", instance.instance_name);
+                  if (fetchedPhone) {
+                    await supabaseClient
+                      .from("whatsapp_instances")
+                      .update({ phone_number: fetchedPhone })
+                      .eq("id", body.instanceId);
+                  }
+                }
+
+                return new Response(
+                  JSON.stringify({
+                    success: true,
+                    qrCode: null,
+                    status: "connected",
+                    message: "Instância já está conectada",
+                  }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                );
+              }
+
+              console.log(`[Evolution API] connectionState is "${realState}" - proceeding with recovery`);
+            } else {
+              console.warn(`[Evolution API] connectionState check failed: ${stateResp.status}`);
+            }
+          } catch (stateErr: any) {
+            console.warn(`[Evolution API] connectionState check error (non-fatal):`, stateErr?.message);
+          }
 
           try {
             // === ATTEMPT 1: Logout + Connect (preferred - keeps instance registration) ===
@@ -893,7 +959,7 @@ serve(async (req) => {
             }
 
             // Wait for Baileys to clear session files
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise(resolve => setTimeout(resolve, 4000));
 
             // Try connect to get fresh QR
             const connectResp = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
@@ -935,7 +1001,7 @@ serve(async (req) => {
               console.log(`[Evolution API] Connect after logout failed (${connectResp.status}), falling back to delete+recreate`);
             }
 
-            // === ATTEMPT 2: Delete + Recreate (fallback with retry) ===
+            // === ATTEMPT 2: Delete + Recreate (fallback with longer delays) ===
             console.log(`[Evolution API] Recovery Step 2: Delete + Recreate for ${instance.instance_name}`);
             
             const deleteResponse = await fetchWithTimeout(`${apiUrl}/instance/delete/${instance.instance_name}`, {
@@ -944,12 +1010,12 @@ serve(async (req) => {
             }, 15000);
             console.log(`[Evolution API] Delete response: ${deleteResponse.status}`);
 
-            // Wait longer for async deletion
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            // Wait longer for async deletion (8s instead of 5s)
+            await new Promise(resolve => setTimeout(resolve, 8000));
 
             // Try create with retry on 403
             let recreateSuccess = false;
-            for (let attempt = 1; attempt <= 2; attempt++) {
+            for (let attempt = 1; attempt <= 3; attempt++) {
               console.log(`[Evolution API] Recreate attempt ${attempt} for ${instance.instance_name}...`);
               const recreateResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
                 method: "POST",
@@ -972,9 +1038,9 @@ serve(async (req) => {
               const recreateError = await safeReadResponseText(recreateResponse);
               console.warn(`[Evolution API] Recreate attempt ${attempt} failed: ${recreateResponse.status} - ${recreateError.slice(0, 200)}`);
               
-              if (recreateResponse.status === 403 && attempt < 2) {
-                console.log(`[Evolution API] 403 "name in use" - waiting 5s before retry...`);
-                await new Promise(resolve => setTimeout(resolve, 5000));
+              if (recreateResponse.status === 403 && attempt < 3) {
+                console.log(`[Evolution API] 403 "name in use" - waiting ${attempt * 5}s before retry...`);
+                await new Promise(resolve => setTimeout(resolve, attempt * 5000));
               } else {
                 break;
               }
@@ -1005,49 +1071,59 @@ serve(async (req) => {
               body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
             }).catch(e => console.warn("[Evolution API] Webhook config failed:", e));
 
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            // Wait for instance initialization
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
-            // Get fresh QR code
-            const freshQrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
-              method: "GET",
-              headers: recoveryHeaders,
-            });
+            // Get fresh QR code - with retry
+            for (let qrAttempt = 1; qrAttempt <= 2; qrAttempt++) {
+              console.log(`[Evolution API] Fresh QR attempt ${qrAttempt}...`);
+              const freshQrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+                method: "GET",
+                headers: recoveryHeaders,
+              });
 
-            if (freshQrResponse.ok) {
-              const freshData = await freshQrResponse.json();
-              console.log(`[Evolution API] Fresh QR response:`, JSON.stringify(freshData).slice(0, 300));
-              qrCode = freshData.base64 || freshData.qrcode?.base64 || freshData.qrcode || freshData.code || null;
-              
-              if (qrCode) {
-                console.log(`[Evolution API] ✅ Delete+Recreate recovery successful - QR code obtained!`);
-                await supabaseClient
-                  .from("whatsapp_instances")
-                  .update({ 
-                    status: "awaiting_qr", 
-                    awaiting_qr: true,
-                    manual_disconnect: false,
-                    reconnect_attempts_count: 0,
-                    updated_at: new Date().toISOString() 
-                  })
-                  .eq("id", body.instanceId);
+              if (freshQrResponse.ok) {
+                const freshData = await freshQrResponse.json();
+                console.log(`[Evolution API] Fresh QR response (attempt ${qrAttempt}):`, JSON.stringify(freshData).slice(0, 300));
+                qrCode = freshData.base64 || freshData.qrcode?.base64 || freshData.qrcode || freshData.code || null;
+                
+                if (qrCode) {
+                  console.log(`[Evolution API] ✅ Delete+Recreate recovery successful - QR code obtained!`);
+                  await supabaseClient
+                    .from("whatsapp_instances")
+                    .update({ 
+                      status: "awaiting_qr", 
+                      awaiting_qr: true,
+                      manual_disconnect: false,
+                      reconnect_attempts_count: 0,
+                      updated_at: new Date().toISOString() 
+                    })
+                    .eq("id", body.instanceId);
 
-                return new Response(
-                  JSON.stringify({
-                    success: true,
-                    qrCode,
-                    status: "awaiting_qr",
-                    message: "Sessão recuperada - escaneie o QR code",
-                    recovered: true,
-                  }),
-                  { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-                );
+                  return new Response(
+                    JSON.stringify({
+                      success: true,
+                      qrCode,
+                      status: "awaiting_qr",
+                      message: "Sessão recuperada - escaneie o QR code",
+                      recovered: true,
+                    }),
+                    { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                  );
+                }
+              }
+
+              if (qrAttempt < 2) {
+                console.log(`[Evolution API] No QR on attempt ${qrAttempt}, waiting 5s before retry...`);
+                await new Promise(resolve => setTimeout(resolve, 5000));
               }
             }
 
-            console.warn(`[Evolution API] Recovery completed but no QR code returned`);
+            console.warn(`[Evolution API] Recovery completed but no QR code returned after all attempts`);
+            throw new Error("Sessão recuperada mas QR code não foi gerado. Aguarde 30 segundos e tente novamente.");
           } catch (recoveryError: any) {
             console.error(`[Evolution API] Recovery failed:`, recoveryError);
-            throw new Error(`Sessão corrompida. Tentativa de recuperação falhou: ${recoveryError.message}`);
+            throw new Error(recoveryError.message || `Sessão corrompida. Tentativa de recuperação falhou.`);
           }
         }
 
