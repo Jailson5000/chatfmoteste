@@ -1,79 +1,26 @@
 
-# Correcao: Instancias Recriadas Pegam Sessao Antiga do Disco
 
-## Diagnostico
+# Limitar Reconexao Automatica a 2 Tentativas
 
-Ao deletar instancias via API e recria-las com `global_recreate_instance`, a Evolution API v2.2.3 reutiliza os arquivos de sessao do disco (`/evolution/instances/{instanceName}/session*`). Resultado: a instancia vai direto para "connecting" (tentando reconectar com sessao antiga) em vez de gerar um QR code novo.
+## Problema
+O sistema atual tenta reconectar ate **3 vezes** em uma janela de **3 minutos** (`MAX_RECONNECT_ATTEMPTS = 3`). Cada tentativa envia requisicoes ao WhatsApp, e com multiplas instancias isso gera dezenas de conexoes simultaneas, resultando em bloqueio temporario pelo WhatsApp ("tente mais tarde").
 
-A screenshot confirma que `inst_5fjooku6` (que usou `get_qrcode` com recovery Level 2 - logout + connect) gerou QR com sucesso. Ja as instancias recriadas via `global_recreate` nao passam por logout, entao ficam presas.
+## Mudancas
 
-## Mudancas Tecnicas
+### Arquivo: `supabase/functions/auto-reconnect-instances/index.ts`
 
-### Arquivo: `supabase/functions/evolution-api/index.ts`
+1. **Linha 12**: Reduzir `MAX_RECONNECT_ATTEMPTS` de `3` para `2`
+2. **Linha 13**: Aumentar `ATTEMPT_WINDOW_MINUTES` de `3` para `5` - dar mais espaco entre ciclos para o WhatsApp nao bloquear
+3. **Linha 698**: Aumentar delay entre instancias de `1000ms` para `3000ms` - evitar rajadas de conexoes simultaneas
 
-**Correcao no `global_recreate_instance` (linhas ~3814-3835):**
+### Comportamento Apos a Mudanca
 
-Antes de chamar `/instance/create`, adicionar dois passos:
-1. Tentar `/instance/logout/{instanceName}` (DELETE) para invalidar a sessao
-2. Tentar `/instance/delete/{instanceName}` (DELETE) para remover a instancia e limpar arquivos
-3. Aguardar 2 segundos
-4. Entao chamar `/instance/create`
-
-```typescript
-// Step 0: Clean up any existing instance (logout + delete to clear session files)
-console.log(`[Evolution API] global_recreate: Cleaning up existing instance ${body.instanceName}...`);
-try {
-  await fetchWithTimeout(`${apiUrl}/instance/logout/${body.instanceName}`, {
-    method: "DELETE",
-    headers: { apikey: globalApiKey },
-  }, 5000);
-} catch (_) { /* ignore - may not exist */ }
-
-try {
-  await fetchWithTimeout(`${apiUrl}/instance/delete/${body.instanceName}`, {
-    method: "DELETE",
-    headers: { apikey: globalApiKey },
-  }, 5000);
-} catch (_) { /* ignore - may not exist */ }
-
-await new Promise(resolve => setTimeout(resolve, 2000));
-
-// Step 1: Create instance in Evolution API (original code continues)
-```
-
-Isso garante que sessoes antigas sejam limpas antes de recriar a instancia.
-
-### Acao Manual no VPS (Critica)
-
-Os arquivos de sessao das instancias atuais precisam ser limpos manualmente:
-
-```bash
-# Parar containers, limpar sessoes, reiniciar
-cd /var/www/miauchat  # ou onde esta o docker-compose
-
-# Ver sessoes existentes
-docker exec evolution-api ls -la /evolution/instances/
-
-# Remover sessoes corrompidas de TODAS as instancias
-docker exec evolution-api rm -rf /evolution/instances/inst_*/
-
-# Reiniciar o container para limpar cache em memoria
-docker restart evolution-api
-
-# Aguardar 30 segundos para inicializar
-sleep 30
-
-# Verificar que nao ha instancias residuais
-curl -s "https://evo.fmoadv.com.br/instance/fetchInstances" \
-  -H "apikey: a3c56030f89efe1e5b4c033308c7e3c8f72d7492ac8bb46947be28df2e06ffed"
-```
-
-Apos isso, aguardar 5 minutos e usar "Gerar QR Code" em cada empresa.
+- A funcao `auto-reconnect-instances` tenta reconectar no maximo **2 vezes** em **5 minutos**
+- Apos 2 tentativas falhas, a instancia e marcada como `awaiting_qr` e o sistema **para de tentar**
+- O usuario precisa ir manualmente em Conexoes e clicar "Gerar QR Code"
+- Quando o usuario conecta com sucesso, o contador (`reconnect_attempts_count`) e zerado automaticamente, permitindo futuras reconexoes
+- Delay de 3 segundos entre instancias evita rajada de requisicoes
 
 ### Deploy
-Redeployar a edge function `evolution-api`.
+Redeployar a edge function `auto-reconnect-instances`.
 
-## Resultado Esperado
-1. `global_recreate` faz logout+delete antes de criar, evitando sessoes residuais
-2. Apos limpeza do VPS, todas as instancias geram QR codes limpos
-3. Sem mais loops de "connecting" causados por sessoes corrompidas
