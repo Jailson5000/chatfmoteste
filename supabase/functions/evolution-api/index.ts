@@ -177,12 +177,12 @@ function simplifyEvolutionError(status: number, bodyText: string): string {
 }
 
 function buildWebhookConfig(webhookUrl: string) {
-  // Evolution API v2 expects snake_case keys
+  // Evolution API v2.2.3 expects camelCase keys
   return {
     enabled: true,
     url: webhookUrl,
-    webhook_by_events: false,
-    webhook_base64: true,
+    webhookByEvents: false,
+    webhookBase64: true,
     events: [
       "CONNECTION_UPDATE",
       "QRCODE_UPDATED",
