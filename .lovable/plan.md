@@ -1,36 +1,66 @@
 
+# Corrigir QR Code preso em "connecting" apos limpeza de sessoes
 
-# Reverter Edge Functions para Evolution API v2.2.3
+## Problema
+Apos limpar os arquivos de sessao no VPS, todas as instancias ficaram no estado "connecting" na Evolution API. Quando o usuario tenta gerar um QR Code, a edge function detecta `connectionState === "connecting"` e retorna imediatamente com a mensagem "WhatsApp esta inicializando a conexao. Aguarde alguns segundos..." sem nunca gerar o QR.
 
-## Contexto
-O Docker foi revertido para `atendai/evolution-api:v2.2.3`. Agora as edge functions precisam voltar aos timings originais da v2.2.3 (Baileys v6 = inicializacao rapida).
+Isso cria um loop infinito: a instancia nunca sai de "connecting" porque nao tem sessao valida, e o sistema nunca forca a geracao de um novo QR.
 
-## Mudancas
+## Solucao
+Modificar a logica na edge function `evolution-api` para que, quando o estado for "connecting" e a instancia estiver com `awaiting_qr: true` no banco, o fluxo **nao retorne imediatamente** e sim prossiga para o Level 1 de recuperacao (logout + reconnect), que forcara a geracao de um novo QR Code.
 
-### 1. `supabase/functions/evolution-api/index.ts`
+## Mudancas Tecnicas
 
-**a) create_instance (linhas 674-678)**
-- Comentario: voltar para "v2.2.3 - fast init"
-- `maxRetries = 3` volta para `maxRetries = 2`
-- `retryDelayMs = 4000` volta para `retryDelayMs = 2000`
+### Arquivo: `supabase/functions/evolution-api/index.ts`
 
-**b) get_qrcode - corrupted session recovery (linha 1121-1122)**
-- Comentario: voltar para "v2.2.3 optimized"
-- `detectedApiVersion = "v2.3.7"` volta para `"v2.2.3"`
+**Linhas 1196-1208** - Remover o retorno imediato para "connecting" quando `awaiting_qr` esta ativo:
 
-**c) Level 1 delays (linha 1247)**
-- `setTimeout(resolve, 5000)` volta para `setTimeout(resolve, 3000)`
+Antes:
+```typescript
+if (currentState === "connecting") {
+  console.log(`[Evolution API] Instance is "connecting" - Baileys still initializing. Returning retryable.`);
+  return new Response(
+    JSON.stringify({
+      success: false,
+      error: "WhatsApp esta inicializando a conexao...",
+      retryable: true,
+      connectionState: "connecting",
+    }),
+    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+  );
+}
+```
 
-**d) Level 2 delay pos-logout (linha 1295)**
-- `setTimeout(resolve, 5000)` volta para `setTimeout(resolve, 3000)`
+Depois:
+```typescript
+if (currentState === "connecting") {
+  // Verificar se a instancia esta aguardando QR - se sim, prosseguir para recovery
+  const { data: dbInstance } = await supabaseClient
+    .from("whatsapp_instances")
+    .select("awaiting_qr")
+    .eq("id", body.instanceId)
+    .single();
 
-**e) Level 2 delay entre retries (linha 1323)**
-- `setTimeout(resolve, 5000)` volta para `setTimeout(resolve, 3000)`
+  if (dbInstance?.awaiting_qr) {
+    console.log(`[Evolution API] Instance is "connecting" + awaiting_qr=true. Proceeding to Level 1 recovery to force QR generation.`);
+    // Nao retorna - continua para o Level 1 recovery abaixo
+  } else {
+    console.log(`[Evolution API] Instance is "connecting" - Baileys still initializing. Returning retryable.`);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: "WhatsApp esta inicializando a conexao. Aguarde alguns segundos...",
+        retryable: true,
+        connectionState: "connecting",
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+}
+```
 
-### 2. `supabase/functions/auto-reconnect-instances/index.ts`
+### Deploy
+Redeployar a edge function `evolution-api` apos a mudanca.
 
-**Linhas 275-276**: Atualizar comentarios de "v2.3.7" para "v2.2.3". A logica de usar `/instance/connect` diretamente funciona em ambas as versoes, entao nao precisa restaurar o bloco de `/instance/restart`.
-
-### 3. Deploy
-Redeployar ambas as edge functions apos as mudancas.
-
+## Resultado Esperado
+Ao clicar em "Gerar QR Code", o sistema vai forcar um logout + reconnect na instancia, gerando um novo QR Code limpo em vez de ficar preso na mensagem de "inicializando".
