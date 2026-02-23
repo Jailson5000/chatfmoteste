@@ -4143,6 +4143,15 @@ serve(async (req) => {
           if (isAlreadyAwaitingQr) {
             dbStatus = 'awaiting_qr';
             logDebug('CONNECTION', `Preserving awaiting_qr status (ignoring connecting state)`, { requestId });
+          } else if (instance.status === 'connected') {
+            // IMPORTANT: If instance is already connected, ignore "connecting" spam
+            // Evolution API sends repeated "connecting" events even for fully connected instances
+            // This prevents overwriting a valid "connected" status
+            logDebug('CONNECTION', `Ignoring connecting state - instance already connected`, { requestId });
+            return new Response(JSON.stringify({ status: "ignored", reason: "already_connected" }), {
+              status: 200,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
           } else {
             dbStatus = 'connecting';
           }
