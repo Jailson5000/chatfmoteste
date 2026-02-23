@@ -1968,53 +1968,18 @@ serve(async (req) => {
                 } catch { /* ignore parse errors */ }
 
                 if (mediaIsConnectionClosed && instanceId) {
-                  console.warn(`[Evolution API] Media Connection Closed for ${instanceId} - forcing reconnect via /instance/connect...`);
+                  // Do NOT call /instance/connect here - it restarts the Baileys socket
+                  // and causes a destabilization loop. Mark as disconnected and let the
+                  // auto-reconnect cron handle recovery properly.
+                  console.warn(`[Evolution API] Media Connection Closed for ${instanceId} - marking as disconnected (no /instance/connect call)`);
                   
-                  // Force socket reconnection before retry
-                  try {
-                    const connectRes = await fetchWithTimeout(
-                      `${apiUrl}/instance/connect/${encodeURIComponent(instance.instance_name)}`,
-                      { method: "GET", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } },
-                      10000
-                    );
-                    const connectData = await connectRes.json().catch(() => ({}));
-                     console.log(`[Evolution API] Reconnect raw response for media:`, JSON.stringify(connectData).slice(0, 500));
-                     const connectState = connectData?.instance?.state || connectData?.instance?.status || connectData?.instance?.connectionStatus || connectData?.state || connectData?.status;
-                     console.log(`[Evolution API] Reconnect response for media: state=${connectState}, status=${connectRes.status}`);
-                  } catch (connectErr: any) {
-                    console.warn(`[Evolution API] Reconnect call failed for media:`, connectErr?.message);
-                  }
-                  
-                  // Wait 5s for socket to stabilize
-                  await new Promise(resolve => setTimeout(resolve, 5000));
-                  
-                  try {
-                    const mediaRetry = await fetch(mediaEndpoint, {
-                      method: "POST",
-                      headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-                      body: JSON.stringify(mediaPayload),
-                    });
-                    if (mediaRetry.ok) {
-                      const retryText = await mediaRetry.text();
-                      let retryData: Record<string, unknown> = {};
-                      try { retryData = JSON.parse(retryText); } catch { /* */ }
-                      const retryMsgId = (retryData as any).key?.id || (retryData as any).messageId || (retryData as any).id || crypto.randomUUID();
-                      console.log(`[Evolution API] Media retry succeeded! whatsapp_message_id: ${retryMsgId}`);
-                      if (conversationId) {
-                        await supabaseClient.from("messages")
-                          .update({ whatsapp_message_id: retryMsgId, status: "sent", message_type: mediaTypeRaw.toLowerCase() as any, content: caption || `[${mediaTypeRaw}]`, media_url: mediaUrl })
-                          .eq("id", tempMessageId);
-                      }
-                      return; // Success on retry
-                    }
-                  } catch (retryErr) {
-                    console.error(`[Evolution API] Media retry fetch failed:`, retryErr);
-                  }
-                  // Retry failed - mark as connecting
                   await supabaseClient.from("whatsapp_instances")
-                    .update({ status: 'connecting', updated_at: new Date().toISOString() })
-                    .eq("id", instanceId)
-                    .not("status", "in", '("disconnected","connecting")');
+                    .update({ 
+                      status: 'disconnected', 
+                      disconnected_since: new Date().toISOString(),
+                      updated_at: new Date().toISOString() 
+                    })
+                    .eq("id", instanceId);
                 }
 
                 if (conversationId) {
@@ -2110,71 +2075,13 @@ serve(async (req) => {
                 );
 
                 if (isConnectionClosed && instanceId) {
-                  // SMART RETRY: Force socket reconnection via /instance/connect, then retry
-                  console.warn(`[Evolution API] Connection Closed for ${instanceId} - forcing reconnect via /instance/connect...`);
+                  // Do NOT call /instance/connect here - it restarts the Baileys socket
+                  // and causes a destabilization loop. Mark as disconnected and let the
+                  // auto-reconnect cron handle recovery properly.
+                  console.warn(`[Evolution API] Connection Closed for ${instanceId} - marking as disconnected (no /instance/connect call)`);
                   
-                  // Force socket reconnection
-                  try {
-                    const connectRes = await fetchWithTimeout(
-                      `${apiUrl}/instance/connect/${encodeURIComponent(instance.instance_name)}`,
-                      { method: "GET", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } },
-                      10000
-                    );
-                    const connectData = await connectRes.json().catch(() => ({}));
-                     console.log(`[Evolution API] Reconnect raw response:`, JSON.stringify(connectData).slice(0, 500));
-                     const connectState = connectData?.instance?.state || connectData?.instance?.status || connectData?.instance?.connectionStatus || connectData?.state || connectData?.status;
-                     console.log(`[Evolution API] Reconnect response: state=${connectState}, status=${connectRes.status}`);
-                    
-                    // If QR code returned, session is dead - skip retry
-                    if (connectData?.base64 || connectData?.qrcode?.base64) {
-                      console.warn(`[Evolution API] Reconnect returned QR code - session expired for ${instanceId}`);
-                      await supabaseClient.from("whatsapp_instances")
-                        .update({ status: 'awaiting_qr', awaiting_qr: true, updated_at: new Date().toISOString() })
-                        .eq("id", instanceId);
-                      errorReason = "Sessão expirada - necessário escanear QR Code novamente";
-                      // Skip retry, fall through to mark message as failed
-                      throw new Error("QR_NEEDED");
-                    }
-                  } catch (connectErr: any) {
-                    if (connectErr?.message === "QR_NEEDED") throw connectErr;
-                    console.warn(`[Evolution API] Reconnect call failed:`, connectErr?.message);
-                  }
+                  errorReason = "Conexão perdida - reconexão automática em andamento";
                   
-                  // Wait 5s for socket to stabilize after reconnection
-                  await new Promise(resolve => setTimeout(resolve, 5000));
-
-                  try {
-                    const retryResponse = await fetch(
-                      `${apiUrl}/message/sendText/${instance.instance_name}`,
-                      {
-                        method: "POST",
-                        headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-                        body: JSON.stringify(sendPayload),
-                      }
-                    );
-
-                    if (retryResponse.ok) {
-                      const retryData = await retryResponse.json();
-                      const retryWhatsAppId = retryData.key?.id || retryData.messageId || retryData.id;
-                      console.log(`[Evolution API] Retry after reconnect succeeded! whatsapp_message_id: ${retryWhatsAppId}`);
-                      if (conversationId && retryWhatsAppId) {
-                        await supabaseClient.from("messages")
-                          .update({ whatsapp_message_id: retryWhatsAppId, status: "sent" })
-                          .eq("id", tempMessageId);
-                      }
-                      // Mark instance as connected since message went through
-                      await supabaseClient.from("whatsapp_instances")
-                        .update({ status: 'connected', disconnected_since: null, reconnect_attempts_count: 0, awaiting_qr: false, updated_at: new Date().toISOString() })
-                        .eq("id", instanceId);
-                      return; // Success on retry
-                    }
-                  } catch (retryErr: any) {
-                    if (retryErr?.message === "QR_NEEDED") throw retryErr;
-                    console.error(`[Evolution API] Retry fetch failed:`, retryErr);
-                  }
-
-                  // Retry also failed - mark as DISCONNECTED so auto-reconnect cron handles it
-                  console.error(`[Evolution API] Retry after reconnect also failed for ${instanceId} - marking as disconnected`);
                   await supabaseClient
                     .from("whatsapp_instances")
                     .update({ status: 'disconnected', disconnected_since: new Date().toISOString(), updated_at: new Date().toISOString() })
