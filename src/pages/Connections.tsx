@@ -353,6 +353,10 @@ export default function Connections() {
         setIsQRDialogOpen(true);
         // Start polling for the new instance
         startPolling(result.instance.id);
+      } else if (!result.qrCode && result.instance) {
+        // QR code not available from create - auto-trigger connect flow
+        console.log("[Connections] Instance created without QR code, auto-triggering connect flow");
+        handleConnectInstance(result.instance);
       }
     } catch (error) {
       console.error("Create instance error:", error);
