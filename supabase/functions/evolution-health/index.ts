@@ -98,10 +98,11 @@ serve(async (req) => {
     );
 
     // Get user from token
+    const token = authHeader.replace("Bearer ", "");
     const {
       data: { user },
       error: authError,
-    } = await supabaseUser.auth.getUser();
+    } = await supabaseUser.auth.getUser(token);
 
     if (authError || !user) {
       console.error("[Evolution Health] Auth error:", authError?.message);

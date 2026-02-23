@@ -59,3 +59,12 @@ verify_jwt = false
 
 [functions.sync-stripe-subscriptions]
 verify_jwt = false
+
+[functions.evolution-health]
+verify_jwt = false
+
+[functions.sync-evolution-instances]
+verify_jwt = false
+
+[functions.get-billing-status]
+verify_jwt = false
