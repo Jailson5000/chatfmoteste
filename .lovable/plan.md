@@ -1,76 +1,51 @@
 
 
-# Corrigir QR Code nao gerando - Bug conhecido da Evolution API
+# Corrigir Edge Functions para Evolution API v2.3.7
 
-## Diagnostico
+## Problema
 
-Os logs mostram claramente o problema:
+As edge functions foram otimizadas para a v2.2.3 (Baileys v6, inicializacao rapida). A v2.3.7 usa Baileys v7 que precisa de mais tempo para inicializar sessoes. Alem disso, o endpoint `/instance/restart` nao existe na v2.3.x (retorna 404).
 
-```text
-/instance/connect -> {"count":0}  (toda vez)
-connectionState -> "connecting"   (preso para sempre)
-Nenhum evento qrcode.update recebido via webhook
-```
+## Mudancas Necessarias
 
-Isso e um **bug conhecido da Evolution API v2.2.x** (Issues #2365 e #2367 no GitHub). O Baileys entra em um loop infinito de reconexao durante a conexao inicial, impedindo a geracao do QR code. O fix foi incluido apenas na v2.3.7+.
+### 1. `auto-reconnect-instances/index.ts`
 
-## Opcoes de Solucao
+**Problema**: Tenta `/instance/restart` primeiro (linhas 275-337), que retorna 404 na v2.3.x.
 
-### Opcao A: Workaround no Docker Compose (mais rapido)
-Adicionar a variavel de ambiente `CONFIG_SESSION_PHONE_VERSION` no container da Evolution API:
+**Correcao**: Remover a tentativa de restart e ir direto para `/instance/connect`. Atualizar comentarios de "v2.2.3" para "v2.3.7".
 
-```text
-docker exec -it evolution bash
-# Ou editar o docker-compose.yml:
+### 2. `evolution-api/index.ts`
 
-environment:
-  CONFIG_SESSION_PHONE_VERSION: "2.3000"
-```
+Duas areas precisam de ajuste:
 
-Depois reiniciar:
-```text
-docker compose down && docker compose up -d
-```
+**a) create_instance (linhas 674-678)**
+- Comentario diz "v2.2.3 - fast init"
+- `maxRetries = 2` e `retryDelayMs = 2000` sao curtos demais para Baileys v7
+- Corrigir para `maxRetries = 3` e `retryDelayMs = 4000`
 
-Esse workaround foi reportado como funcional por usuarios na issue #2367.
+**b) get_qrcode - corrupted session recovery (linhas 1121-1122, 1217-1249)**
+- Variavel `detectedApiVersion` hardcoded como "v2.2.3"
+- Level 1: delays de 3s sao curtos para Baileys v7
+- Corrigir para `detectedApiVersion = "v2.3.7"`, delays de 5s no Level 1, e 5s no Level 2
 
-### Opcao B: Voltar para v2.3.1 (recomendado)
-O v2.2.3 tem esse bug critico sem correcao oficial. As opcoes mais estaveis sao:
-- **v2.3.1** - que ja estava em uso (tem o delay do Baileys v7, mas as edge functions ja lidam com isso)
-- **v2.3.7** - tem o fix oficial do bug #2365, mas pode ter outros problemas reportados
+## Detalhes Tecnicos
 
-Para voltar ao v2.3.1:
-```text
-sed -i 's|atendai/evolution-api:v2.2.3|evoapicloud/evolution-api:v2.3.1|' docker-compose.yml
-docker compose down && docker compose pull && docker compose up -d
-```
+### auto-reconnect-instances/index.ts
+- Linhas 271-337: Remover bloco try/catch do `/instance/restart` e ir direto para `/instance/connect` como fallback unico
+- Atualizar log de "v2.2.3 preferred" para "v2.3.7 - connect only"
 
-### Opcao C: Usar v2.3.7 com o fix oficial
-```text
-sed -i 's|atendai/evolution-api:v2.2.3|atendai/evolution-api:v2.3.7|' docker-compose.yml
-docker compose down && docker compose pull && docker compose up -d
-```
+### evolution-api/index.ts
+- Linha 676: Atualizar comentario para "v2.3.7 - Baileys v7 needs more time"
+- Linha 677: `maxRetries = 2` para `maxRetries = 3`
+- Linha 678: `retryDelayMs = 2000` para `retryDelayMs = 4000`
+- Linha 1121: Atualizar comentario para "v2.3.7 - Baileys v7"
+- Linha 1122: `"v2.2.3"` para `"v2.3.7"`
+- Linha 1218: Atualizar log de Level 1 com delays corretos
+- Linha 1247: Delay entre retries de 3000 para 5000ms
+- Linha 1295: Delay pos-logout de 3000 para 5000ms
+- Linha 1323: Delay entre retries Level 2 de 3000 para 5000ms
 
-## Mudancas no Codigo
-
-### Se escolher Opcao B (v2.3.1)
-- Reverter as mudancas feitas nas edge functions (restaurar retries originais)
-- Manter a logica de recovery simplificada que ja funciona
-
-### Se escolher Opcao C (v2.3.7)
-- As edge functions atuais ja sao compativeis
-- Nenhuma mudanca de codigo necessaria
-
-### Se escolher Opcao A (workaround)
-- Nenhuma mudanca de codigo necessaria
-- Apenas adicionar a variavel de ambiente e reiniciar o container
-
-## Recomendacao
-
-**Opcao B (voltar para v2.3.1)** e a mais segura porque:
-1. Ja estava funcionando antes (o problema era apenas o delay de inicializacao)
-2. As edge functions ja foram adaptadas para lidar com o delay do Baileys v7
-3. Nao depende de um workaround nao-oficial
-
-Apos escolher a opcao, as unicas mudancas necessarias no codigo serao reverter os timeouts de retry na edge function para os valores originais compatveis com v2.3.x (delays maiores para acomodar o Baileys v7).
+### Sem mudancas necessarias
+- `evolution-webhook/index.ts` - ja compativel (logica de status preservation funciona igual)
+- `sync-evolution-instances/index.ts` - ja compativel (usa fetchInstances que funciona igual)
 
