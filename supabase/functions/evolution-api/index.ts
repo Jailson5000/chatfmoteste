@@ -831,7 +831,141 @@ serve(async (req) => {
         }
 
         const status = qrData.state || qrData.status || qrData.instance?.state || "unknown";
-        console.log(`[Evolution API] QR Code extracted: ${!!qrCode}, Status: ${status}`);
+        console.log(`[Evolution API] QR Code extracted: ${!!qrCode}, Status: ${status}, Raw keys: ${Object.keys(qrData).join(',')}`);
+
+        // CORRUPTED SESSION DETECTION: {"count":0} or no QR + not connected
+        // This means the Baileys session is corrupted and cannot generate a QR code
+        const isCorruptedSession = !qrCode && 
+          status !== "open" && status !== "connected" &&
+          (qrData.count === 0 || (Object.keys(qrData).length <= 2 && !qrData.base64 && !qrData.qrcode));
+
+        if (isCorruptedSession) {
+          console.log(`[Evolution API] 🔧 CORRUPTED SESSION DETECTED for ${instance.instance_name} - Response: ${JSON.stringify(qrData).slice(0, 200)}`);
+          console.log(`[Evolution API] Executing delete+recreate recovery...`);
+
+          try {
+            // Step 1: Delete corrupted instance from Evolution
+            console.log(`[Evolution API] Step 1: Deleting corrupted instance ${instance.instance_name}...`);
+            const deleteResponse = await fetchWithTimeout(`${apiUrl}/instance/delete/${instance.instance_name}`, {
+              method: "DELETE",
+              headers: {
+                apikey: instance.api_key || "",
+                "Content-Type": "application/json",
+              },
+            }, 15000);
+            console.log(`[Evolution API] Delete response: ${deleteResponse.status}`);
+
+            // Wait for Evolution to fully clear the session
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Step 2: Recreate instance from scratch
+            console.log(`[Evolution API] Step 2: Recreating instance ${instance.instance_name}...`);
+            const recreateResponse = await fetchWithTimeout(`${apiUrl}/instance/create`, {
+              method: "POST",
+              headers: {
+                apikey: instance.api_key || "",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                instanceName: instance.instance_name,
+                token: instance.api_key,
+                qrcode: true,
+              }),
+            }, 30000);
+
+            if (!recreateResponse.ok) {
+              const recreateError = await safeReadResponseText(recreateResponse);
+              console.error(`[Evolution API] Recreate failed:`, recreateError);
+              throw new Error("Não foi possível recriar a instância. Tente novamente.");
+            }
+
+            const recreateData = await recreateResponse.json();
+            console.log(`[Evolution API] Recreate response:`, JSON.stringify(recreateData).slice(0, 500));
+
+            // Step 3: Configure settings (groupsIgnore)
+            try {
+              const settingsPayload = {
+                rejectCall: false,
+                msgCall: "",
+                groupsIgnore: true,
+                alwaysOnline: false,
+                readMessages: false,
+                readStatus: false,
+                syncFullHistory: false,
+              };
+              await fetchWithTimeout(`${apiUrl}/settings/set/${instance.instance_name}`, {
+                method: "POST",
+                headers: {
+                  apikey: instance.api_key || "",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(settingsPayload),
+              });
+              console.log(`[Evolution API] Settings configured for recreated instance`);
+            } catch (e) {
+              console.warn(`[Evolution API] Settings config failed (non-fatal):`, e);
+            }
+
+            // Step 4: Configure webhook
+            await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
+              method: "POST",
+              headers: {
+                apikey: instance.api_key || "",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(buildWebhookConfig(WEBHOOK_URL)),
+            }).catch(e => console.warn("[Evolution API] Webhook config failed:", e));
+
+            // Wait for initialization
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Step 5: Get fresh QR code
+            const freshQrResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${instance.instance_name}`, {
+              method: "GET",
+              headers: {
+                apikey: instance.api_key || "",
+                "Content-Type": "application/json",
+              },
+            });
+
+            if (freshQrResponse.ok) {
+              const freshData = await freshQrResponse.json();
+              console.log(`[Evolution API] Fresh QR response:`, JSON.stringify(freshData).slice(0, 300));
+              qrCode = freshData.base64 || freshData.qrcode?.base64 || freshData.qrcode || freshData.code || null;
+              
+              if (qrCode) {
+                console.log(`[Evolution API] ✅ Recovery successful - QR code obtained!`);
+                // Update DB status
+                await supabaseClient
+                  .from("whatsapp_instances")
+                  .update({ 
+                    status: "awaiting_qr", 
+                    awaiting_qr: true,
+                    manual_disconnect: false,
+                    reconnect_attempts_count: 0,
+                    updated_at: new Date().toISOString() 
+                  })
+                  .eq("id", body.instanceId);
+
+                return new Response(
+                  JSON.stringify({
+                    success: true,
+                    qrCode,
+                    status: "awaiting_qr",
+                    message: "Sessão recuperada - escaneie o QR code",
+                    recovered: true,
+                  }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                );
+              }
+            }
+
+            console.warn(`[Evolution API] Recovery completed but no QR code returned`);
+          } catch (recoveryError: any) {
+            console.error(`[Evolution API] Recovery failed:`, recoveryError);
+            throw new Error(`Sessão corrompida. Tentativa de recuperação falhou: ${recoveryError.message}`);
+          }
+        }
 
         // Update instance status based on state
         if (status === "open" || status === "connected") {
