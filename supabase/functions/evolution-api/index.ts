@@ -1110,6 +1110,65 @@ serve(async (req) => {
               { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
             );
           }
+
+          // GUARD: Check if another get_qrcode call recently ran recovery (race condition prevention)
+          const { data: freshInstance } = await supabaseClient
+            .from("whatsapp_instances")
+            .select("status, awaiting_qr, updated_at")
+            .eq("id", body.instanceId)
+            .single();
+
+          const updatedAgo = freshInstance?.updated_at 
+            ? Date.now() - new Date(freshInstance.updated_at).getTime() 
+            : Infinity;
+
+          if (freshInstance?.awaiting_qr === true && updatedAgo < 60000) {
+            console.log(`[Evolution API] Recovery already in progress (updated ${updatedAgo}ms ago). Skipping destructive recovery.`);
+            // Try one simple connect to see if QR is available now
+            const recoveryHeadersQuick = {
+              apikey: instance.api_key || "",
+              "Content-Type": "application/json",
+            };
+            try {
+              const quickResp = await fetchWithTimeout(
+                `${apiUrl}/instance/connect/${instance.instance_name}`,
+                { method: "GET", headers: recoveryHeadersQuick }, 8000
+              );
+              if (quickResp.ok) {
+                const quickData = await quickResp.json();
+                const quickQr = quickData?.base64 || quickData?.qrcode?.base64 || quickData?.qrcode || quickData?.code || null;
+                if (quickQr) {
+                  console.log(`[Evolution API] Quick connect got QR while recovery in progress!`);
+                  await supabaseClient
+                    .from("whatsapp_instances")
+                    .update({ status: "awaiting_qr", awaiting_qr: true, updated_at: new Date().toISOString() })
+                    .eq("id", body.instanceId);
+                  return new Response(
+                    JSON.stringify({ success: true, qrCode: quickQr, status: "awaiting_qr" }),
+                    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                  );
+                }
+              }
+            } catch (_quickErr) {
+              // Ignore - just return retryable
+            }
+            
+            return new Response(
+              JSON.stringify({
+                success: false,
+                error: "Recuperação em andamento. Aguarde 10 segundos...",
+                retryable: true,
+                connectionState: "recovering",
+              }),
+              { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+            );
+          }
+
+          // Mark instance as recovering BEFORE starting Level 1
+          await supabaseClient
+            .from("whatsapp_instances")
+            .update({ awaiting_qr: true, updated_at: new Date().toISOString() })
+            .eq("id", body.instanceId);
           
           console.log(`[Evolution API] 🔧 POSSIBLE CORRUPTED SESSION for ${instance.instance_name} - Response: ${JSON.stringify(qrData).slice(0, 200)}`);
 

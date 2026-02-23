@@ -121,14 +121,20 @@ export default function Connections() {
   const [rejectCalls, setRejectCalls] = useState<Record<string, boolean>>({});
 
   const MAX_POLLS = 60;
-  const BASE_POLL_INTERVAL = 1000; // 1 second base - more responsive
-  const MAX_POLL_INTERVAL = 5000; // 5 seconds max
+  const BASE_POLL_INTERVAL = 3000; // 3 seconds base
+  const QR_FETCH_INTERVAL = 8000; // 8 seconds when actively fetching QR (prevents race conditions)
+  const MAX_POLL_INTERVAL = 10000; // 10 seconds max
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const pollCountRef = useRef(0);
+  const qrFetchInProgressRef = useRef(false);
 
   // Calculate polling interval with slower exponential backoff
-  const getPollingInterval = useCallback((count: number): number => {
-    // Increase interval every 10 polls, up to MAX_POLL_INTERVAL - slower backoff
+  const getPollingInterval = useCallback((count: number, hasQr: boolean): number => {
+    if (!hasQr) {
+      // When fetching QR, use longer interval to prevent race conditions
+      return QR_FETCH_INTERVAL;
+    }
+    // When we have QR and just checking status, use faster polling
     const multiplier = Math.pow(1.3, Math.floor(count / 10));
     return Math.min(BASE_POLL_INTERVAL * multiplier, MAX_POLL_INTERVAL);
   }, []);
@@ -215,6 +221,15 @@ export default function Connections() {
     try {
       // If we don't have a QR code yet, actively try to fetch one
       if (!currentQRCode) {
+        // DEBOUNCE: Prevent parallel QR fetch calls (race condition prevention)
+        if (qrFetchInProgressRef.current) {
+          console.log("[Connections] QR fetch already in progress, skipping this poll");
+          const nextInterval = getPollingInterval(count, false);
+          pollIntervalRef.current = setTimeout(() => pollOnce(instanceId), nextInterval);
+          return;
+        }
+
+        qrFetchInProgressRef.current = true;
         console.log(`[Connections] Polling for QR code (${count}/${MAX_POLLS})...`);
         try {
           const qrResult = await getQRCode.mutateAsync(instanceId);
@@ -239,14 +254,17 @@ export default function Connections() {
             setCurrentQRCode(qrResult.qrCode);
             setQrError(null);
             setConnectionStatus("Escaneie o QR Code");
+          } else if ((qrResult as any).connectionState === "recovering") {
+            // Backend is recovering, wait longer
+            setConnectionStatus("Recuperando conexão...");
           } else {
-            // Still no QR, keep waiting
             setConnectionStatus("Aguardando QR Code...");
           }
         } catch (qrError) {
           console.warn("[Connections] QR fetch error (will retry):", qrError);
-          // Don't set error - just continue polling
           setConnectionStatus("Aguardando QR Code...");
+        } finally {
+          qrFetchInProgressRef.current = false;
         }
       } else {
         // Already have QR code, just check connection status
@@ -273,11 +291,10 @@ export default function Connections() {
       }
     } catch (error) {
       console.error("[Connections] Poll error:", error);
-      // Continue polling despite errors
     }
 
     // Schedule next poll with backoff
-    const nextInterval = getPollingInterval(count);
+    const nextInterval = getPollingInterval(count, !!currentQRCode);
     console.log(`[Connections] Next poll in ${nextInterval}ms`);
     pollIntervalRef.current = setTimeout(() => pollOnce(instanceId), nextInterval);
   }, [stopPolling, getStatus, getQRCode, refetch, currentQRCode, getPollingInterval]);
