@@ -1,73 +1,107 @@
 
-## Corrigir "Connection Closed" no Envio de Mensagens
 
-### Diagnostico Completo (com provas dos logs)
+## Corrigir Bug de Parsing que Causa Todas as Desconexoes
 
-**Estado atual do banco:** Instancias marcadas como `connected` e `connecting` alternando constantemente.
+### Causa Raiz Comprovada (com logs)
 
-**O que acontece passo a passo (comprovado nos logs):**
+O endpoint `/instance/connect` da Evolution API v2.3.7 retorna o campo **`status`**, mas nosso codigo procura pelo campo **`state`**. Resultado: `state` e SEMPRE `undefined`.
 
-```text
-15:05:09 - auto-reconnect: fetchInstances = "open" -> marca DB como "connected" (CORRETO)
-15:05:22 - webhook: evento "connecting" recebido -> IGNORADO (nosso fix funciona!)
-15:06:10 - usuario envia mensagem via inst_0gkejsc5
-15:06:11 - Evolution retorna: {"message":["Error: Connection Closed"]}
-15:06:14 - retry apos 3s tambem falha -> marca DB como "disconnected"
-15:06:14 - frontend ve "disconnected" -> mostra banner vermelho "WhatsApp desconectado"
+**Prova nos logs:**
+```
+15:15:14 /instance/connect returned state=undefined for inst_l26f156k
+15:15:09 /instance/connect returned state=undefined for inst_0gkejsc5
+15:12:40 Reconnect response: state=undefined, status=200
+15:11:04 Reconnect response: state=undefined, status=200
 ```
 
-**Causa raiz:** A Evolution API v2.3.7 (Baileys) tem um bug onde `fetchInstances` reporta `connectionStatus: "open"` mas o socket WebSocket interno do WhatsApp esta quebrado. Quando se tenta enviar via `/message/sendText`, retorna "Connection Closed".
-
-O auto-reconnect ve "open" e apenas atualiza o banco sem verificar se o socket realmente funciona. A mensagem falha, marca como `disconnected`, e o ciclo recomeça.
-
-### Solucao em 2 Partes
-
-**Parte 1: Reconexao inteligente no envio (evolution-api/index.ts)**
-
-Quando "Connection Closed" ocorrer no envio de mensagem:
-1. Chamar `/instance/connect` para forcar o Baileys a reconectar o socket WhatsApp
-2. Esperar 5 segundos para a reconexao
-3. Tentar enviar a mensagem novamente
-4. So marcar como `disconnected` se a reconexao + retry tambem falharem
-
-```text
-// ANTES (atual):
-Connection Closed -> espera 3s -> retry direto -> falha -> marca disconnected
-
-// DEPOIS (corrigido):
-Connection Closed -> chama /instance/connect -> espera 5s -> retry -> 
-  se sucesso: marca connected, mensagem enviada
-  se falha: marca disconnected (desconexao real)
+A Evolution API v2.3.7 retorna:
+```json
+{ "instance": { "instanceName": "inst_xxx", "status": "open" } }
 ```
 
-**Parte 2: Auto-reconnect verifica conexao real (auto-reconnect-instances/index.ts)**
+Nosso codigo faz:
+```javascript
+const state = data?.instance?.state || data?.state;  // SEMPRE undefined!
+```
 
-Quando `fetchInstances` retorna "open" mas a instancia estava em `connecting`/`disconnected`:
-1. Chamar `/instance/connect` para garantir que o socket esta ativo
-2. So entao marcar como `connected` no banco
-3. Isto previne o cenario onde "open" no fetchInstances nao significa socket funcional
+### Cascata de Problemas Causada por Este Bug
 
 ```text
-// ANTES:
-fetchInstances = "open" -> atualiza DB para "connected" (sem verificar socket)
+1. Auto-reconnect chama fetchInstances -> "open" (correto)
+2. Auto-reconnect chama /instance/connect para VERIFICAR
+3. Resposta tem status="open" mas codigo procura state -> undefined
+4. socketVerified = false (ERRADO - deveria ser true)
+5. Cai no fallback -> chama /instance/connect NOVAMENTE (attemptConnect)
+6. attemptConnect TAMBEM nao entende a resposta (mesmo bug)
+7. Resultado: 2x chamadas /instance/connect por instancia a cada 5 min
+8. 3 instancias x 2 chamadas = 6 reconexoes desnecessarias a cada 5 min
+9. Cada /instance/connect reinicia o socket Baileys
+10. Sockets NUNCA estabilizam -> messages.upsert NUNCA chegam
+11. Envio falha com "Connection Closed" -> mais 1 /instance/connect
+12. Ciclo infinito de reinicio de sockets
+```
 
-// DEPOIS:
-fetchInstances = "open" -> chama /instance/connect -> verifica resposta -> 
-  se state "open"/"connected": marca connected
-  se retorna QR: marca awaiting_qr
+**Confirmacao:** ZERO eventos `messages.upsert` nos logs do webhook. Apenas eventos `connection.update`. As conexoes estao sendo reiniciadas tao frequentemente que Baileys nao consegue processar mensagens.
+
+### Solucao: Corrigir Parsing em 3 Pontos
+
+**O bug existe em 3 lugares identicos. A correcao e a mesma em todos:**
+
+Trocar:
+```text
+data?.instance?.state || data?.state
+```
+Por:
+```text
+data?.instance?.state || data?.instance?.status || data?.instance?.connectionStatus || data?.state || data?.status
+```
+
+**Arquivo 1: `supabase/functions/auto-reconnect-instances/index.ts`**
+
+Corrigir em 2 pontos:
+- Linha 119 (funcao `attemptConnect`): `const state = data?.instance?.state || data?.state;`
+- Linha 387 (verificacao de socket): `const verifyState = verifyData?.instance?.state || verifyData?.state;`
+
+Adicionar log da resposta COMPLETA para diagnostico futuro:
+```text
+console.log(`[Auto-Reconnect] /instance/connect raw response:`, JSON.stringify(data).slice(0, 500));
+```
+
+**Arquivo 2: `supabase/functions/evolution-api/index.ts`**
+
+Corrigir em 1 ponto:
+- Linha 2123 (retry apos Connection Closed): `const connectState = connectData?.instance?.state || connectData?.state;`
+
+Tambem corrigir o mesmo parsing na logica de envio de MEDIA (linhas ~1975-1985).
+
+### Impacto Esperado
+
+| Antes (bug) | Depois (fix) |
+|---|---|
+| `/instance/connect` retorna `state=undefined` | Lido corretamente como `status: "open"` |
+| socketVerified = false SEMPRE | socketVerified = true quando realmente conectado |
+| 6+ chamadas /instance/connect a cada 5 min | 0 chamadas desnecessarias (instancias reconhecidas) |
+| Sockets reiniciados constantemente | Sockets estabilizam |
+| ZERO messages.upsert | Mensagens voltam a fluir |
+| Toda mensagem enviada falha com "Connection Closed" | Mensagens enviadas com sucesso |
+| Auto-reconnect marca connected, webhook desfaz, cron tenta de novo | Instancias permanecem como connected |
+
+### Logica Corrigida do Auto-Reconnect
+
+```text
+1. fetchInstances retorna "open" -> isConnected=true
+2. /instance/connect para verificar -> status="open" -> socketVerified=true (CORRIGIDO)
+3. Atualiza DB para "connected" e PARA (nao chama attemptConnect)
+4. Na proxima execucao, instancia ja e "connected" -> nao entra no filtro
+5. Sockets estabilizam -> messages.upsert comecam a chegar
+6. Mensagens enviadas com sucesso
 ```
 
 ### Arquivos Editados
 
-1. `supabase/functions/evolution-api/index.ts` - Adicionar chamada a `/instance/connect` antes do retry no caso "Connection Closed" (tanto em send_message_async quanto send_message)
-2. `supabase/functions/auto-reconnect-instances/index.ts` - Chamar `/instance/connect` quando fetchInstances retorna "open" para garantir socket funcional
+1. `supabase/functions/auto-reconnect-instances/index.ts` - Corrigir parsing em attemptConnect (L119) e verificacao de socket (L387)
+2. `supabase/functions/evolution-api/index.ts` - Corrigir parsing no retry de text (L2123) e media (~L1975)
 
-### Impacto Esperado
+### Observacao Tecnica
 
-| Antes | Depois |
-|---|---|
-| "Connection Closed" -> retry falha -> marca disconnected | "Connection Closed" -> reconnect socket -> retry com sucesso |
-| auto-reconnect confia em fetchInstances "open" | auto-reconnect forca reconexao real do socket |
-| Instancias flip-flop connected/disconnected a cada mensagem | Instancias estabilizam apos primeira reconexao |
-| Mensagens falham constantemente | Mensagens entregues apos reconexao automatica transparente |
-| Banner vermelho aparece a cada envio | Banner so aparece se desconexao real confirmada |
+Este e um bug classico de incompatibilidade de campo. A Evolution API usa `status` no response de `/instance/connect`, mas `connectionStatus` no response de `fetchInstances`, e `state` nos eventos de webhook. Nosso codigo assumiu que todos usavam `state`.
