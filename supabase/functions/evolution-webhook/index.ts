@@ -4127,6 +4127,11 @@ serve(async (req) => {
         // Check if instance is already awaiting QR scan - preserve this state unless connected
         const isAlreadyAwaitingQr = instance.awaiting_qr === true || instance.status === 'awaiting_qr';
         
+        // Build update payload BEFORE the state switch to avoid temporal dead zone
+        const updatePayload: Record<string, unknown> = { 
+          updated_at: new Date().toISOString() 
+        };
+
         let dbStatus: 'connected' | 'connecting' | 'disconnected' | 'awaiting_qr' = 'disconnected';
         let shouldSetAwaitingQr = false;
         
@@ -4166,11 +4171,8 @@ serve(async (req) => {
           logDebug('CONNECTION', `Instance closed - marking as disconnected (was: ${instance.status})`, { requestId });
         }
 
-        // Build update payload
-        const updatePayload: Record<string, unknown> = { 
-          status: dbStatus, 
-          updated_at: new Date().toISOString() 
-        };
+        // Set the status in the payload
+        updatePayload.status = dbStatus;
 
         // When QR is displayed, set awaiting_qr flag to stop auto-reconnect attempts
         if (shouldSetAwaitingQr) {
@@ -4271,10 +4273,18 @@ serve(async (req) => {
         }
 
         // Update instance status
-        const { error: updateError } = await supabaseClient
+        // RACE CONDITION FIX: When dbStatus is 'connecting', do NOT overwrite if current DB status is 'connected'
+        let updateQuery = supabaseClient
           .from('whatsapp_instances')
           .update(updatePayload)
           .eq('id', instance.id);
+        
+        if (dbStatus === 'connecting') {
+          updateQuery = updateQuery.neq('status', 'connected');
+          logDebug('CONNECTION', `Adding race condition guard: will not downgrade from connected to connecting`, { requestId });
+        }
+        
+        const { error: updateError } = await updateQuery;
 
         if (updateError) {
           logDebug('ERROR', `Failed to update status`, { requestId, error: updateError });

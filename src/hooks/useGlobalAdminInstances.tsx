@@ -462,14 +462,15 @@ export function useGlobalAdminInstances() {
   // Reapply webhooks on all connected instances
   const reapplyAllWebhooks = useMutation({
     mutationFn: async () => {
-      const connectedInstances = instances.filter((i) => ["connected", "connecting"].includes(i.status));
-      console.log("[useGlobalAdminInstances] Reapplying webhooks on", connectedInstances.length, "instances");
+      // Include ALL instances except those not found in Evolution API
+      const targetInstances = instances.filter((i) => !["not_found_in_evolution"].includes(i.status));
+      console.log("[useGlobalAdminInstances] Reapplying webhooks on", targetInstances.length, "instances");
 
       let success = 0;
       let failed = 0;
 
       // Sequential to avoid overloading
-      for (const instance of connectedInstances) {
+      for (const instance of targetInstances) {
         try {
           const { data, error } = await supabase.functions.invoke("evolution-api", {
             body: {
@@ -489,13 +490,25 @@ export function useGlobalAdminInstances() {
         }
       }
 
-      return { success, failed, total: connectedInstances.length };
+      return { success, failed, total: targetInstances.length };
     },
     onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+      refetchHealth();
       toast({
         title: "Webhooks reaplicados",
-        description: `${data.success} de ${data.total} instâncias configuradas${data.failed > 0 ? `. ${data.failed} falha(s).` : "."}`,
+        description: `${data.success} de ${data.total} instâncias configuradas${data.failed > 0 ? `. ${data.failed} falha(s).` : "."}. Sincronizando status...`,
       });
+      
+      // Call sync after 3 seconds to update statuses from Evolution API
+      setTimeout(async () => {
+        try {
+          await supabase.functions.invoke("sync-evolution-instances");
+          queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+        } catch (err) {
+          console.error("[reapplyAllWebhooks] Post-sync error:", err);
+        }
+      }, 3000);
     },
     onError: (error: Error) => {
       toast({
