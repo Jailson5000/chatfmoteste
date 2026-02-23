@@ -190,6 +190,7 @@ export default function GlobalAdminConnections() {
     fetchPhoneNumber,
     reapplyAllWebhooks,
     forceSyncAll,
+    recreateAllLostInstances,
   } = useGlobalAdminInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -255,6 +256,8 @@ export default function GlobalAdminConnections() {
   const problemsCount = instances.filter((i) =>
     ["disconnected", "error", "suspended"].includes(i.status)
   ).length;
+
+  const lostCount = instances.filter((i) => i.status === "not_found_in_evolution").length;
 
   // CRITICAL: Detect duplicate phone numbers across connected instances
   // This is a security issue that can cause message duplication and tenant data mixing
@@ -445,6 +448,25 @@ export default function GlobalAdminConnections() {
                 <p>Reconfigura TODOS os webhooks com URL correta + sincroniza status (correção de webhooks quebrados)</p>
               </TooltipContent>
             </Tooltip>
+            {lostCount > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => recreateAllLostInstances.mutate()}
+                    disabled={recreateAllLostInstances.isPending}
+                    className="bg-red-600 hover:bg-red-700"
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-2 ${recreateAllLostInstances.isPending ? "animate-spin" : ""}`} />
+                    Recriar {lostCount} Perdida(s)
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Recriar instâncias perdidas na Evolution API (status: not_found_in_evolution)</p>
+                </TooltipContent>
+              </Tooltip>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

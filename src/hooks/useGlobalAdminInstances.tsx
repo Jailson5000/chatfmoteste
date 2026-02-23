@@ -615,6 +615,55 @@ export function useGlobalAdminInstances() {
     },
   });
 
+  // Recreate all lost instances (not_found_in_evolution)
+  const recreateAllLostInstances = useMutation({
+    mutationFn: async () => {
+      const lostInstances = instances.filter(i => i.status === "not_found_in_evolution");
+      if (lostInstances.length === 0) throw new Error("Nenhuma instância perdida encontrada");
+
+      console.log("[useGlobalAdminInstances] Recreating", lostInstances.length, "lost instances");
+      let success = 0;
+      let failed = 0;
+
+      for (const instance of lostInstances) {
+        try {
+          const { data, error } = await supabase.functions.invoke("evolution-api", {
+            body: {
+              action: "global_recreate_instance",
+              instanceName: instance.instance_name,
+            },
+          });
+          if (error || !data?.success) {
+            console.error("[recreateAllLost] Failed for", instance.instance_name, error?.message || data?.error);
+            failed++;
+          } else {
+            success++;
+          }
+        } catch (err) {
+          console.error("[recreateAllLost] Exception for", instance.instance_name, err);
+          failed++;
+        }
+      }
+
+      return { success, failed, total: lostInstances.length };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["global-admin-instances"] });
+      refetchHealth();
+      toast({
+        title: "Recriação concluída",
+        description: `${data.success} de ${data.total} instâncias recriadas. Escaneie os QR Codes.${data.failed > 0 ? ` ${data.failed} falha(s).` : ""}`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Erro ao recriar instâncias",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   return {
     instances,
     instancesByConnection,
@@ -635,5 +684,6 @@ export function useGlobalAdminInstances() {
     fetchPhoneNumber,
     reapplyAllWebhooks,
     forceSyncAll,
+    recreateAllLostInstances,
   };
 }
