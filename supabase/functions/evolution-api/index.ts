@@ -2272,6 +2272,57 @@ serve(async (req) => {
           return mediaData.mimetype;
         })();
 
+        // --- PERSIST ON DOWNLOAD (catch-up for older messages) ---
+        try {
+          const baseMime = (normalizedMimetype || '').split(';')[0].trim().toLowerCase();
+          const extMap: Record<string, string> = {
+            'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png',
+            'image/webp': '.webp', 'image/gif': '.gif', 'audio/ogg': '.ogg',
+            'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'audio/webm': '.webm',
+            'video/mp4': '.mp4', 'video/3gpp': '.3gp',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+            'application/msword': '.doc', 'application/vnd.ms-excel': '.xls',
+          };
+          const ext = extMap[baseMime] || '.bin';
+          const safeId = (body.whatsappMessageId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+          const storagePath = `${targetLawFirmId}/${body.conversationId}/${safeId}${ext}`;
+
+          const raw = mediaData.base64 as string;
+          const binaryStr = atob(raw);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+
+          const { error: uploadErr } = await supabaseClient.storage
+            .from('chat-media')
+            .upload(storagePath, bytes, {
+              contentType: baseMime || 'application/octet-stream',
+              upsert: true,
+            });
+
+          if (!uploadErr) {
+            const { data: publicUrlData } = supabaseClient.storage
+              .from('chat-media')
+              .getPublicUrl(storagePath);
+
+            if (publicUrlData?.publicUrl) {
+              await supabaseClient
+                .from('messages')
+                .update({ media_url: publicUrlData.publicUrl })
+                .eq('whatsapp_message_id', body.whatsappMessageId)
+                .eq('conversation_id', body.conversationId);
+              console.log(`[Evolution API] Media persisted to Storage: ${storagePath}`);
+            }
+          } else {
+            console.warn(`[Evolution API] Storage upload failed:`, uploadErr.message);
+          }
+        } catch (persistErr) {
+          console.warn('[Evolution API] Failed to persist media on download:', persistErr);
+        }
+        // --- END PERSIST ON DOWNLOAD ---
+
         return new Response(
           JSON.stringify({
             success: true,
