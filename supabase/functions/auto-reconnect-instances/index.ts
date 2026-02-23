@@ -116,19 +116,52 @@ async function deleteAndRecreateInstance(instance: InstanceToReconnect): Promise
     apikey: instance.api_key,
     "Content-Type": "application/json",
   };
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+  const WEBHOOK_URL_LOCAL = `${SUPABASE_URL}/functions/v1/evolution-webhook`;
 
   try {
-    // Step 1: Try logout first (clears Baileys session), then delete
-    console.log(`[Auto-Reconnect] 🔧 Recovery for ${instance.instance_name}: logout → delete → create`);
+    // === ATTEMPT 1: Logout + Connect (preferred - keeps instance registration) ===
+    console.log(`[Auto-Reconnect] 🔧 Recovery for ${instance.instance_name}: Step 1 - Logout + Connect`);
     
-    // Logout (best-effort)
-    await fetchWithTimeout(
-      `${apiUrl}/instance/logout/${encodeURIComponent(instance.instance_name)}`,
-      { method: "DELETE", headers },
-      8000
-    ).catch(() => {});
+    // Logout (best-effort - clears Baileys session files)
+    try {
+      const logoutResp = await fetchWithTimeout(
+        `${apiUrl}/instance/logout/${encodeURIComponent(instance.instance_name)}`,
+        { method: "DELETE", headers },
+        10000
+      );
+      console.log(`[Auto-Reconnect] Logout response: ${logoutResp.status}`);
+    } catch (e) {
+      console.warn(`[Auto-Reconnect] Logout failed (non-fatal):`, e);
+    }
 
-    // Delete (best-effort - may fail with 400 on corrupted sessions)
+    // Wait for Baileys to clear session files
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Try connect to get fresh QR
+    const connectResp = await fetchWithTimeout(
+      `${apiUrl}/instance/connect/${encodeURIComponent(instance.instance_name)}`,
+      { method: "GET", headers },
+      15000
+    );
+
+    if (connectResp.ok) {
+      const connectData = await connectResp.json().catch(() => ({}));
+      console.log(`[Auto-Reconnect] Connect after logout:`, JSON.stringify(connectData).slice(0, 300));
+      const qrcode = connectData.base64 || connectData.qrcode?.base64 || null;
+      if (qrcode) {
+        console.log(`[Auto-Reconnect] ✅ Logout+Connect recovery successful for ${instance.instance_name}`);
+        return { success: true, qrcode, message: "Session cleared - QR code available" };
+      }
+      console.log(`[Auto-Reconnect] Logout+Connect did not return QR, falling back to delete+recreate`);
+    } else {
+      console.log(`[Auto-Reconnect] Connect after logout failed (${connectResp.status}), falling back to delete+recreate`);
+    }
+
+    // === ATTEMPT 2: Delete + Recreate (fallback with retry) ===
+    console.log(`[Auto-Reconnect] Recovery Step 2: Delete + Recreate for ${instance.instance_name}`);
+
+    // Delete (best-effort)
     const deleteResp = await fetchWithTimeout(
       `${apiUrl}/instance/delete/${encodeURIComponent(instance.instance_name)}`,
       { method: "DELETE", headers },
@@ -136,71 +169,74 @@ async function deleteAndRecreateInstance(instance: InstanceToReconnect): Promise
     ).catch(() => ({ status: 0 } as any));
     console.log(`[Auto-Reconnect] Delete response: ${deleteResp?.status || 'failed'}`);
 
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Wait longer for async deletion
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
-    // Step 2: Recreate instance
-    console.log(`[Auto-Reconnect] Recreating instance ${instance.instance_name}...`);
-    const createResp = await fetchWithTimeout(
-      `${apiUrl}/instance/create`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          instanceName: instance.instance_name,
-          token: instance.api_key,
-          qrcode: true,
-          integration: "WHATSAPP-BAILEYS",
-          webhook: buildWebhookConfig(WEBHOOK_URL),
-        }),
-      },
-      30000
-    );
+    // Try create with retry on 403
+    let createSuccess = false;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      console.log(`[Auto-Reconnect] Recreate attempt ${attempt} for ${instance.instance_name}...`);
+      const createResp = await fetchWithTimeout(
+        `${apiUrl}/instance/create`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            instanceName: instance.instance_name,
+            token: instance.api_key,
+            qrcode: true,
+            integration: "WHATSAPP-BAILEYS",
+            webhook: { url: WEBHOOK_URL_LOCAL, webhook_by_events: false, webhook_base64: true, events: ["CONNECTION_UPDATE", "QRCODE_UPDATED", "MESSAGES_UPSERT", "MESSAGES_DELETE", "CONTACTS_UPDATE"] },
+          }),
+        },
+        30000
+      );
 
-    if (!createResp.ok) {
+      if (createResp.ok) {
+        console.log(`[Auto-Reconnect] Recreate succeeded on attempt ${attempt}`);
+        createSuccess = true;
+        break;
+      }
+
       const err = await createResp.text().catch(() => "unknown");
-      return { success: false, message: `Recreate failed: ${createResp.status} - ${err.slice(0, 200)}` };
+      console.warn(`[Auto-Reconnect] Recreate attempt ${attempt} failed: ${createResp.status} - ${err.slice(0, 200)}`);
+      
+      if (createResp.status === 403 && attempt < 2) {
+        console.log(`[Auto-Reconnect] 403 "name in use" - waiting 5s before retry...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      } else {
+        return { success: false, message: `Recreate failed: ${createResp.status} - ${err.slice(0, 200)}` };
+      }
     }
 
-    const createData = await createResp.json().catch(() => ({}));
-    console.log(`[Auto-Reconnect] Recreate response:`, JSON.stringify(createData).slice(0, 300));
+    if (!createSuccess) {
+      return { success: false, message: "Recreate failed after retries" };
+    }
 
-    // Step 3: Configure settings
+    // Configure settings
     try {
       await fetchWithTimeout(`${apiUrl}/settings/set/${encodeURIComponent(instance.instance_name)}`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          rejectCall: false,
-          msgCall: "",
-          groupsIgnore: true,
-          alwaysOnline: false,
-          readMessages: false,
-          readStatus: false,
-          syncFullHistory: false,
+          rejectCall: false, msgCall: "", groupsIgnore: true,
+          alwaysOnline: false, readMessages: false, readStatus: false, syncFullHistory: false,
         }),
       }, 10000);
     } catch (e) {
       console.warn(`[Auto-Reconnect] Settings config failed (non-fatal):`, e);
     }
 
-    // Step 4: Configure webhook
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-    const WEBHOOK_URL = `${SUPABASE_URL}/functions/v1/evolution-webhook`;
+    // Configure webhook
     try {
       await fetchWithTimeout(`${apiUrl}/webhook/set/${encodeURIComponent(instance.instance_name)}`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          url: WEBHOOK_URL,
+          url: WEBHOOK_URL_LOCAL,
           webhook_by_events: false,
           webhook_base64: true,
-          events: [
-            "CONNECTION_UPDATE",
-            "QRCODE_UPDATED",
-            "MESSAGES_UPSERT",
-            "MESSAGES_DELETE",
-            "CONTACTS_UPDATE",
-          ],
+          events: ["CONNECTION_UPDATE", "QRCODE_UPDATED", "MESSAGES_UPSERT", "MESSAGES_DELETE", "CONTACTS_UPDATE"],
         }),
       }, 10000);
     } catch (e) {
@@ -209,7 +245,7 @@ async function deleteAndRecreateInstance(instance: InstanceToReconnect): Promise
 
     await new Promise(resolve => setTimeout(resolve, 1000));
 
-    // Step 5: Get QR code
+    // Get QR code
     const qrResp = await fetchWithTimeout(
       `${apiUrl}/instance/connect/${encodeURIComponent(instance.instance_name)}`,
       { method: "GET", headers },
@@ -220,14 +256,14 @@ async function deleteAndRecreateInstance(instance: InstanceToReconnect): Promise
       const qrData = await qrResp.json().catch(() => ({}));
       const qrcode = qrData.base64 || qrData.qrcode?.base64 || null;
       if (qrcode) {
-        console.log(`[Auto-Reconnect] ✅ Recovery successful - QR code obtained for ${instance.instance_name}`);
+        console.log(`[Auto-Reconnect] ✅ Delete+Recreate recovery successful for ${instance.instance_name}`);
         return { success: true, qrcode, message: "Instance recreated - QR code available" };
       }
     }
 
     return { success: true, message: "Instance recreated but no QR code returned" };
   } catch (error: any) {
-    console.error(`[Auto-Reconnect] Delete+recreate failed for ${instance.instance_name}:`, error);
+    console.error(`[Auto-Reconnect] Recovery failed for ${instance.instance_name}:`, error);
     return { success: false, message: `Recovery failed: ${error.message}` };
   }
 }
