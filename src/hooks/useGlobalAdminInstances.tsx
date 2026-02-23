@@ -479,7 +479,15 @@ export function useGlobalAdminInstances() {
             },
           });
           if (error || !data?.success) {
-            console.error("[reapplyAllWebhooks] Failed for", instance.instance_name, error || data?.error);
+            const errorMsg = error?.message || data?.error || "";
+            console.error("[reapplyAllWebhooks] Failed for", instance.instance_name, errorMsg);
+            // Se a instância não existe na Evolution API, marcar no banco
+            if (errorMsg.includes("404") || errorMsg.includes("does not exist") || errorMsg.includes("not found")) {
+              await supabase
+                .from("whatsapp_instances")
+                .update({ status: "not_found_in_evolution", updated_at: new Date().toISOString() })
+                .eq("id", instance.id);
+            }
             failed++;
           } else {
             success++;

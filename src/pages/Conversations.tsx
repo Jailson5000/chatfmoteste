@@ -4419,10 +4419,10 @@ export default function Conversations() {
                             await queryClient.invalidateQueries({ queryKey: ["whatsapp-instances"] });
                             toast({ title: "WhatsApp reconectado com sucesso!" });
                           } else {
-                            navigate("/connections");
-                          }
+                          navigate(`/connections?reconnect=${instanceDisconnectedInfo.instanceId}`);
+                        }
                         } catch {
-                          navigate("/connections");
+                          navigate(`/connections?reconnect=${instanceDisconnectedInfo.instanceId}`);
                         } finally {
                           setIsReconnecting(false);
                         }
