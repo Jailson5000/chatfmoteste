@@ -1,84 +1,63 @@
 
+# Corrigir recuperacao de sessao WhatsApp apos restart
 
-# Fix: QR Code nao aparece ao criar/conectar instancias WhatsApp
+## Problema diagnosticado
 
-## Problema
+Apos o restart do Docker, as instancias ficam instáveis nos primeiros minutos - alternando entre "open" e "close". Quando o usuario tenta gerar QR code nesse periodo, a Evolution API retorna `{"count":0}` e o sistema interpreta como **sessao corrompida**, executando um fluxo destrutivo:
 
-Os logs confirmam o problema: a Evolution API retorna `{"count":0}` consistentemente para TODAS as chamadas `/instance/connect/{name}`, mesmo apos 25+ segundos de retries no backend. O backend ja tem retry logic extensiva (4 retries de 5s cada) mas nao e suficiente.
+1. Logout (destroi a sessao Baileys)
+2. Delete da instancia
+3. Recreate da instancia
+4. Multiplas tentativas de connect
 
-O problema real esta no frontend: quando o QR nao vem nem do `create_instance` nem do `get_qrcode`, o dialog mostra "QR Code nao disponivel" como um beco sem saida. O polling via `get_status` so verifica o `connectionState` -- nunca tenta obter um novo QR code.
+Isso leva ~40 segundos e frequentemente falha porque Baileys ainda esta inicializando. O resultado: a sessao que estava se recuperando sozinha e destruida.
 
-## Causa Raiz
+## Solucao
 
-A Evolution API com Baileys v7 pode levar 30-60+ segundos para inicializar o WebSocket e gerar o primeiro QR code. O backend tenta por ~25s e desiste. O frontend nao tem mecanismo de re-tentativa automatica para buscar o QR code.
+Substituir o fluxo de recuperacao agressivo por um mais inteligente com 3 niveis:
 
-## Solucao (3 alteracoes)
+1. **Nivel 1 - Retry simples** (quando connectionState e "close" ou "connecting"): Apenas fazer 3 tentativas de `/instance/connect/` com delays de 5s entre cada. Sem logout, sem delete.
 
-### 1. Frontend - Polling inteligente que tambem busca QR code
+2. **Nivel 2 - Logout + Connect** (se Nivel 1 falhar e estado continuar "close"): Fazer logout e tentar connect novamente. Sem delete/recreate.
 
-Modificar `src/pages/Connections.tsx`:
+3. **Nivel 3 - Delete + Recreate** (somente se Nivel 2 falhar): Manter como ultimo recurso, mas so apos os niveis anteriores falharem.
 
-- Na funcao `pollOnce`, quando `currentQRCode` e `null` (nenhum QR disponivel ainda), chamar `getQRCode.mutateAsync(instanceId)` em vez de apenas `getStatus.mutateAsync(instanceId)`
-- Isso faz o polling tentar obter o QR code repetidamente ate conseguir, ao inves de so verificar o status
-- Quando o QR code for obtido, atualizar o state e continuar polling normal (so status)
+## Alteracoes tecnicas
 
-### 2. Frontend - QR Dialog com auto-retry
+### Arquivo: `supabase/functions/evolution-api/index.ts`
 
-Modificar `src/components/connections/QRCodeDialog.tsx`:
+Na secao de deteccao de sessao corrompida (linhas ~1060-1412):
 
-- Quando nao ha QR code e nao ha erro, mostrar um estado de "Aguardando QR Code..." com spinner em vez de "QR Code nao disponivel" estatico
-- Adicionar botao "Tentar Novamente" tambem no estado sem QR (nao so no estado de erro)
+- Quando `connectionState` retornar "close" ou "connecting", adicionar tentativas simples de connect com retry (3x, 5s delay) ANTES de ir para logout
+- Mover a logica de logout+connect como segundo nivel
+- Manter delete+recreate como terceiro e ultimo nivel
+- Adicionar log claro de qual nivel esta sendo executado
+- Reduzir o timeout total do fluxo (de ~60s para ~30s no caso comum)
 
-### 3. Frontend - handleConnectInstance com retry automatico
-
-Modificar `src/pages/Connections.tsx`:
-
-- Na funcao `handleConnectInstance`, quando `get_qrcode` retorna sem QR e sem erro (retryable=true ou simplesmente sem qrCode), iniciar o polling mesmo assim em vez de mostrar erro
-- O polling inteligente (item 1) se encarregara de buscar o QR code
-
-## Detalhes Tecnicos
-
-### Connections.tsx - pollOnce modificado
+### Fluxo proposto
 
 ```text
-Antes:
-  pollOnce chama getStatus.mutateAsync(instanceId) → verifica status e QR atualizado
-
-Depois:
-  pollOnce verifica se currentQRCode e null:
-    - Se null: chama getQRCode.mutateAsync(instanceId) em vez de getStatus
-      - Se retornar qrCode: atualiza currentQRCode + continua polling normal
-      - Se retornar connected: para polling, mostra sucesso
-      - Se retornar erro retryable: agenda proximo poll
-    - Se ja tem QR: mantém comportamento atual (getStatus)
+get_qrcode chamado
+  |
+  v
+/instance/connect/ retorna {"count":0}
+  |
+  v
+Check connectionState
+  |
+  +-- "open"/"connected" -> Retornar sucesso (ja existe)
+  |
+  +-- "close"/"connecting" -> NIVEL 1: Retry connect (3x, 5s delay)
+  |     |
+  |     +-- QR obtido -> Retornar sucesso
+  |     |
+  |     +-- Falhou -> NIVEL 2: Logout + Connect (2x, 5s delay)
+  |           |
+  |           +-- QR obtido -> Retornar sucesso
+  |           |
+  |           +-- Falhou -> NIVEL 3: Delete + Recreate (existente)
+  |
+  +-- "unknown"/erro -> NIVEL 2 direto
 ```
 
-### Connections.tsx - handleConnectInstance modificado
-
-```text
-Antes:
-  get_qrcode falha sem QR → setQrError("QR Code nao disponivel")
-
-Depois:
-  get_qrcode retorna sem QR:
-    - Se retryable ou sem qrCode: inicia polling (que tentara buscar QR)
-    - Mostra estado de "Aguardando..." no dialog em vez de erro
-```
-
-### QRCodeDialog.tsx - Estado intermediario
-
-```text
-Antes:
-  Sem QR + sem erro + sem loading → "QR Code nao disponivel" (beco sem saida)
-
-Depois:
-  Sem QR + sem erro + sem loading + pollCount > 0 → "Aguardando QR Code..." com spinner + botao retry
-  Sem QR + sem erro + sem loading + pollCount == 0 → "QR Code nao disponivel" + botao retry
-```
-
-## Resultado Esperado
-
-- Ao criar uma instancia, se o QR nao vier imediatamente, o dialog mostra "Aguardando QR Code..." e continua tentando automaticamente
-- O polling busca ativamente o QR code via `get_qrcode` (que faz `/instance/connect`) a cada 3-5s
-- Quando a Evolution API finalmente gerar o QR (apos 30-60s), ele aparece automaticamente no dialog
-- O usuario nao precisa fechar e reabrir o dialog manualmente
+Essa mudanca reduz drasticamente a chance de destruir sessoes que estao se recuperando apos um restart do servidor.
