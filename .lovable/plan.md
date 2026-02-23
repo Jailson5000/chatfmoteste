@@ -1,129 +1,120 @@
 
+## Corrigir Instancias Conectadas que Nao Enviam/Recebem Mensagens
 
-## Corrigir Ciclo de Desconexao de Instancias WhatsApp
+### Diagnostico Completo
 
-### Problema Raiz
+Analisando os logs, banco de dados e codigo, identifiquei 3 problemas interligados:
 
-Quando uma mensagem falha com "Connection Closed", o sistema reage de forma excessivamente agressiva:
+**Problema 1: Guard excessivo no webhook mascara desconexoes reais**
 
-1. Marca a instancia como `disconnected` (status mais grave)
-2. Dispara `/instance/connect` imediatamente no background
-3. O cron `auto-reconnect-instances` tambem detecta e tenta reconectar
-4. Multiplas chamadas simultaneas ao servidor Evolution API sobrecarregam o servidor
-5. Isso causa desconexao em cascata de OUTRAS instancias no mesmo servidor
+No `evolution-webhook`, linhas 4288-4296, quando o banco mostra uma instancia como `connected` e a Evolution API envia um evento `connecting`, o webhook faz um `return` imediato sem processar nada. Isso foi adicionado para evitar "flickering" na UI, mas tem um efeito colateral grave:
 
-Os logs mostram o padrao claro: instancias desconectando em sequencia (14:20 → 14:23 → 14:26), todas no mesmo servidor `evo.fmoadv.com.br`.
+- Quando a sessao WhatsApp cai e a Evolution API tenta reconectar, ela envia eventos `connecting`
+- Nosso webhook ignora esses eventos porque o banco diz `connected`
+- O banco fica mostrando `connected` para uma instancia que NAO esta conectada
+- Nenhuma mensagem chega (webhook so recebe `connection.update`, zero `messages.upsert`)
+- Ao tentar enviar, falha com "Connection Closed"
 
-### Correcoes
+Os logs confirmam: TODAS as instancias estao recebendo apenas `connection.update` com `state: connecting`, e o webhook diz "Ignoring connecting state - instance already connected".
 
-**Arquivo: `supabase/functions/evolution-api/index.ts`**
+**Problema 2: Mensagem do usuario e destruida no erro**
 
-**1. Trocar status de `disconnected` para `connecting` no erro "Connection Closed"**
+Quando o envio falha, o conteudo original da mensagem e substituido por:
+```
+"Conexao WhatsApp perdida. Reconectando automaticamente...: <mensagem original>"
+```
+Isso sobrescreve o campo `content` da mensagem, destruindo o texto original do usuario na interface.
 
-O erro "Connection Closed" e transiente - a Evolution API geralmente reconecta sozinha em 2-5 segundos. Marcar como `disconnected` e excessivo e dispara alertas desnecessarios.
+**Problema 3: Retry de 3s nao e suficiente quando a instancia esta genuinamente desconectada**
 
-Mudar linhas ~1997-2007:
+O retry com delay de 3 segundos funciona para erros transientes rapidos, mas quando a instancia perdeu a sessao WhatsApp, 3 segundos nao sao suficientes para reconectar.
+
+### Solucao
+
+**Arquivo 1: `supabase/functions/evolution-webhook/index.ts`**
+
+Substituir o guard nas linhas 4288-4296 por uma logica baseada em tempo. Em vez de ignorar completamente o `connecting` quando o banco diz `connected`, verificar ha quanto tempo a instancia esta `connected`. Se a ultima atualizacao do status foi ha mais de 60 segundos, permitir a transicao para `connecting` (desconexao real). Se foi ha menos de 60 segundos, manter o guard (reconexao rapida normal da Evolution API).
+
+```text
+// ANTES (bugado - mascara desconexoes reais):
+} else if (instance.status === 'connected') {
+  logDebug('CONNECTION', 'Ignoring connecting state...');
+  return new Response(...); // RETURN EARLY - nunca processa
+}
+
+// DEPOIS (permite detectar desconexoes reais):
+} else if (instance.status === 'connected') {
+  const lastUpdate = new Date(instance.updated_at).getTime();
+  const now = Date.now();
+  const elapsedSeconds = (now - lastUpdate) / 1000;
+
+  if (elapsedSeconds < 60) {
+    // Reconexao rapida normal - ignorar para evitar flickering
+    logDebug('CONNECTION', 'Ignoring connecting (recent connection)');
+    // Atualizar apenas last_webhook_event e updated_at, sem mudar status
+    await supabaseClient.from('whatsapp_instances')
+      .update({ updated_at: new Date().toISOString(), last_webhook_event: 'connection.update' })
+      .eq('id', instance.id);
+    return new Response(...);
+  } else {
+    // Instancia "connected" ha mais de 60s mas recebendo connecting
+    // = desconexao real que nao gerou evento "close"
+    dbStatus = 'connecting';
+    logDebug('CONNECTION', 'Downgrading to connecting (stale connection)');
+  }
+}
+```
+
+Tambem remover o guard redundante `.neq('status', 'connected')` nas linhas 4419-4421, pois a logica acima ja controla quando permitir ou nao a transicao.
+
+**Arquivo 2: `supabase/functions/evolution-api/index.ts`**
+
+Correcao 1 - Nao destruir o conteudo da mensagem no erro (linhas ~2096-2102):
 
 ```text
 // ANTES:
-status: 'disconnected'
-disconnected_since: new Date().toISOString()
+.update({ 
+  status: "failed",
+  content: `[erro]: ${body.message}`,  // DESTROI o conteudo original
+})
 
 // DEPOIS:
-status: 'connecting'
-// NAO setar disconnected_since para erros transientes
+.update({ 
+  status: "failed",
+  // Manter content original, usuario vera o status "failed" na UI
+})
 ```
 
-**2. Remover a reconexao imediata no background**
+Mesma correcao no catch generico (linhas ~2127-2133).
 
-Remover as linhas ~2010-2019 que chamam `/instance/connect` diretamente no handler de erro do envio. Deixar que o cron `auto-reconnect-instances` cuide disso de forma controlada (ele ja roda a cada 5 minutos e tem logica de throttling).
-
-**3. Adicionar retry com delay antes de falhar**
-
-Antes de declarar o envio como falho e marcar a instancia, tentar novamente UMA vez apos 3 segundos de espera. Muitas vezes o "Connection Closed" e momentaneo e a segunda tentativa funciona.
+Correcao 2 - Quando retry falha e a instancia esta genuinamente desconectada, marcar como `disconnected` (nao `connecting`), para que o auto-reconnect cron trate adequadamente:
 
 ```text
-// Pseudocodigo:
-if (isConnectionClosed && !isRetry) {
-  await new Promise(r => setTimeout(r, 3000)); // esperar 3 segundos
-  // Tentar enviar novamente (mesma chamada)
-  const retryResponse = await fetch(sendUrl, ...);
-  if (retryResponse.ok) {
-    // Sucesso na segunda tentativa - nao marcar nada
-    return;
-  }
-  // Se falhou de novo, ai sim marcar como connecting
-}
+// ANTES (linhas ~2071-2077):
+.update({ status: 'connecting' })
+
+// DEPOIS:
+.update({ status: 'disconnected', disconnected_since: new Date().toISOString() })
 ```
-
-**4. Proteger contra marcacao duplicada**
-
-Antes de atualizar o status, verificar se a instancia ja esta como `connecting` ou `disconnected` para evitar updates desnecessarios que geram webhooks extras.
-
-### Detalhes Tecnicos
-
-No `backgroundSend` (linhas ~1988-2046), substituir o bloco de tratamento de "Connection Closed" por:
-
-```text
-if (isConnectionClosed && instanceId) {
-  // RETRY: Esperar 3s e tentar novamente (erro pode ser transiente)
-  console.warn(`[Evolution API] Connection Closed for ${instanceId} - retrying in 3s...`);
-  await new Promise(resolve => setTimeout(resolve, 3000));
-
-  const retryResponse = await fetch(
-    `${apiUrl}/message/sendText/${instance.instance_name}`,
-    {
-      method: "POST",
-      headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-      body: JSON.stringify(sendPayload),
-    }
-  );
-
-  if (retryResponse.ok) {
-    // Sucesso no retry!
-    const retryData = await retryResponse.json();
-    const retryWhatsAppId = retryData.key?.id || retryData.messageId || retryData.id;
-    console.log(`[Evolution API] Retry succeeded! whatsapp_message_id: ${retryWhatsAppId}`);
-    if (conversationId && retryWhatsAppId) {
-      await supabaseClient.from("messages")
-        .update({ whatsapp_message_id: retryWhatsAppId, status: "sent" })
-        .eq("id", tempMessageId);
-    }
-    return; // Nao marcar instancia como desconectada
-  }
-
-  // Retry tambem falhou - marcar como CONNECTING (nao disconnected)
-  console.error(`[Evolution API] Retry also failed for ${instanceId} - marking as connecting`);
-  await supabaseClient
-    .from("whatsapp_instances")
-    .update({ status: 'connecting', updated_at: new Date().toISOString() })
-    .eq("id", instanceId)
-    .neq("status", "disconnected"); // Nao sobrescrever se ja esta pior
-
-  // NAO chamar /instance/connect aqui - deixar o cron cuidar
-  errorReason = "Conexao temporariamente indisponivel. Tentando reconectar...";
-}
-```
-
-A mesma logica de retry deve ser aplicada no bloco de envio de midia (linhas ~1894-1911) que tambem pode receber "Connection Closed".
 
 ### Resumo das Mudancas
 
-| O que muda | Antes | Depois |
+| Problema | Antes | Depois |
 |---|---|---|
-| Status no erro | `disconnected` | `connecting` |
-| Reconexao imediata | Sim (`/instance/connect` no handler) | Nao (deixar cron) |
-| Retry antes de falhar | Nenhum | 1 tentativa apos 3s |
-| `disconnected_since` | Setado imediatamente | Nao alterado (erro transiente) |
+| Guard no webhook | Ignora TODOS os `connecting` quando DB=connected | Ignora apenas se connected < 60s (normal flickering) |
+| Conteudo da mensagem | Sobrescrito com erro | Mantido original, apenas status=failed |
+| Guard .neq no webhook | Bloqueia DB update connected->connecting | Removido (logica de tempo ja controla) |
+| Status no send failure | `connecting` | `disconnected` (permite auto-reconnect) |
 
-### Impacto Esperado
+### Impacto
 
-- Elimina o efeito cascata de desconexoes entre instancias
-- Reduz chamadas ao servidor Evolution API (menos sobrecarga)
-- Mensagens com falha transiente serao entregues no retry automatico
-- O cron `auto-reconnect-instances` continua como fallback para desconexoes reais
+- Instancias que perderam a conexao serao detectadas em ate 60 segundos
+- O status no banco refletira o estado real da Evolution API
+- Mensagens falhadas manterao o conteudo original visivel na interface
+- O cron auto-reconnect tratara instancias desconectadas corretamente
+- O flickering rapido durante reconexoes normais continua bloqueado (threshold de 60s)
 
-### Arquivo editado
+### Arquivos editados
 
+- `supabase/functions/evolution-webhook/index.ts`
 - `supabase/functions/evolution-api/index.ts`
-
