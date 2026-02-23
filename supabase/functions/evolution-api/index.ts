@@ -673,11 +673,11 @@ serve(async (req) => {
         // If no QR code from create response, retry with /instance/connect endpoint
         // Baileys v7 needs more time to initialize the WebSocket session
         if (!qrCode) {
-          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect (Baileys v7 init delay)`);
-          const maxRetries = 4;
-          const retryDelayMs = 5000;
+          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect (v2.2.3 - fast init)`);
+          const maxRetries = 2;
+          const retryDelayMs = 2000;
 
-          // Initial wait for Baileys to initialize
+          // Brief wait for Baileys v6 to initialize (much faster than v7)
           await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
 
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -1118,18 +1118,8 @@ serve(async (req) => {
             "Content-Type": "application/json",
           };
 
-          // === STEP 0: Detect Evolution API version + Check connectionState ===
-          let detectedApiVersion = "unknown";
-          try {
-            const versionResp = await fetchWithTimeout(`${apiUrl}`, { method: "GET", headers: recoveryHeaders }, 5000);
-            if (versionResp.ok) {
-              const versionData = await versionResp.json();
-              detectedApiVersion = versionData?.version || "unknown";
-              console.log(`[Evolution API] 🏷️ Detected Evolution API version: ${detectedApiVersion}`);
-            }
-          } catch (_) {
-            console.warn(`[Evolution API] Could not detect API version`);
-          }
+          // v2.2.3 - Baileys v6 initializes fast, no need for version detection
+          const detectedApiVersion = "v2.2.3";
 
           // Helper to extract QR from connect response
           const extractQrFromResponse = (data: any): string | null => {
@@ -4210,7 +4200,24 @@ serve(async (req) => {
 
         if (!restartResponse.ok) {
           const errorText = await safeReadResponseText(restartResponse);
-          throw new Error(simplifyEvolutionError(restartResponse.status, errorText));
+          console.warn(`[Evolution API] GLOBAL restart failed (${restartResponse.status}), trying /instance/connect as fallback...`);
+          
+          // Fallback: try connect endpoint
+          const connectResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${body.instanceName}`, {
+            method: "GET",
+            headers: {
+              apikey: globalApiKey,
+              "Content-Type": "application/json",
+            },
+          });
+          
+          if (!connectResponse.ok) {
+            throw new Error(simplifyEvolutionError(restartResponse.status, errorText));
+          }
+          
+          return new Response(JSON.stringify({ success: true, message: "Instance reconnected via connect fallback" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
         }
 
         return new Response(JSON.stringify({ success: true, message: "Instance restarted" }), {
