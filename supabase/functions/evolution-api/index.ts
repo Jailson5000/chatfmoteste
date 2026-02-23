@@ -1193,18 +1193,29 @@ serve(async (req) => {
                   return await returnConnectedSuccess("Instância já está conectada");
                 }
 
-                // If Baileys is still initializing ("connecting"), return retryable immediately
+                // If Baileys is still initializing ("connecting"), check if awaiting QR
                 if (currentState === "connecting") {
-                  console.log(`[Evolution API] ⏳ Instance is "connecting" - Baileys still initializing. Returning retryable.`);
-                  return new Response(
-                    JSON.stringify({
-                      success: false,
-                      error: "WhatsApp está inicializando a conexão. Aguarde alguns segundos...",
-                      retryable: true,
-                      connectionState: "connecting",
-                    }),
-                    { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-                  );
+                  const { data: dbInstance } = await supabaseClient
+                    .from("whatsapp_instances")
+                    .select("awaiting_qr")
+                    .eq("id", body.instanceId)
+                    .single();
+
+                  if (dbInstance?.awaiting_qr) {
+                    console.log(`[Evolution API] ⏳ Instance is "connecting" + awaiting_qr=true. Proceeding to Level 1 recovery to force QR generation.`);
+                    // Nao retorna - continua para o Level 1 recovery abaixo
+                  } else {
+                    console.log(`[Evolution API] ⏳ Instance is "connecting" - Baileys still initializing. Returning retryable.`);
+                    return new Response(
+                      JSON.stringify({
+                        success: false,
+                        error: "WhatsApp está inicializando a conexão. Aguarde alguns segundos...",
+                        retryable: true,
+                        connectionState: "connecting",
+                      }),
+                      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+                    );
+                  }
                 }
               }
             } catch (stateErr: any) {
