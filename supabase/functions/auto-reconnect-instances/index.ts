@@ -272,8 +272,8 @@ async function attemptConnect(instance: InstanceToReconnect): Promise<ReconnectR
   const apiUrl = normalizeUrl(instance.api_url);
   
   try {
-    // v2.3.7 - Baileys v7: /instance/restart removed (404), use /instance/connect only
-    console.log(`[Auto-Reconnect] Attempting connect for ${instance.instance_name} (v2.3.7 - connect only)...`);
+    // v2.2.3 - /instance/connect works in both v2.2.3 and v2.3.x
+    console.log(`[Auto-Reconnect] Attempting connect for ${instance.instance_name} (v2.2.3 - connect only)...`);
     
     const connectResponse = await fetchWithTimeout(
       `${apiUrl}/instance/connect/${encodeURIComponent(instance.instance_name)}`,

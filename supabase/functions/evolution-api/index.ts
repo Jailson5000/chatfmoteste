@@ -671,13 +671,13 @@ serve(async (req) => {
         let qrCode: string | null = _extractQr(createData);
 
         // If no QR code from create response, retry with /instance/connect endpoint
-        // Baileys v7 needs more time to initialize the WebSocket session
+        // v2.2.3 - Baileys v6 fast init
         if (!qrCode) {
-          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect (v2.3.7 - Baileys v7 needs more time)`);
-          const maxRetries = 3;
-          const retryDelayMs = 4000;
+          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect (v2.2.3 - fast init)`);
+          const maxRetries = 2;
+          const retryDelayMs = 2000;
 
-          // Wait for Baileys v7 to initialize (slower than v6)
+          // Wait for Baileys v6 to initialize
           await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
 
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -1118,8 +1118,8 @@ serve(async (req) => {
             "Content-Type": "application/json",
           };
 
-          // v2.3.7 - Baileys v7 needs more time for session init
-          const detectedApiVersion = "v2.3.7";
+          // v2.2.3 optimized
+          const detectedApiVersion = "v2.2.3";
 
           // Helper to extract QR from connect response
           const extractQrFromResponse = (data: any): string | null => {
@@ -1244,7 +1244,7 @@ serve(async (req) => {
               }
               
               if (l1 < 3) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                await new Promise(resolve => setTimeout(resolve, 3000));
               }
             }
 
@@ -1292,7 +1292,7 @@ serve(async (req) => {
               console.warn(`[Evolution API] Level 2 - Logout failed (non-fatal):`, e);
             }
 
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await new Promise(resolve => setTimeout(resolve, 3000));
 
             for (let l2 = 1; l2 <= 2; l2++) {
               console.log(`[Evolution API] Level 2 - connect attempt ${l2}/2...`);
@@ -1320,7 +1320,7 @@ serve(async (req) => {
                 console.warn(`[Evolution API] Level 2 attempt ${l2} error:`, l2Err?.message);
               }
               if (l2 < 2) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
+                await new Promise(resolve => setTimeout(resolve, 3000));
               }
             }
 
