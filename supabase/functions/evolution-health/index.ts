@@ -97,21 +97,42 @@ serve(async (req) => {
       }
     );
 
-    // Validate JWT using getClaims (local validation, no network call)
+    // Validate JWT - try getClaims first (local), fallback to getUser (network)
     const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
+    let userId: string | null = null;
 
-    if (claimsError || !claimsData?.claims) {
-      console.error("[Evolution Health] Claims error:", claimsError?.message);
+    // Attempt 1: getClaims (no network call)
+    try {
+      const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
+      if (!claimsError && claimsData?.claims?.sub) {
+        userId = claimsData.claims.sub as string;
+      }
+    } catch (_) { /* fallback below */ }
+
+    // Attempt 2: getUser (network call to auth server)
+    if (!userId) {
+      try {
+        const { data: { user }, error: userError } = await supabaseUser.auth.getUser(token);
+        if (!userError && user?.id) {
+          userId = user.id;
+        }
+      } catch (_) { /* both failed */ }
+    }
+
+    if (!userId) {
+      console.error("[Evolution Health] Both getClaims and getUser failed for token validation");
       throw new Error("Invalid authorization token");
     }
 
-    const userId = claimsData.claims.sub as string;
-
     // Check if user is admin
-    const { data: adminRole } = await supabaseAdmin.rpc("is_admin", {
+    const { data: adminRole, error: adminError } = await supabaseAdmin.rpc("is_admin", {
       _user_id: userId,
     });
+
+    if (adminError) {
+      console.error("[Evolution Health] Admin check DB error:", adminError.message);
+      throw new Error("Erro ao verificar permissões. Tente novamente.");
+    }
 
     if (!adminRole) {
       throw new Error("Access denied. Admin role required.");
