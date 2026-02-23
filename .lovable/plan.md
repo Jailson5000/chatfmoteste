@@ -1,128 +1,55 @@
 
+# Corrigir: QR Code nao aparece na pagina Global Admin
 
-# Plano: Corrigir Geração de QR Code e Race Condition no Polling
+## Problema Real Identificado
 
-## Problema Identificado
+O backend ESTA gerando o QR Code com sucesso (confirmado nos logs: `QR Code extracted: true`). O problema esta na pagina **Global Admin Connections** (`/global-admin/connections`):
 
-Os logs mostram uma contradição clara:
-```
-Level 2 (create) recovery successful - QR code obtained!
-Level 2 - QR extracted from create response!
-Levels 1-2 exhausted without QR. Returning retryable.
-```
+1. O botao "Reiniciar Conexao" chama `restartInstance.mutate()` que faz `get_qrcode` no backend
+2. O backend retorna o QR Code no campo `data.qrCode`
+3. Mas o `restartInstance` no hook `useGlobalAdminInstances` apenas mostra um **toast** ("QR Code disponivel") - **nunca exibe o QR Code visualmente**
+4. A pagina Global Admin **nao tem nenhum componente de dialog para exibir QR Codes** (diferente da pagina `/connections` do tenant que tem o `QRCodeDialog`)
 
-Isso acontece porque:
-1. O frontend faz **polling agressivo** chamando `get_qrcode` repetidamente
-2. A primeira chamada faz Level 2 recovery (logout + delete + create) e obtém o QR Code
-3. Enquanto essa chamada ainda processa, **outra chamada paralela** entra e vê `{"count":0}` porque a instância acabou de ser recriada
-4. A segunda chamada dispara **outro** Level 2, deletando a instância que acabou de ser criada
-5. O resultado final retorna "exhausted" ao frontend, que nunca recebe o QR Code
+## Solucao
 
-Sobre a instância 3528 (`inst_eqblozqc`): ela caiu por causa do `docker restart evolution`, que forca re-autenticacao de **todas** as instancias. Isso e esperado -- ela precisa ser reconectada via QR Code.
+### 1. Adicionar estado e dialog de QR Code na pagina GlobalAdminConnections
 
-## Solucao em 2 Partes
+- Adicionar estados: `qrDialogOpen`, `qrCode`, `qrInstanceName`
+- Quando o usuario clicar em "Reiniciar Conexao", capturar o retorno do `restartInstance` e, se tiver `qrCode`, abrir o dialog com a imagem
+- Reutilizar o componente existente `QRCodeDialog` que ja existe em `src/components/connections/QRCodeDialog.tsx`
 
-### Parte 1: Protecao contra chamadas paralelas no backend
+### 2. Modificar o botao "Reiniciar Conexao" para exibir QR
 
-No `evolution-api/index.ts`, adicionar um **guard** que impede multiplas chamadas `get_qrcode` de executar recovery simultaneamente para a mesma instancia:
+Em vez de usar `restartInstance.mutate()` diretamente, criar um handler que:
+1. Chama `restartInstance.mutateAsync()`
+2. Verifica se o retorno contem `qrCode`
+3. Se sim, abre o `QRCodeDialog` com a imagem do QR
+4. Se a instancia ja esta conectada, mostra apenas o toast
 
-- Antes de iniciar Level 1/Level 2 recovery, verificar se a instancia ja esta em `awaiting_qr` com um `updated_at` recente (menos de 60 segundos)
-- Se estiver, retornar `retryable: true` sem disparar novo ciclo de recovery
-- Isso impede o loop destrutivo onde uma chamada desfaz o trabalho da outra
+### 3. Adicionar botao dedicado "Gerar QR Code"
 
-### Parte 2: Debounce no polling do frontend
-
-No `src/pages/Connections.tsx`, evitar que o polling chame `get_qrcode` enquanto uma chamada anterior ainda esta em andamento:
-
-- Adicionar um flag `isQrFetchInProgress` para impedir chamadas paralelas
-- Aumentar o intervalo minimo de polling para QR Code (de ~3s para ~8s)
-- Quando o backend retornar `retryable: true`, aguardar o tempo sugerido antes de tentar novamente
+Adicionar uma opcao no dropdown de acoes especificamente para gerar QR Code, visivel quando a instancia nao esta conectada. Isso facilita a reconexao de instancias desconectadas.
 
 ## Detalhes Tecnicos
 
-### Arquivo 1: `supabase/functions/evolution-api/index.ts`
+### Arquivo: `src/pages/global-admin/GlobalAdminConnections.tsx`
 
-Na secao de `isCorruptedSession` (linha ~1100), antes de iniciar o Level 1 recovery:
+Mudancas:
+- Importar `QRCodeDialog` de `@/components/connections/QRCodeDialog`
+- Adicionar estados: `adminQrCode`, `adminQrDialogOpen`, `adminQrLoading`, `adminQrError`, `adminQrInstanceName`
+- Criar funcao `handleGenerateQR(instance)` que:
+  - Seta estado de loading
+  - Abre o dialog
+  - Chama `restartInstance.mutateAsync(instance.id)`
+  - Se resultado tem `qrCode`, seta `adminQrCode`
+  - Se `status === "open"/"connected"`, mostra toast de ja conectado e fecha dialog
+- Adicionar no dropdown de acoes um item "Gerar QR Code" para instancias nao conectadas
+- Renderizar o `QRCodeDialog` no final do componente
 
-```typescript
-// GUARD: Check if another get_qrcode call recently ran recovery
-const { data: freshInstance } = await supabaseClient
-  .from("whatsapp_instances")
-  .select("status, awaiting_qr, updated_at")
-  .eq("id", body.instanceId)
-  .single();
+### Arquivo: `src/hooks/useGlobalAdminInstances.tsx`
 
-const updatedAgo = freshInstance?.updated_at 
-  ? Date.now() - new Date(freshInstance.updated_at).getTime() 
-  : Infinity;
+Nenhuma mudanca necessaria - o `restartInstance` ja retorna o `qrCode` no resultado do `mutateAsync`. A tipagem ja inclui `qrCode?: string` no retorno.
 
-// If instance was updated to awaiting_qr in the last 60s, 
-// another call already ran recovery -- just return retryable
-if (freshInstance?.awaiting_qr === true && updatedAgo < 60000) {
-  console.log(`[Evolution API] Recovery already in progress (updated ${updatedAgo}ms ago). Skipping.`);
-  // Try one simple connect to see if QR is available now
-  try {
-    const quickResp = await fetchWithTimeout(
-      `${apiUrl}/instance/connect/${instance.instance_name}`,
-      { method: "GET", headers: recoveryHeaders }, 8000
-    );
-    if (quickResp.ok) {
-      const quickData = await quickResp.json();
-      const quickQr = extractQrFromResponse(quickData);
-      if (quickQr) {
-        return await returnQrSuccess(quickQr, "Quick retry");
-      }
-    }
-  } catch (_) {}
-  
-  return new Response(JSON.stringify({
-    success: false,
-    error: "Recuperacao em andamento. Aguarde 10 segundos...",
-    retryable: true,
-    connectionState: "recovering",
-  }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-}
+### Nenhuma mudanca no backend
 
-// Mark instance as recovering BEFORE starting Level 1
-await supabaseClient
-  .from("whatsapp_instances")
-  .update({ awaiting_qr: true, updated_at: new Date().toISOString() })
-  .eq("id", body.instanceId);
-```
-
-### Arquivo 2: `src/pages/Connections.tsx`
-
-Adicionar debounce no `pollOnce`:
-
-```typescript
-const qrFetchInProgressRef = useRef(false);
-
-// Inside pollOnce, wrap the getQRCode call:
-if (!currentQRCode) {
-  if (qrFetchInProgressRef.current) {
-    console.log("[Connections] QR fetch already in progress, skipping this poll");
-    // Schedule next poll
-    const nextInterval = getPollingInterval(count);
-    pollIntervalRef.current = setTimeout(() => pollOnce(instanceId), nextInterval);
-    return;
-  }
-  
-  qrFetchInProgressRef.current = true;
-  try {
-    const qrResult = await getQRCode.mutateAsync(instanceId);
-    // ... existing handling ...
-  } finally {
-    qrFetchInProgressRef.current = false;
-  }
-}
-```
-
-Tambem aumentar o intervalo minimo de polling de 3s para 8s quando ainda nao tem QR Code.
-
-## Resultado Esperado
-
-1. A primeira chamada `get_qrcode` executa o Level 2 recovery normalmente e retorna o QR Code
-2. Chamadas subsequentes detectam que a recovery ja esta em andamento e fazem apenas um `connect` simples para buscar o QR existente
-3. O frontend nao dispara chamadas paralelas, evitando o loop destrutivo
-4. As instancias desconectadas pelo `docker restart` poderao ser reconectadas normalmente via QR Code
-
+O backend ja funciona corretamente. Os logs confirmam que o QR Code e gerado e retornado com sucesso.
