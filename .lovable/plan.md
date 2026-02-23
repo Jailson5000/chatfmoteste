@@ -1,55 +1,37 @@
 
-# Corrigir: QR Code nao aparece na pagina Global Admin
+# Remover QR Code do Global Admin e Corrigir Erros
 
-## Problema Real Identificado
+## Resumo
 
-O backend ESTA gerando o QR Code com sucesso (confirmado nos logs: `QR Code extracted: true`). O problema esta na pagina **Global Admin Connections** (`/global-admin/connections`):
+A funcionalidade de "Gerar QR Code" foi adicionada por engano na pagina Global Admin Connections. Essa funcionalidade pertence apenas a pagina do tenant (`/connections`). Vamos remover todo o codigo relacionado.
 
-1. O botao "Reiniciar Conexao" chama `restartInstance.mutate()` que faz `get_qrcode` no backend
-2. O backend retorna o QR Code no campo `data.qrCode`
-3. Mas o `restartInstance` no hook `useGlobalAdminInstances` apenas mostra um **toast** ("QR Code disponivel") - **nunca exibe o QR Code visualmente**
-4. A pagina Global Admin **nao tem nenhum componente de dialog para exibir QR Codes** (diferente da pagina `/connections` do tenant que tem o `QRCodeDialog`)
+Os erros de "Invalid authorization token" e "Access denied" no `evolution-health` ja foram corrigidos na ultima alteracao e os logs confirmam que a funcao esta funcionando normalmente desde 23:54. Nenhuma alteracao adicional e necessaria no backend.
 
-## Solucao
-
-### 1. Adicionar estado e dialog de QR Code na pagina GlobalAdminConnections
-
-- Adicionar estados: `qrDialogOpen`, `qrCode`, `qrInstanceName`
-- Quando o usuario clicar em "Reiniciar Conexao", capturar o retorno do `restartInstance` e, se tiver `qrCode`, abrir o dialog com a imagem
-- Reutilizar o componente existente `QRCodeDialog` que ja existe em `src/components/connections/QRCodeDialog.tsx`
-
-### 2. Modificar o botao "Reiniciar Conexao" para exibir QR
-
-Em vez de usar `restartInstance.mutate()` diretamente, criar um handler que:
-1. Chama `restartInstance.mutateAsync()`
-2. Verifica se o retorno contem `qrCode`
-3. Se sim, abre o `QRCodeDialog` com a imagem do QR
-4. Se a instancia ja esta conectada, mostra apenas o toast
-
-### 3. Adicionar botao dedicado "Gerar QR Code"
-
-Adicionar uma opcao no dropdown de acoes especificamente para gerar QR Code, visivel quando a instancia nao esta conectada. Isso facilita a reconexao de instancias desconectadas.
-
-## Detalhes Tecnicos
+## Alteracoes
 
 ### Arquivo: `src/pages/global-admin/GlobalAdminConnections.tsx`
 
-Mudancas:
-- Importar `QRCodeDialog` de `@/components/connections/QRCodeDialog`
-- Adicionar estados: `adminQrCode`, `adminQrDialogOpen`, `adminQrLoading`, `adminQrError`, `adminQrInstanceName`
-- Criar funcao `handleGenerateQR(instance)` que:
-  - Seta estado de loading
-  - Abre o dialog
-  - Chama `restartInstance.mutateAsync(instance.id)`
-  - Se resultado tem `qrCode`, seta `adminQrCode`
-  - Se `status === "open"/"connected"`, mostra toast de ja conectado e fecha dialog
-- Adicionar no dropdown de acoes um item "Gerar QR Code" para instancias nao conectadas
-- Renderizar o `QRCodeDialog` no final do componente
+Remover os seguintes elementos:
 
-### Arquivo: `src/hooks/useGlobalAdminInstances.tsx`
+1. **Imports** (linhas 60-62):
+   - Remover `QrCode` do import do lucide-react
+   - Remover `import { QRCodeDialog } from "@/components/connections/QRCodeDialog"`
 
-Nenhuma mudanca necessaria - o `restartInstance` ja retorna o `qrCode` no resultado do `mutateAsync`. A tipagem ja inclui `qrCode?: string` no retorno.
+2. **Estados de QR Code** (linhas 205-208):
+   - Remover `qrDialogOpen`, `qrCode`, `qrLoading`, `qrError`
 
-### Nenhuma mudanca no backend
+3. **Funcao `handleGenerateQR`** (linhas 210-237):
+   - Remover toda a funcao
 
-O backend ja funciona corretamente. Os logs confirmam que o QR Code e gerado e retornado com sucesso.
+4. **Botao "Gerar QR Code" na view agrupada** (linhas 818-826):
+   - Remover o `DropdownMenuItem` com "Gerar QR Code" do dropdown de acoes na tabela agrupada
+
+5. **Botao "Gerar QR Code" na view lista** (linhas 1138-1146):
+   - Remover o `DropdownMenuItem` com "Gerar QR Code" do dropdown de acoes na tabela lista
+
+6. **Componente QRCodeDialog** (linhas 1328-1347):
+   - Remover a renderizacao do `QRCodeDialog` no final do componente
+
+### Nenhuma alteracao no backend
+
+Os logs do `evolution-health` confirmam que a funcao esta operando normalmente desde as 23:54 UTC. Os erros reportados (23:48-23:52) foram de versoes anteriores do deploy.
