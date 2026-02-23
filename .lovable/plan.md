@@ -1,80 +1,84 @@
 
 
-# Correcao: QR Code nao gerado apos recreate de instancia
+# Correcao: 3 Problemas no Fluxo de QR Code e Versao do WhatsApp
 
-## Problema Confirmado nos Logs
+## Problema 1 - Delete nao funciona, instancia fica "presa"
 
-Os logs de 16:45-16:46 mostram o fluxo exato do bug:
+Os logs mostram claramente o que acontece com `inst_7sw6k99c`:
 
 ```text
-16:45:59 - Connect retorna 404 (instancia nao existe na Evolution)
-16:45:59 - Recreate executado com sucesso
-16:46:06 - Connect pos-recreate retorna {"count":0} (delay de apenas 1s)
-16:46:06 - Entra no fluxo de "corrupted session"
-16:46:12 - Logout+Connect: tambem retorna {"count":0}
-16:46:34 - Delete+Recreate: Fresh QR attempt 1 retorna {"count":0}
-16:46:37 - Fresh QR attempt 2: {"count":0}
-16:46:42 - FALHA FINAL
+17:01:06 - connect retorna {"count":0} (sessao corrompida)
+17:01:06 - connectionState = "connecting"
+17:01:06 - Recovery Step 1: Logout + Connect -> sem QR
+17:01:09 - connectionState = "close"
+17:01:10 - Recovery Step 2: Delete + Recreate
+17:01:19 - Recreate attempt 1: 403 "name already in use"
+17:01:26 - Recreate attempt 2: 403 "name already in use"
+17:01:36 - Recreate attempt 3: 403 "name already in use"
+17:01:36 - FALHA FINAL
 ```
 
-## Causa Raiz
+O delete retorna sucesso mas a Evolution API nao remove a instancia imediatamente. O create subsequente recebe 403 em todas as 3 tentativas. Quando isso acontece, o codigo atual simplesmente falha - mas a instancia AINDA EXISTE no servidor.
 
-Dois problemas combinados:
+**Solucao**: Quando todas as tentativas de create retornam 403, a instancia ainda existe. Em vez de falhar, devemos fazer logout + connect com delays maiores (a instancia ja existe, so precisa limpar a sessao).
 
-1. **Delay insuficiente apos recreate**: Apos criar a instancia na Evolution API, o codigo espera apenas **1 segundo** (linha 793) antes de chamar `/instance/connect`. O Baileys v7 precisa de mais tempo para inicializar a sessao internamente.
+## Problema 2 - Instancias nao recriadas apos tentativa falha
 
-2. **Duplo recovery desnecessario**: Quando o connect pos-recreate retorna `{"count":0}`, o codigo cai no bloco de "corrupted session" (linha 866-1127), que faz **outro ciclo completo** de logout+delete+recreate - agora em cima de uma instancia recem-criada que so precisava de mais tempo.
+Como o fluxo falhou no meio, as instancias ficaram em estado inconsistente - existem na Evolution mas o sistema as trata como problemicas.
 
-## Solucao
+**Solucao**: Adicionar fallback no bloco de 403 do recovery step 2 - se o create falhar com 403, fazer logout da instancia existente e tentar connect com retries progressivos.
 
-### Alteracao no arquivo: `supabase/functions/evolution-api/index.ts`
+## Problema 3 - Versao do WhatsApp
 
-#### 1. Aumentar delay apos recreate no bloco 404 (linha 793)
+A versao do WhatsApp Web e controlada pelo Baileys dentro do container da Evolution API. A versao atual e `2.3000.1033105955`. Para atualizar, e necessario alterar o arquivo `.env` no container da Evolution ou atualizar o pacote Baileys. Isso NAO pode ser feito pela edge function - e uma configuracao do servidor.
 
-Mudar de 1s para **5 segundos** o tempo de espera apos o create, e adicionar **retry com delay progressivo** para o connect pos-recreate.
+Para atualizar a versao, rode no servidor VPS:
 
-Em vez de:
-```text
-wait 1s -> connect (unica tentativa)
+```bash
+docker exec -it evolution sh -c "
+  # Verificar a versao atual do WhatsApp Web no check-update
+  wget -qO- 'https://web.whatsapp.com/check-update?version=0&platform=web' 2>/dev/null | head -1
+"
 ```
 
-Fazer:
-```text
-wait 5s -> connect
-  -> Se QR: sucesso, retornar direto
-  -> Se {"count":0}: wait 5s -> connect (2a tentativa)
-    -> Se QR: sucesso
-    -> Se {"count":0}: retornar erro claro pedindo para aguardar
+Depois, atualize no `.env` da Evolution:
+```bash
+docker exec -it evolution sh -c "
+  # Editar a versao no Defaults do Baileys
+  sed -i 's/const version = \[2, 3000, [0-9]*/const version = [2, 3000, NOVA_VERSAO/' /evolution/node_modules/baileys/lib/Defaults/index.js
+"
+docker restart evolution
 ```
 
-#### 2. Evitar cascata para corrupted session apos recreate
+**Importante**: A versao do WhatsApp Web muda frequentemente. A versao correta pode ser obtida em `https://web.whatsapp.com/check-update?version=0&platform=web`.
 
-Apos o bloco de recreate do 404 (que termina na linha 840), se o connect pos-recreate retornou `{"count":0}`, **nao deixar cair no bloco de corrupted session**. Em vez disso, retornar uma resposta informativa pedindo ao usuario para tentar novamente em 30 segundos, pois a instancia foi recriada com sucesso mas o Baileys ainda esta inicializando.
+## Alteracoes no Codigo
 
-#### 3. Adicionar log de connectionState no bloco 404
+### Arquivo: `supabase/functions/evolution-api/index.ts`
 
-Antes de declarar que nao obteve QR, verificar o `connectionState` da instancia recem-criada. Se estiver `connecting`, informar ao usuario que a instancia esta inicializando.
+#### Correcao no Recovery Step 2 - Fallback quando create retorna 403
 
-### Detalhes Tecnicos
+No bloco de recovery step 2 (linhas 1128-1163), quando todas as tentativas de create falham com 403, em vez de lancar erro, adicionar um fallback:
 
-**Bloco 404 (linhas 729-840)** - Modificacoes:
+1. Se `recreateSuccess === false` e o motivo foi 403:
+   - Fazer logout da instancia existente
+   - Aguardar 5 segundos
+   - Tentar connect com 3 tentativas (5s entre cada)
+   - Se obtiver QR, retornar sucesso
+   - Se nao, retornar mensagem informativa pedindo para aguardar
 
-- Linha 793: Mudar `setTimeout(resolve, 1000)` para `setTimeout(resolve, 5000)`
-- Apos linha 802: Adicionar retry loop (ate 2 tentativas com 5s entre elas) para o connect, extraindo QR em cada tentativa
-- Se QR obtido em qualquer tentativa: retornar sucesso imediatamente (sem cair no fluxo de corrupted session)
-- Se nenhuma tentativa retornar QR: verificar connectionState e retornar resposta adequada
+#### Correcao no bloco 403 do fluxo de 404
 
-**Bloco corrupted session (linhas 866-1128)** - Adicionar guard:
+No bloco de fallback 403 (linhas 906-933), quando recebe 403 "name in use" na recriacao do 404:
 
-- Adicionar flag `wasRecreatedFrom404` que e setada `true` quando o fluxo 404 ja fez recreate
-- Se `wasRecreatedFrom404 === true` e `isCorruptedSession === true`: pular todo o recovery e retornar mensagem pedindo ao usuario para aguardar, pois ja foi recriada
-
-**Nenhuma outra action e afetada** - todas as demais (send_message, delete, configure_webhook, etc.) permanecem inalteradas.
+1. Apos o logout, aumentar o delay de 3s para 5s
+2. Adicionar retry loop (ate 3 tentativas com 5s entre elas) para o connect
+3. Se nenhuma tentativa retornar QR, verificar connectionState e retornar mensagem adequada
 
 ### Resultado Esperado
 
-- Instancias que retornam 404 serao recriadas e terao tempo suficiente para inicializar
-- Nao havera mais cascata de delete+recreate em cima de instancias recem-criadas
-- Mensagens de erro serao mais claras para o usuario
-- Instancias que realmente estao conectadas (Step 0 do connectionState) continuarao sendo detectadas corretamente
+- Instancias "presas" (existem na Evolution mas create retorna 403) serao tratadas via logout+connect com retries, em vez de falhar
+- O fluxo de 404 com 403 subsequente tera mais tentativas antes de desistir
+- Mensagens de erro serao mais claras e informativas
+- A versao do WhatsApp e atualizada manualmente no servidor (instrucoes acima)
 
