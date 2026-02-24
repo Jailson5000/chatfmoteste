@@ -540,6 +540,164 @@ export default function Kanban() {
                 />
               )}
             </>
+          ) : groupBy === 'responsible' ? (
+            <>
+              {/* Unassigned column */}
+              <KanbanColumn
+                id={null}
+                name="Sem Responsável"
+                color="#71717a"
+                conversations={filteredConversations.filter(c => !c.assigned_to && !c.current_automation_id)}
+                customStatuses={customStatuses}
+                tags={tags}
+                automations={automations}
+                isDragging={false}
+                draggedConversation={draggedConversation}
+                onDrop={() => {
+                  if (draggedConversation) {
+                    const conv = conversations.find(c => c.id === draggedConversation);
+                    if (conv) {
+                      transferHandler.mutate({ conversationId: conv.id, handlerType: 'human', assignedTo: undefined });
+                    }
+                  }
+                  setDraggedConversation(null);
+                }}
+                onConversationDragStart={(id) => setDraggedConversation(id)}
+                onConversationClick={handleConversationClick}
+              />
+
+              {/* AI agent columns */}
+              {automations.filter(a => a.is_active).map(agent => {
+                const agentConversations = filteredConversations.filter(c => c.current_automation_id === agent.id);
+                return (
+                  <KanbanColumn
+                    key={agent.id}
+                    id={agent.id}
+                    name={agent.name}
+                    color="#a855f7"
+                    conversations={agentConversations}
+                    customStatuses={customStatuses}
+                    tags={tags}
+                    automations={automations}
+                    isDragging={false}
+                    draggedConversation={draggedConversation}
+                    onDrop={() => {
+                      if (draggedConversation) {
+                        transferHandler.mutate({ conversationId: draggedConversation, handlerType: 'ai', automationId: agent.id });
+                      }
+                      setDraggedConversation(null);
+                    }}
+                    onConversationDragStart={(id) => setDraggedConversation(id)}
+                    onConversationClick={handleConversationClick}
+                  />
+                );
+              })}
+
+              {/* Human member columns */}
+              {members.map(member => {
+                const memberConversations = filteredConversations.filter(c => c.assigned_to === member.id && !c.current_automation_id);
+                return (
+                  <KanbanColumn
+                    key={member.id}
+                    id={member.id}
+                    name={member.full_name}
+                    color="#22c55e"
+                    conversations={memberConversations}
+                    customStatuses={customStatuses}
+                    tags={tags}
+                    automations={automations}
+                    isDragging={false}
+                    draggedConversation={draggedConversation}
+                    onDrop={() => {
+                      if (draggedConversation) {
+                        transferHandler.mutate({ conversationId: draggedConversation, handlerType: 'human', assignedTo: member.id });
+                      }
+                      setDraggedConversation(null);
+                    }}
+                    onConversationDragStart={(id) => setDraggedConversation(id)}
+                    onConversationClick={handleConversationClick}
+                  />
+                );
+              })}
+
+              {/* Archived column */}
+              {canViewArchived && (
+                <KanbanColumn
+                  id="archived"
+                  name="Arquivados"
+                  color="#dc2626"
+                  conversations={archivedConversations}
+                  customStatuses={customStatuses}
+                  tags={tags}
+                  automations={automations}
+                  isDragging={false}
+                  draggedConversation={draggedConversation}
+                  isArchiveColumn={true}
+                  onDrop={handleArchiveDrop}
+                  onConversationDragStart={(id) => setDraggedConversation(id)}
+                  onConversationClick={handleConversationClick}
+                />
+              )}
+            </>
+          ) : groupBy === 'connection' ? (
+            <>
+              {/* No connection column */}
+              <KanbanColumn
+                id={null}
+                name="Sem Conexão"
+                color="#71717a"
+                conversations={filteredConversations.filter(c => !c.whatsapp_instance?.instance_name)}
+                customStatuses={customStatuses}
+                tags={tags}
+                automations={automations}
+                isDragging={false}
+                draggedConversation={draggedConversation}
+                onDrop={() => setDraggedConversation(null)}
+                onConversationDragStart={(id) => setDraggedConversation(id)}
+                onConversationClick={handleConversationClick}
+              />
+
+              {/* Connection columns */}
+              {availableConnections.map(conn => {
+                const connConversations = filteredConversations.filter(c => c.whatsapp_instance?.instance_name === conn.id);
+                return (
+                  <KanbanColumn
+                    key={conn.id}
+                    id={conn.id}
+                    name={`${conn.name}${conn.phone ? ` (${conn.phone})` : ''}`}
+                    color="#3b82f6"
+                    conversations={connConversations}
+                    customStatuses={customStatuses}
+                    tags={tags}
+                    automations={automations}
+                    isDragging={false}
+                    draggedConversation={draggedConversation}
+                    onDrop={() => setDraggedConversation(null)}
+                    onConversationDragStart={(id) => setDraggedConversation(id)}
+                    onConversationClick={handleConversationClick}
+                  />
+                );
+              })}
+
+              {/* Archived column */}
+              {canViewArchived && (
+                <KanbanColumn
+                  id="archived"
+                  name="Arquivados"
+                  color="#dc2626"
+                  conversations={archivedConversations}
+                  customStatuses={customStatuses}
+                  tags={tags}
+                  automations={automations}
+                  isDragging={false}
+                  draggedConversation={draggedConversation}
+                  isArchiveColumn={true}
+                  onDrop={handleArchiveDrop}
+                  onConversationDragStart={(id) => setDraggedConversation(id)}
+                  onConversationClick={handleConversationClick}
+                />
+              )}
+            </>
           ) : (
             <>
               {/* Status columns - Sem Status first */}
@@ -595,7 +753,7 @@ export default function Kanban() {
                 );
               })}
 
-              {/* Archived column - only shown if user has permission */}
+              {/* Archived column */}
               {canViewArchived && (
                 <KanbanColumn
                   id="archived"

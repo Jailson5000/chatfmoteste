@@ -862,7 +862,7 @@ export function useMessagesWithPagination({
       try {
         const { data: newMsgs, error } = await supabase
           .from("messages")
-          .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal, is_pontual, is_revoked, is_starred, my_reaction")
+          .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal, is_pontual, is_revoked, is_starred, my_reaction, client_reaction")
           .eq("conversation_id", conversationId)
           .gt("created_at", latestTimestamp)
           .order("created_at", { ascending: true })
