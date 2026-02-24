@@ -1,172 +1,132 @@
 
 
-# Integrar uazapi como Provedor Alternativo de WhatsApp (Dual-Provider)
+# Continuar Integração Dual-Provider (uazapi) - Fase 2
 
-## Contexto
+## Resumo
 
-O sistema atualmente usa a Evolution API (auto-hospedada) para todas as operacoes de WhatsApp. A integracao envolve ~11.400 linhas de codigo backend (evolution-api: 5.102 linhas, evolution-webhook: 6.340 linhas). A uazapi e um servico SaaS gerenciado (R$138/mes - Servidor LITE, ate 100 dispositivos) que oferece proxy residencial, hospedagem inclusa e atualizacoes automaticas.
+A Fase 1 criou a migration SQL, o modulo de abstracao `_shared/whatsapp-provider.ts`, o webhook `uazapi-webhook`, e o dialog `NewInstanceDialog` com selector de provider. Agora precisamos conectar tudo: o frontend precisa passar os dados do provider para o hook, o hook para a edge function, e a edge function precisa usar a camada de abstracao para criar instancias uazapi.
 
-## Mapeamento de APIs: Evolution vs uazapi
+## O que sera feito
 
-| Funcionalidade | Evolution API | uazapi |
-|---|---|---|
-| Autenticacao | Header `apikey` | Header `token` |
-| Base URL | `{api_url}/.../{instanceName}` | `https://{subdomain}.uazapi.com/...` |
-| Conectar (QR) | `POST /instance/connect/{name}` | `POST /instance/connect` (body: phone opcional) |
-| Status | `GET /instance/connectionState/{name}` | `GET /instance/status` |
-| Enviar texto | `POST /message/sendText/{name}` | `POST /send/text` |
-| Enviar midia | `POST /message/sendMedia/{name}` | `POST /send/media` |
-| Webhook config | `POST /webhook/set/{name}` | `POST /webhook` |
-| Deletar instancia | `DELETE /instance/delete/{name}` | `DELETE /instance` |
-| Buscar contatos | `POST /chat/findContacts/{name}` | `GET /contacts` |
-| Desconectar | `DELETE /instance/logout/{name}` | `POST /instance/disconnect` |
+### 1. Atualizar `Connections.tsx` - handleCreateInstance
 
-Diferencas-chave:
-- Evolution: instance_name vai na URL como path param
-- uazapi: cada instancia tem seu proprio subdominio + token. Nao tem path param de instancia
-- Webhooks uazapi suportam filtro `excludeMessages: ["wasSentByApi"]` (anti-loop nativo)
-- uazapi usa `number` no body (ex: "5511999999999"), Evolution usa `remoteJid` (ex: "5511999999999@s.whatsapp.net")
+A funcao `handleCreateInstance` atualmente aceita apenas `(displayName, instanceName)`. Precisa aceitar os parametros extras do provider:
 
-## Estrategia de Implementacao
-
-A abordagem e criar uma **camada de abstracao (provider pattern)** que permite que cada instancia WhatsApp use Evolution OU uazapi, sem mudar o restante do sistema.
-
-### Fase 1: Schema do Banco de Dados
-
-Adicionar coluna `api_provider` na tabela `whatsapp_instances`:
-
-```sql
-ALTER TABLE public.whatsapp_instances 
-ADD COLUMN api_provider text NOT NULL DEFAULT 'evolution' 
-CHECK (api_provider IN ('evolution', 'uazapi'));
+```
+handleCreateInstance(displayName, instanceName, provider?, uazapiUrl?, uazapiToken?)
 ```
 
-Para uazapi, os campos existentes serao reutilizados:
-- `api_url` -> `https://{subdomain}.uazapi.com` (URL base da instancia uazapi)
-- `api_key` -> token da instancia uazapi
-- `instance_name` -> nome identificador (mesmo uso)
+Quando `provider === "uazapi"`:
+- Passa `uazapiUrl` como `apiUrl` e `uazapiToken` como `apiKey` para o hook
+- Passa `provider: "uazapi"` para o hook
 
-Atualizar a view `whatsapp_instances_safe` para incluir `api_provider`.
+### 2. Atualizar `useWhatsAppInstances.tsx` - CreateInstanceParams
 
-### Fase 2: Edge Function - Provider Abstraction Layer
+Adicionar campo `provider` ao `CreateInstanceParams`:
 
-Criar um modulo compartilhado `supabase/functions/_shared/whatsapp-provider.ts` que abstrai as chamadas:
-
-```text
-+-------------------+
-| evolution-api     |  <-- Frontend chama normalmente
-| (edge function)   |
-+--------+----------+
-         |
-         v
-+--------+----------+
-| WhatsApp Provider |  <-- Nova camada de abstracao
-| (shared module)   |
-+--------+----------+
-    |           |
-    v           v
-+-------+  +--------+
-| Evol. |  | uazapi |
-| API   |  | API    |
-+-------+  +--------+
+```typescript
+interface CreateInstanceParams {
+  instanceName: string;
+  displayName: string;
+  apiUrl?: string;
+  apiKey?: string;
+  provider?: 'evolution' | 'uazapi';  // NOVO
+}
 ```
 
-O modulo tera funcoes como:
-- `sendText(provider, config, number, text)` 
-- `sendMedia(provider, config, number, mediaType, ...)`
-- `connectInstance(provider, config)`
-- `getStatus(provider, config)`
-- `configureWebhook(provider, config, webhookUrl)`
-- `disconnectInstance(provider, config)`
+No `createInstance.mutationFn`, passar `provider` no body da requisicao para a edge function.
 
-### Fase 3: Adaptar evolution-api/index.ts
+### 3. Atualizar `evolution-api/index.ts` - case "create_instance"
 
-No `switch(body.action)`, antes de fazer chamadas HTTP, resolver o provider da instancia e delegar para o modulo de abstracao. Isso permite reutilizar 100% da logica de negocio existente (autenticacao, validacao de tenant, logging, billing, etc.).
+Modificar o case `create_instance` para:
+1. Verificar se `body.provider === "uazapi"`
+2. Se uazapi: Usar o `UazapiProvider.createInstance()` do modulo compartilhado
+3. Se evolution (ou sem provider): Manter logica existente
+4. Gravar `api_provider: body.provider || 'evolution'` no INSERT do banco
 
-### Fase 4: Adaptar evolution-webhook/index.ts
+### 4. Atualizar actions que buscam instancia (get_qrcode, get_status, send_message, etc.)
 
-Criar um novo webhook endpoint `supabase/functions/uazapi-webhook/index.ts` para receber eventos da uazapi. A uazapi envia payloads diferentes da Evolution:
+Para cada action que chama `getInstanceById` e depois faz requests HTTP diretos:
+- Verificar `instance.api_provider`
+- Se `uazapi`: delegar para `UazapiProvider` do modulo compartilhado
+- Se `evolution`: manter logica existente
 
-- Evento `messages` -> equivalente a `MESSAGES_UPSERT`
-- Evento `connection` -> equivalente a `CONNECTION_UPDATE`
-- Evento `messages_update` -> equivalente a `MESSAGES_UPDATE`
+As actions prioritarias (mais usadas) sao:
+- `get_qrcode` - conectar instancia
+- `get_status` / `refresh_status` - verificar conexao
+- `refresh_phone` - buscar numero conectado
+- `send_message` / `send_message_async` - enviar texto
+- `send_media` / `send_media_async` - enviar midia
+- `configure_webhook` - configurar webhook
+- `delete_instance` - remover instancia
+- `logout_instance` - desconectar
+- `get_settings` / `set_settings` - configuracoes de rejeicao de chamada
 
-O webhook da uazapi ira normalizar os payloads para o formato interno e reutilizar a logica de processamento existente.
+### 5. Adicionar badge de provider na tabela de conexoes
 
-### Fase 5: UI - Selector de Provider na Pagina de Conexoes
-
-Na pagina `/connections` (tenant) e `/global-admin/connections`:
-- Ao criar nova instancia, permitir escolher "Evolution API" ou "uazapi"
-- Mostrar badge indicando o provider de cada instancia
-- Para uazapi: pedir subdomain e token (em vez de API URL + API Key)
-
-### Fase 6: Configuracao Global
-
-Adicionar na tabela `evolution_api_connections` (ou criar `whatsapp_api_providers`) suporte para armazenar credenciais do servidor uazapi LITE (admintoken).
+Na tabela em `Connections.tsx`, exibir um badge pequeno indicando o provider de cada instancia (ex: "EVO" ou "UAZAPI") ao lado do nome/ID.
 
 ## Detalhes Tecnicos
 
-### Arquivo: `supabase/functions/_shared/whatsapp-provider.ts` (NOVO)
+### Conexao Frontend -> Edge Function
 
-Modulo com interface `WhatsAppProvider` e duas implementacoes:
-- `EvolutionProvider`: encapsula todas as chamadas Evolution API existentes
-- `UazapiProvider`: implementa a mesma interface usando endpoints uazapi
-
-Funcoes exportadas:
-- `getProvider(instance)` -> retorna o provider correto baseado em `api_provider`
-- `sendText(provider, number, text, options?)` 
-- `sendMedia(provider, number, mediaType, mediaUrl/base64, options?)`
-- `connectInstance(provider)` -> retorna QR code
-- `getInstanceStatus(provider)` -> retorna status normalizado
-- `configureWebhook(provider, webhookUrl, events)` 
-- `disconnectInstance(provider)`
-
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts` (NOVO)
-
-Webhook dedicado para receber eventos da uazapi. Normaliza payloads para o formato interno:
-- Campo `number` da uazapi -> `remoteJid` do formato interno
-- Estrutura de mensagem da uazapi -> estrutura de mensagem interna
-- Eventos de conexao -> mapeamento de estados
-
-### Arquivo: `supabase/functions/evolution-api/index.ts` (MODIFICAR)
-
-Para cada action no switch, adicionar resolucao de provider:
-1. Buscar instancia no banco
-2. Verificar `api_provider`
-3. Delegar para `EvolutionProvider` ou `UazapiProvider`
-
-### Migration SQL
-
-```sql
--- Adicionar coluna de provider
-ALTER TABLE public.whatsapp_instances 
-ADD COLUMN api_provider text NOT NULL DEFAULT 'evolution';
-
--- Atualizar view segura
-CREATE OR REPLACE VIEW public.whatsapp_instances_safe AS
-SELECT id, instance_name, display_name, status, phone_number, 
-       law_firm_id, created_at, updated_at, api_provider,
-       -- demais campos exceto api_key e api_key_encrypted
-FROM public.whatsapp_instances;
+```text
+NewInstanceDialog (provider=uazapi, subdomain, token)
+    |
+    v
+Connections.tsx handleCreateInstance(name, id, "uazapi", url, token)
+    |
+    v
+useWhatsAppInstances.createInstance({ ..., provider: "uazapi", apiUrl, apiKey })
+    |
+    v
+evolution-api edge function (body.provider === "uazapi")
+    |
+    v
+UazapiProvider.connect(config) -> QR code
+    + INSERT whatsapp_instances (api_provider: "uazapi")
 ```
 
-### Secrets Necessarios
+### Deteccao de provider nas actions existentes
 
-- `UAZAPI_ADMIN_TOKEN`: Token administrativo do servidor LITE para operacoes de gerenciamento
+Apos buscar instancia com `getInstanceById()`, checar `instance.api_provider`:
 
-## Ordem de Implementacao
+```typescript
+const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+const providerConfig = {
+  provider: instance.api_provider || 'evolution',
+  apiUrl: instance.api_url,
+  apiKey: instance.api_key,
+  instanceName: instance.instance_name,
+};
 
-1. Migration SQL (adicionar `api_provider`)
-2. Criar `_shared/whatsapp-provider.ts`
-3. Criar `uazapi-webhook/index.ts`
-4. Adaptar `evolution-api/index.ts` para usar provider pattern
-5. Adaptar UI de criacao de instancia
-6. Testes com instancia uazapi real
+if (instance.api_provider === 'uazapi') {
+  // Delegar para UazapiProvider
+  const result = await UazapiProvider.connect(providerConfig);
+  // ...
+} else {
+  // Manter logica Evolution existente
+  // ...
+}
+```
 
-## Riscos e Consideracoes
+### Actions com tratamento especial para uazapi
 
-- **Escopo grande**: A migracao envolve refatorar ~5.000 linhas na evolution-api e criar ~1.000 linhas do webhook uazapi. Sera feito em etapas.
-- **Persistencia de midia**: uazapi retorna midias via base64 diretamente, simplificando a persistencia vs Evolution que requer endpoint separado.
-- **Webhook anti-loop**: uazapi tem filtro `excludeMessages: ["wasSentByApi"]` nativo, eliminando a necessidade da logica manual de deduplicacao.
-- **Sem auto-hospedagem**: Com uazapi, nao ha necessidade de gerenciar servidor, Docker, Baileys, nem lidar com bugs de sessao. A estabilidade e responsabilidade do provedor.
+- `get_settings` / `set_settings`: uazapi nao tem equivalente de rejectCall. Retornar valor padrao e ignorar set.
+- `get_media`: uazapi envia midia como base64 inline no webhook, nao precisa de endpoint separado.
+- `fetch_profile_picture`: usar endpoint uazapi `/contacts/profile-picture`.
 
+### Webhook uazapi
+
+O webhook `uazapi-webhook/index.ts` ja foi criado na Fase 1 e esta pronto para receber eventos.
+
+## Ordem de implementacao
+
+1. Atualizar `CreateInstanceParams` no hook
+2. Atualizar `handleCreateInstance` em `Connections.tsx`
+3. Modificar `create_instance` na edge function
+4. Adicionar provider detection nas actions `get_qrcode`, `get_status`, `refresh_status`, `refresh_phone`
+5. Adicionar provider detection nas actions `send_message`, `send_media`
+6. Adicionar provider detection nas actions `configure_webhook`, `delete_instance`, `logout_instance`
+7. Adicionar provider detection em `get_settings`/`set_settings`
+8. Adicionar badge de provider na UI
