@@ -328,7 +328,11 @@ serve(async (req) => {
         const chat = body.chat || {};
         
         // Skip group messages
-        const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid || chat.id || "";
+        // Prioritize chat.phone (uazapi reliable source) over chat.id (internal ID, NOT a phone number)
+        const chatPhoneClean = chat.phone ? chat.phone.replace(/\D/g, "") : "";
+        const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid 
+          || (chatPhoneClean.length >= 10 ? chatPhoneClean : null)
+          || chat.id || "";
         if (remoteJidRaw.includes("@g.us")) {
           console.log("[UAZAPI_WEBHOOK] Skipping group message");
           break;
@@ -368,19 +372,12 @@ serve(async (req) => {
         }
 
         // Debug: log all phone-related fields from payload
-        console.log(`[UAZAPI_WEBHOOK] Phone debug:`, {
-          "msg.from": msg.from,
-          "msg.remoteJid": msg.remoteJid,
-          "msg.key?.remoteJid": msg.key?.remoteJid,
-          "chat.id": chat.id,
+        console.log(`[UAZAPI_WEBHOOK] Phone resolution:`, {
           "chat.phone": chat.phone,
-          "body.SenderJid": body.SenderJid,
-          "body.senderJid": body.senderJid,
-          "body.sender": body.sender,
-          "body.number": body.number,
-          "chat.lead_phone": chat.lead_phone,
+          "chatPhoneClean": chatPhoneClean,
           "remoteJidRaw": remoteJidRaw,
           "extractedPhone": phoneNumber,
+          "remoteJid": remoteJid,
         });
 
         console.log(`[UAZAPI_WEBHOOK] Message: ${messageType} from ${phoneNumber} (fromMe: ${isFromMe})`, {
