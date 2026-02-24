@@ -1,53 +1,43 @@
 
 
-# Kanban Nao Mostra Numeros de Telefone da Instancia
+# Atualizar Limites de Conexoes WhatsApp dos Planos
 
-## Diagnostico
+## Situacao Atual (banco de dados)
 
-No `KanbanCard.tsx`, a funcao `getConnectionInfo()` (linha 156-163) so exibe o numero quando `phone_number` esta preenchido na tabela `whatsapp_instances`. Duas instancias no banco tem `phone_number` como `null`:
+| Plano | max_instances atual |
+|---|---|
+| PRIME | 1 |
+| BASIC | 2 |
+| STARTER | 3 |
+| PROFESSIONAL | 4 |
+| ENTERPRISE | 6 |
 
-- **Z9089** (id: b2622a7e) → `phone_number: null`
-- **Z3528** (id: 10b70877) → `phone_number: null`
+## Novos Valores Solicitados
 
-Quando `phone_number` e null, o codigo retorna `{ label: "----" }`, causando os cards sem numero vistos no screenshot.
+| Plano | max_instances novo |
+|---|---|
+| PRIME | 1 (sem alteracao) |
+| BASIC | **3** |
+| STARTER | **5** |
+| PROFESSIONAL | **6** |
+| ENTERPRISE | **10** |
 
-## Correcao
+## Escopo da Mudanca
 
-### Arquivo: `src/components/kanban/KanbanCard.tsx`
+Todos os locais que exibem limites de planos (landing page, aba "Meu Plano" do cliente, aba "Planos" do admin global, edge function de pagamento) ja leem os valores diretamente do banco de dados. Portanto, a unica acao necessaria e:
 
-Na funcao `getConnectionInfo()`, quando `phone_number` for null, exibir o `display_name` da instancia como fallback em vez de "----":
+**Uma migracao SQL** atualizando `max_instances` na tabela `plans` para os 4 planos afetados:
 
-```typescript
-// Linha 156-163 - Adicionar fallback para display_name
-const phoneNumber = conversation.whatsapp_instance?.phone_number;
-if (phoneNumber) {
-  const digits = phoneNumber.replace(/\D/g, "");
-  if (digits.length >= 4) {
-    return { label: `•••${digits.slice(-4)}`, isWidget: false, tooltipText: ... };
-  }
-}
-// FALLBACK: mostrar display_name quando phone_number nao existe
-if (conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name) {
-  return { 
-    label: conversation.whatsapp_instance.display_name || conversation.whatsapp_instance.instance_name, 
-    isWidget: false, 
-    tooltipText: conversation.whatsapp_instance.display_name || "WhatsApp" 
-  };
-}
-return { label: "----", isWidget: false, tooltipText: "Canal não identificado" };
+```sql
+UPDATE plans SET max_instances = 3 WHERE name = 'BASIC';
+UPDATE plans SET max_instances = 5 WHERE name = 'STARTER';
+UPDATE plans SET max_instances = 6 WHERE name = 'PROFESSIONAL';
+UPDATE plans SET max_instances = 10 WHERE name = 'ENTERPRISE';
 ```
 
-A mesma logica ja existe para `WHATSAPP_CLOUD` (linha 152-154). Esta correcao alinha o comportamento do caso padrao.
-
-## Resultado Esperado
-
-- Cards com instancias sem `phone_number` mostrarao o nome da instancia (ex: "Z9089", "Z3528")
-- Cards com `phone_number` preenchido continuam mostrando `•••XXXX`
-- Nenhum card mostra "----" a menos que nao tenha instancia associada
+Nenhum arquivo de codigo precisa ser alterado — tudo e dinamico a partir do banco.
 
 ## Arquivos Afetados
 
-| Arquivo | Mudanca |
-|---|---|
-| `src/components/kanban/KanbanCard.tsx` | Fallback para display_name em getConnectionInfo |
+Nenhum arquivo de codigo. Apenas migracao no banco de dados.
 
