@@ -4596,29 +4596,15 @@ serve(async (req) => {
 
         console.log(`[Evolution API] Fetching profile picture for phone: ${body.phoneNumber.slice(0, 4)}***`);
 
-        // Get instance
+        // Get instance and use provider abstraction
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
-        const apiUrl = normalizeUrl(instance.api_url);
-
-        // Call Evolution API to fetch profile picture
-        const profileResponse = await fetchWithTimeout(
-          `${apiUrl}/chat/fetchProfilePictureUrl/${instance.instance_name}`,
-          {
-            method: "POST",
-            headers: {
-              apikey: instance.api_key || "",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ number: body.phoneNumber }),
-          },
-          DEFAULT_TIMEOUT_MS
-        );
-
-        if (!profileResponse.ok) {
-          const errorText = await safeReadResponseText(profileResponse);
-          console.error("[fetch_profile_picture] Evolution API error:", profileResponse.status, errorText);
-          
-          // Don't throw - just return that photo is not available
+        
+        let profilePicUrl: string | null = null;
+        try {
+          const picResult = await providerFetchProfilePicture(instance, body.phoneNumber);
+          profilePicUrl = picResult.profilePicUrl;
+        } catch (picErr) {
+          console.error("[fetch_profile_picture] Provider error:", picErr);
           return new Response(
             JSON.stringify({
               success: false,
@@ -4627,17 +4613,6 @@ serve(async (req) => {
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
-
-        const profileData = await profileResponse.json();
-        console.log("[fetch_profile_picture] Response:", JSON.stringify(profileData));
-
-        // Extract profile picture URL from various response formats
-        const profilePicUrl = 
-          profileData?.profilePictureUrl || 
-          profileData?.picture || 
-          profileData?.url || 
-          profileData?.pictureUrl ||
-          profileData?.profilePicture;
 
         if (profilePicUrl && typeof profilePicUrl === "string" && profilePicUrl.startsWith("http")) {
           // Download image and persist to Storage to avoid expiring WhatsApp URLs
