@@ -1,77 +1,69 @@
 
+# Corrigir botoes para instancias uazapi
 
-# Corrigir deteccao de status "connected" para uazapi
+## Problema
 
-## Problema Raiz (confirmado pelos logs)
+Dois actions no backend (`evolution-api/index.ts`) nao tem tratamento para o provedor uazapi, fazendo com que chamem endpoints da Evolution API diretamente -- resultando em erro para instancias uazapi:
 
-A API uazapi retorna o status de conexao em um formato diferente do esperado pelo codigo. Os logs mostram claramente:
+1. **`refresh_phone`** (botao "Atualizar numero"): Usa `fetchPhoneNumberEnhanced()` que chama endpoints da Evolution API. Para uazapi, precisa usar o provider pattern.
+2. **`logout_instance`** (botao "Desconectar"): Chama diretamente `{apiUrl}/instance/logout/{instanceName}` da Evolution. Para uazapi, precisa usar `provider.disconnect()`.
 
-```text
-raw: {
-  "connected": true,           // <-- campo booleano no topo
-  "instance": {
-    "status": "connected",     // <-- status dentro de "instance"
-    "qrcode": "",              // <-- vazio porque ja conectou
-    ...
-  }
-}
-```
-
-Mas o `connect()` procura `data.status` e `data.state` no nivel raiz, que nao existem. Resultado: `state = "unknown"` e entao `status = "awaiting_qr"` -- **errado**.
-
-O backend retorna `{ status: "awaiting_qr" }` para o frontend, que nunca detecta a conexao e fica preso no dialog.
+Os botoes do dropdown ("Conectar", "Atualizar status", "Excluir") ja funcionam corretamente pois os respectivos cases (`get_qrcode`, `refresh_status`, `delete_instance`) ja tem bloco `if (isUazapi(instance))`.
 
 ## Solucao
 
-### Arquivo: `supabase/functions/_shared/whatsapp-provider.ts`
-
-No metodo `connect()` do UazapiProvider (~linha 626), expandir a extracao de estado para incluir os campos reais que uazapi retorna:
-
-**Antes:**
-```typescript
-const state = data?.status || data?.state || "unknown";
-```
-
-**Depois:**
-```typescript
-const state = data?.instance?.status || data?.status || data?.state || 
-              (data?.connected === true ? "connected" : "unknown");
-```
-
-Isso garante que:
-1. `data.instance.status` ("connected") e verificado primeiro
-2. `data.connected` (boolean true) serve como fallback final
-3. A logica existente para Evolution API nao e afetada
-
 ### Arquivo: `supabase/functions/evolution-api/index.ts`
 
-No case `get_qrcode` para uazapi (~linha 885), adicionar a mesma verificacao do campo `connected`:
+**1. `refresh_phone` (linha ~2305):** Adicionar bloco uazapi antes do codigo Evolution:
 
-**Antes:**
 ```typescript
-const uazapiStatus = result.status === 'connected' ? 'connected' : (result.qrCode ? 'awaiting_qr' : 'disconnected');
+// UAZAPI PROVIDER
+if (isUazapi(instance)) {
+  const config = getProviderConfig(instance);
+  const provider = getProvider(config);
+  const statusResult = await provider.getStatus(config);
+  const phoneNumber = statusResult.phoneNumber || null;
+
+  if (phoneNumber) {
+    // Check duplicate
+    const duplicate = await checkPhoneNumberDuplicate(supabaseClient, phoneNumber, body.instanceId);
+    if (duplicate) { /* return 409 error */ }
+
+    await supabaseClient.from("whatsapp_instances")
+      .update({ phone_number: phoneNumber, updated_at: new Date().toISOString() })
+      .eq("id", body.instanceId);
+  }
+
+  return Response({ success: true, phoneNumber });
+}
 ```
 
-**Depois:**
+**2. `logout_instance` (linha ~2430):** Adicionar bloco uazapi antes do codigo Evolution:
+
 ```typescript
-const uazapiStatus = (result.status === 'connected' || result.raw?.connected === true || result.raw?.instance?.status === 'connected') 
-  ? 'connected' 
-  : (result.qrCode ? 'awaiting_qr' : 'disconnected');
+// UAZAPI PROVIDER
+if (isUazapi(instance)) {
+  const config = getProviderConfig(instance);
+  const provider = getProvider(config);
+  await provider.disconnect(config);
+
+  const { data: updatedInstance } = await supabaseClient.from("whatsapp_instances")
+    .update({ status: "disconnected", manual_disconnect: true, updated_at: new Date().toISOString() })
+    .eq("id", body.instanceId).eq("law_firm_id", lawFirmId).select().single();
+
+  return Response({ success: true, message: "Instance disconnected", instance: updatedInstance });
+}
 ```
 
-Isso adiciona uma segunda camada de seguranca: mesmo que o `connect()` falhe na extracao, o `get_qrcode` handler verifica os dados brutos.
+## Resumo
 
-## Resultado Esperado
+| Acao | Status Atual | Correcao |
+|---|---|---|
+| `get_qrcode` (Conectar) | Funciona | Nenhuma |
+| `refresh_status` (Atualizar status) | Funciona | Nenhuma |
+| `delete_instance` (Excluir) | Funciona | Nenhuma |
+| `configure_webhook` | Funciona | Nenhuma |
+| `refresh_phone` (Atualizar numero) | Chama Evolution API | Adicionar bloco uazapi |
+| `logout_instance` (Desconectar) | Chama Evolution API | Adicionar bloco uazapi |
 
-Quando a instancia uazapi esta conectada, o backend retornara `{ status: "connected" }`. O frontend detectara isso e:
-1. Mostrara "Conectado!" por 1 segundo
-2. Fechara o dialog automaticamente
-3. Atualizara a lista de instancias
-
-## Arquivos Alterados
-
-| Arquivo | Mudanca |
-|---|---|
-| `supabase/functions/_shared/whatsapp-provider.ts` | Expandir extracao de estado no `connect()` para cobrir `data.instance.status` e `data.connected` |
-| `supabase/functions/evolution-api/index.ts` | Adicionar fallback no `get_qrcode` verificando `result.raw` |
-
+Apenas 1 arquivo alterado: `supabase/functions/evolution-api/index.ts` (2 blocos adicionados).
