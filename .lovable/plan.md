@@ -1,69 +1,75 @@
 
-# Corrigir botoes para instancias uazapi
 
-## Problema
+# Corrigir recebimento de mensagens do uazapi
 
-Dois actions no backend (`evolution-api/index.ts`) nao tem tratamento para o provedor uazapi, fazendo com que chamem endpoints da Evolution API diretamente -- resultando em erro para instancias uazapi:
+## Problema Raiz (confirmado pelos logs)
 
-1. **`refresh_phone`** (botao "Atualizar numero"): Usa `fetchPhoneNumberEnhanced()` que chama endpoints da Evolution API. Para uazapi, precisa usar o provider pattern.
-2. **`logout_instance`** (botao "Desconectar"): Chama diretamente `{apiUrl}/instance/logout/{instanceName}` da Evolution. Para uazapi, precisa usar `provider.disconnect()`.
+Os logs mostram claramente o problema:
 
-Os botoes do dropdown ("Conectar", "Atualizar status", "Excluir") ja funcionam corretamente pois os respectivos cases (`get_qrcode`, `refresh_status`, `delete_instance`) ja tem bloco `if (isUazapi(instance))`.
+```
+Event: unknown {"BaseUrl":"https://miauchat.uazapi.com","EventType":"messages","chat":{...}}
+Unhandled event: unknown
+```
+
+O uazapi envia o tipo de evento no campo `EventType` (PascalCase), mas o codigo (linha 162) verifica apenas `body.event` e `body.type`:
+
+```typescript
+const event = body.event || body.type || "unknown";
+```
+
+Resultado: **todas as mensagens recebidas sao classificadas como "unknown"** e ignoradas.
+
+Alem disso, ha um segundo problema: metade dos webhooks falham com "Invalid or missing token". O uazapi parece enviar multiplas chamadas por evento, e algumas nao incluem o token. As que passam a validacao de token sao processadas, mas caem no "unknown".
 
 ## Solucao
 
-### Arquivo: `supabase/functions/evolution-api/index.ts`
+### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
 
-**1. `refresh_phone` (linha ~2305):** Adicionar bloco uazapi antes do codigo Evolution:
+**1. Corrigir deteccao do tipo de evento (linha 162):**
+
+Adicionar `body.EventType` ao chain de deteccao:
 
 ```typescript
-// UAZAPI PROVIDER
-if (isUazapi(instance)) {
-  const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  const statusResult = await provider.getStatus(config);
-  const phoneNumber = statusResult.phoneNumber || null;
+const event = body.event || body.type || body.EventType || "unknown";
+```
 
-  if (phoneNumber) {
-    // Check duplicate
-    const duplicate = await checkPhoneNumberDuplicate(supabaseClient, phoneNumber, body.instanceId);
-    if (duplicate) { /* return 409 error */ }
+**2. Normalizar os nomes de evento do uazapi:**
 
-    await supabaseClient.from("whatsapp_instances")
-      .update({ phone_number: phoneNumber, updated_at: new Date().toISOString() })
-      .eq("id", body.instanceId);
-  }
+O uazapi envia `EventType: "messages"` que ja casa com o `case "messages"` existente (linha 295). Mas outros eventos podem ter nomes diferentes. Adicionar normalizacao:
 
-  return Response({ success: true, phoneNumber });
+```typescript
+const rawEvent = body.event || body.type || body.EventType || "unknown";
+const event = rawEvent.toLowerCase(); // normalizar para minusculas
+```
+
+E ajustar os cases do switch para incluir variantes em minusculas (os cases atuais ja cobrem `"messages"`, `"message"`, `"connection"`, etc.).
+
+**3. Melhorar deteccao da instancia pelo payload uazapi:**
+
+Os logs mostram que o payload uazapi inclui `BaseUrl` e informacoes do chat. Quando o token nao e encontrado no payload, podemos tentar encontrar a instancia pela `api_url`:
+
+```typescript
+if (!instance && body.BaseUrl) {
+  const { data } = await supabaseClient
+    .from("whatsapp_instances")
+    .select("*")
+    .eq("api_provider", "uazapi")
+    .ilike("api_url", `%${new URL(body.BaseUrl).hostname}%`)
+    .limit(1)
+    .maybeSingle();
+  instance = data;
 }
 ```
 
-**2. `logout_instance` (linha ~2430):** Adicionar bloco uazapi antes do codigo Evolution:
+## Resumo das Alteracoes
 
-```typescript
-// UAZAPI PROVIDER
-if (isUazapi(instance)) {
-  const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  await provider.disconnect(config);
+| Arquivo | Mudanca |
+|---|---|
+| `supabase/functions/uazapi-webhook/index.ts` | 1. Adicionar `body.EventType` na deteccao de evento |
+| | 2. Normalizar evento para lowercase |
+| | 3. Adicionar fallback de identificacao de instancia por `BaseUrl` |
 
-  const { data: updatedInstance } = await supabaseClient.from("whatsapp_instances")
-    .update({ status: "disconnected", manual_disconnect: true, updated_at: new Date().toISOString() })
-    .eq("id", body.instanceId).eq("law_firm_id", lawFirmId).select().single();
+## Resultado Esperado
 
-  return Response({ success: true, message: "Instance disconnected", instance: updatedInstance });
-}
-```
+Mensagens recebidas do WhatsApp via uazapi serao corretamente identificadas como evento `"messages"`, processadas, salvas no banco e exibidas na interface de conversas em tempo real.
 
-## Resumo
-
-| Acao | Status Atual | Correcao |
-|---|---|---|
-| `get_qrcode` (Conectar) | Funciona | Nenhuma |
-| `refresh_status` (Atualizar status) | Funciona | Nenhuma |
-| `delete_instance` (Excluir) | Funciona | Nenhuma |
-| `configure_webhook` | Funciona | Nenhuma |
-| `refresh_phone` (Atualizar numero) | Chama Evolution API | Adicionar bloco uazapi |
-| `logout_instance` (Desconectar) | Chama Evolution API | Adicionar bloco uazapi |
-
-Apenas 1 arquivo alterado: `supabase/functions/evolution-api/index.ts` (2 blocos adicionados).
