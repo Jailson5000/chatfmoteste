@@ -2458,17 +2458,42 @@ serve(async (req) => {
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
 
-        // ── UAZAPI PROVIDER ──
+        // ── UAZAPI PROVIDER — real restart: disconnect + wait + reconnect ──
         if (isUazapi(instance)) {
           const config = getProviderConfig(instance);
           const provider = getProvider(config);
-          await provider.disconnect(config);
 
+          // Step 1: Disconnect (best effort)
+          try {
+            await provider.disconnect(config);
+            console.log("[Evolution API] Uazapi disconnect OK, waiting 2s before reconnect...");
+          } catch (e) {
+            console.log("[Evolution API] Uazapi disconnect failed (non-fatal):", e);
+          }
+
+          // Step 2: Wait 2s for session cleanup
+          await new Promise(r => setTimeout(r, 2000));
+
+          // Step 3: Reconnect
+          let connectResult: any = { qrCode: null, status: "connecting" };
+          try {
+            connectResult = await provider.connect(config);
+            console.log("[Evolution API] Uazapi reconnect result:", connectResult.status);
+          } catch (e) {
+            console.log("[Evolution API] Uazapi reconnect failed:", e);
+          }
+
+          const newStatus = connectResult.status === "connected" ? "connected" : "connecting";
           const { data: updatedInstance } = await supabaseClient.from("whatsapp_instances")
-            .update({ status: "disconnected", manual_disconnect: true, updated_at: new Date().toISOString() })
+            .update({ status: newStatus, manual_disconnect: false, updated_at: new Date().toISOString() })
             .eq("id", body.instanceId).eq("law_firm_id", lawFirmId).select().single();
 
-          return new Response(JSON.stringify({ success: true, message: "Instance disconnected", instance: updatedInstance }), {
+          return new Response(JSON.stringify({
+            success: true,
+            message: "Instance restarted",
+            instance: updatedInstance,
+            qrCode: connectResult.qrCode || null,
+          }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
