@@ -169,24 +169,6 @@ export function WhatsAppInstanceList({
                 <TableCell>
                   <div className="flex items-center gap-2">
                     {getStatusBadge(instance.status)}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={() => onRefreshStatus(instance.id)}
-                          disabled={isRefreshingStatus}
-                        >
-                          {isRefreshingStatus ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Atualizar status</TooltipContent>
-                    </Tooltip>
                   </div>
                 </TableCell>
                 <TableCell>

@@ -2203,105 +2203,13 @@ serve(async (req) => {
           );
         }
 
-        // ── EVOLUTION PROVIDER ──
-        const apiUrl = normalizeUrl(instance.api_url);
-
-        let dbStatus = "disconnected";
-        let evolutionState = "unknown";
-        let sourceEndpoint = "none";
-
-        // PRIMARY: Use fetchInstances (same endpoint as Evolution Manager UI)
-        try {
-          const fetchUrl = `${apiUrl}/instance/fetchInstances?instanceName=${encodeURIComponent(instance.instance_name)}`;
-          console.log(`[Evolution API] Calling fetchInstances: ${fetchUrl}`);
-          const fetchResponse = await fetchWithTimeout(fetchUrl, {
-            method: "GET",
-            headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-          });
-
-          if (fetchResponse.ok) {
-            const fetchData = await fetchResponse.json();
-            console.log(`[Evolution API] fetchInstances raw response:`, JSON.stringify(fetchData).slice(0, 500));
-
-            // Parse response (can be array or object)
-            const instances = Array.isArray(fetchData) ? fetchData : fetchData?.instances || [fetchData];
-            const found = instances.find((i: any) => i?.instanceName === instance.instance_name || i?.name === instance.instance_name) || instances[0];
-
-            if (found) {
-              // connectionStatus is what Evolution Manager UI uses
-              evolutionState = found.connectionStatus || found.status || found.state || "unknown";
-              sourceEndpoint = "fetchInstances";
-              console.log(`[Evolution API] fetchInstances parsed: connectionStatus=${found.connectionStatus}, status=${found.status}, state=${found.state}, final=${evolutionState}`);
-            }
-          } else {
-            console.warn(`[Evolution API] fetchInstances returned ${fetchResponse.status}`);
-          }
-        } catch (e) {
-          console.warn(`[Evolution API] fetchInstances failed, trying connectionState:`, e.message);
-        }
-
-        // FALLBACK: connectionState endpoint (known to return stale data in v2.3+)
-        if (sourceEndpoint === "none") {
-          try {
-            const stateResponse = await fetchWithTimeout(
-              `${apiUrl}/instance/connectionState/${instance.instance_name}`,
-              { method: "GET", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } }
-            );
-            if (stateResponse.ok) {
-              const stateData = await stateResponse.json();
-              console.log(`[Evolution API] connectionState raw:`, JSON.stringify(stateData));
-              evolutionState = stateData.state || stateData.instance?.state || "unknown";
-              sourceEndpoint = "connectionState";
-            }
-          } catch (e) {
-            console.error(`[Evolution API] Both endpoints failed:`, e.message);
-          }
-        }
-
-        // Map Evolution state to our DB status
-        if (evolutionState === "open" || evolutionState === "connected") {
-          dbStatus = "connected";
-        } else if (evolutionState === "connecting" || evolutionState === "qr") {
-          dbStatus = "connecting";
-        } else if (evolutionState === "close" || evolutionState === "closed") {
-          dbStatus = "disconnected";
-        }
-
-        // Build update payload with proper flag cleanup
-        const refreshUpdatePayload: Record<string, unknown> = {
-          status: dbStatus,
-          updated_at: new Date().toISOString(),
-        };
-
-        if (dbStatus === "connected") {
-          refreshUpdatePayload.disconnected_since = null;
-          refreshUpdatePayload.awaiting_qr = false;
-          refreshUpdatePayload.reconnect_attempts_count = 0;
-        } else if (dbStatus === "disconnected") {
-          if (!instance.disconnected_since) {
-            refreshUpdatePayload.disconnected_since = new Date().toISOString();
-          }
-        }
-
-        const { data: updatedInstance } = await supabaseClient
-          .from("whatsapp_instances")
-          .update(refreshUpdatePayload)
-          .eq("id", body.instanceId)
-          .select()
-          .single();
-
-        console.log(`[Evolution API] Status refreshed: ${dbStatus} (source: ${sourceEndpoint}, evolution: ${evolutionState})`);
-
+        // ── EVOLUTION PROVIDER (desativado) ── retorna status atual sem chamar API externa
+        console.log(`[Evolution API] Evolution provider is deactivated, returning current DB status for instance: ${instance.instance_name}`);
         return new Response(
-          JSON.stringify({
-            success: true,
-            status: dbStatus,
-            evolutionState,
-            sourceEndpoint,
-            instance: updatedInstance,
-          }),
+          JSON.stringify({ success: true, status: instance.status, instance }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
         );
+
       }
 
       case "refresh_phone": {
