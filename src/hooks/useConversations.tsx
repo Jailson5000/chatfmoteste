@@ -149,10 +149,15 @@ export function useConversations() {
         offsetRef.current = 0;
       }
       
+      // Dynamic limit: fetch all already-loaded conversations on refetch
+      const fetchLimit = isRefetch 
+        ? Math.max(CONVERSATIONS_BATCH_SIZE, offsetRef.current) 
+        : CONVERSATIONS_BATCH_SIZE;
+
       const { data, error: rpcError } = await supabase
         .rpc('get_conversations_with_metadata', { 
           _law_firm_id: lawFirm.id,
-          _limit: CONVERSATIONS_BATCH_SIZE,
+          _limit: fetchLimit,
           _offset: 0,
           _include_archived: true
         });
@@ -352,10 +357,7 @@ export function useConversations() {
       return { id, ...updates };
     },
     onMutate: async ({ id, ...updates }) => {
-      // Cancel outgoing refetches to avoid overwriting optimistic update
-      await queryClient.cancelQueries({ queryKey: ["conversations"] });
-      
-      // Register optimistic lock to protect against stale refetch
+      // Register optimistic lock to protect against stale refetch (mergeWithOptimisticProtection handles conflicts)
       registerOptimisticUpdate(id, updates);
       
       // Optimistically update local state for immediate UI feedback
@@ -380,8 +382,11 @@ export function useConversations() {
       // The optimistic lock protects against stale data from the delayed refetch
     },
     onSettled: (_data, _error, variables) => {
-      // Clear optimistic lock after delay (gives DB time to propagate)
       clearOptimisticUpdateAfterDelay(variables.id);
+      // Fallback invalidation after optimistic lock expires (in case Realtime missed it)
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["conversations", lawFirm?.id] });
+      }, OPTIMISTIC_LOCK_DURATION_MS + 500);
     },
     onError: (error, variables) => {
       // Revert on error by refetching
@@ -410,8 +415,6 @@ export function useConversations() {
       return { conversationId, status };
     },
     onMutate: async ({ conversationId, status }) => {
-      await queryClient.cancelQueries({ queryKey: ["conversations"] });
-      
       const optimisticFields = { status };
       registerOptimisticUpdate(conversationId, optimisticFields);
       
@@ -434,6 +437,9 @@ export function useConversations() {
     },
     onSettled: (_data, _error, variables) => {
       clearOptimisticUpdateAfterDelay(variables.conversationId);
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["conversations", lawFirm?.id] });
+      }, OPTIMISTIC_LOCK_DURATION_MS + 500);
     },
     onError: (error, variables) => {
       pendingOptimisticUpdates.current.delete(variables.conversationId);
@@ -703,9 +709,6 @@ export function useConversations() {
     },
     // Optimistic update: update local cache immediately to avoid visual flicker
     onMutate: async ({ conversationId, departmentId }) => {
-      // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ["conversations"] });
-
       // Snapshot current conversations
       const previousConversations = queryClient.getQueryData<ConversationWithLastMessage[]>(["conversations", lawFirm?.id]);
 
@@ -767,6 +770,9 @@ export function useConversations() {
     },
     onSettled: (_data, _error, variables) => {
       clearOptimisticUpdateAfterDelay(variables.conversationId);
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["conversations", lawFirm?.id] });
+      }, OPTIMISTIC_LOCK_DURATION_MS + 500);
     },
   });
 
@@ -856,8 +862,6 @@ export function useConversations() {
     },
     // Optimistic update: update local cache immediately to avoid visual flicker
     onMutate: async ({ clientId, statusId }) => {
-      await queryClient.cancelQueries({ queryKey: ["conversations"] });
-
       // Lookup full status object from cache for immediate UI update
       const cachedStatuses = queryClient.getQueryData<Array<{id: string; name: string; color: string}>>(
         ["custom_statuses", lawFirm?.id]
@@ -920,14 +924,16 @@ export function useConversations() {
       });
     },
     onSettled: (_data, _error, _variables, context) => {
-      // Clear optimistic lock after delay
       if (context?.targetConvId) {
         clearOptimisticUpdateAfterDelay(context.targetConvId);
       }
-      // NOTE: Removed invalidateQueries(["conversations"]) - Realtime handles it
       queryClient.invalidateQueries({ queryKey: ["clients"] });
       queryClient.invalidateQueries({ queryKey: ["scheduled-follow-ups"] });
       queryClient.invalidateQueries({ queryKey: ["all-scheduled-follow-ups"] });
+      // Fallback invalidation after optimistic lock expires
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["conversations", lawFirm?.id] });
+      }, OPTIMISTIC_LOCK_DURATION_MS + 500);
     },
   });
 
