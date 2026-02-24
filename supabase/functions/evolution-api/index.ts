@@ -587,14 +587,36 @@ serve(async (req) => {
 
         // ── UAZAPI PROVIDER ──
         if (requestedProvider === 'uazapi') {
-          if (!body.apiUrl || !body.apiKey) {
-            throw new Error("apiUrl and apiKey are required for uazapi provider");
+          let uazapiUrl = body.apiUrl || "";
+          let uazapiKey = body.apiKey || "";
+
+          // Auto-fetch credentials from system_settings if not provided
+          if (!uazapiUrl || !uazapiKey) {
+            console.log("[Evolution API] No uazapi credentials provided, fetching from system_settings");
+            const { data: settings, error: settingsError } = await supabaseClient
+              .from("system_settings")
+              .select("key, value")
+              .in("key", ["uazapi_server_url", "uazapi_admin_token"]);
+
+            if (settingsError || !settings || settings.length === 0) {
+              throw new Error("Credenciais uazapi não configuradas. Configure no painel de administração global.");
+            }
+
+            for (const s of settings) {
+              if (s.key === "uazapi_server_url") uazapiUrl = String(s.value).replace(/^"|"$/g, "");
+              if (s.key === "uazapi_admin_token") uazapiKey = String(s.value).replace(/^"|"$/g, "");
+            }
+
+            if (!uazapiUrl || !uazapiKey) {
+              throw new Error("Credenciais uazapi incompletas no system_settings. Configure uazapi_server_url e uazapi_admin_token.");
+            }
+            console.log(`[Evolution API] Using system_settings uazapi: ${uazapiUrl}`);
           }
 
           const uazapiConfig: ProviderConfig = {
             provider: 'uazapi',
-            apiUrl: body.apiUrl,
-            apiKey: body.apiKey,
+            apiUrl: uazapiUrl,
+            apiKey: uazapiKey,
             instanceName: body.instanceName,
           };
 
@@ -624,8 +646,8 @@ serve(async (req) => {
               instance_name: body.instanceName,
               display_name: body.displayName || body.instanceName,
               instance_id: body.instanceName,
-              api_url: body.apiUrl,
-              api_key: body.apiKey,
+              api_url: uazapiUrl,
+              api_key: uazapiKey,
               api_provider: 'uazapi',
               status: connectResult.status === 'connected' ? 'connected' : (connectResult.qrCode ? 'awaiting_qr' : 'disconnected'),
             })

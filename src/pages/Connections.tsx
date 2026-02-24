@@ -380,22 +380,13 @@ export default function Connections() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedInstance?.id, selectedInstance?.status]);
 
-  const handleCreateInstance = async (displayName: string, instanceName: string, provider?: string, uazapiUrl?: string, uazapiToken?: string) => {
+  const handleCreateInstance = async (displayName: string, instanceName: string) => {
     try {
-      // Use the random instanceName for Evolution API, displayName for user display
-      const isUazapi = provider === "uazapi";
+      // Always use uazapi provider - backend fetches credentials automatically
       const result = await createInstance.mutateAsync({
-        instanceName, // Technical ID
-        displayName,  // User-friendly name
-        provider: isUazapi ? "uazapi" : "evolution",
-        // For uazapi: use provided URL/token; for evolution: use tenant config or global default
-        ...(isUazapi ? {
-          apiUrl: uazapiUrl,
-          apiKey: uazapiToken,
-        } : (evolutionApiUrl && evolutionApiKey ? {
-          apiUrl: evolutionApiUrl,
-          apiKey: evolutionApiKey,
-        } : {})),
+        instanceName,
+        displayName,
+        provider: "uazapi",
       });
 
       setIsNewInstanceOpen(false);
@@ -574,25 +565,10 @@ export default function Connections() {
             </p>
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                Nova Conexão
-                <ChevronDown className="h-4 w-4 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setIsNewInstanceOpen(true)}>
-                <QrCode className="h-4 w-4 mr-2" />
-                WhatsApp (QR Code)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setIsNewCloudOpen(true)}>
-                <MessageCircle className="h-4 w-4 mr-2 text-[#25D366]" />
-                WhatsApp Cloud (API Oficial)
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button onClick={() => setIsNewInstanceOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nova Conexão
+          </Button>
         </div>
 
         {/* Search */}
