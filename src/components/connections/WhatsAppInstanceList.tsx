@@ -136,7 +136,16 @@ export function WhatsAppInstanceList({
 
             return (
               <TableRow key={instance.id}>
-                <TableCell className="font-medium">{instance.display_name || instance.instance_name}</TableCell>
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2">
+                    {instance.display_name || instance.instance_name}
+                    {(instance as any).api_provider === "uazapi" ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/10 text-emerald-600 border-emerald-500/30">UAZAPI</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-500/30">EVO</Badge>
+                    )}
+                  </div>
+                </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm">

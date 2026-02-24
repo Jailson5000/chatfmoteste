@@ -13,6 +13,7 @@ interface CreateInstanceParams {
   displayName: string;
   apiUrl?: string;
   apiKey?: string;
+  provider?: 'evolution' | 'uazapi';
 }
 
 interface SetSettingsParams {
@@ -119,14 +120,14 @@ export function useWhatsAppInstances() {
   });
 
   const createInstance = useMutation({
-    mutationFn: async ({ instanceName, displayName, apiUrl, apiKey }: CreateInstanceParams): Promise<EvolutionResponse> => {
+    mutationFn: async ({ instanceName, displayName, apiUrl, apiKey, provider }: CreateInstanceParams): Promise<EvolutionResponse> => {
       // Check limit before creating
       const limitCheck = await checkLimit('instances', 1, true);
       if (!limitCheck.allowed) {
         throw new Error(limitCheck.message || "Limite de conexões WhatsApp atingido. Considere fazer um upgrade do seu plano.");
       }
 
-      console.log("[useWhatsAppInstances] Creating instance:", instanceName, "Display:", displayName);
+      console.log("[useWhatsAppInstances] Creating instance:", instanceName, "Display:", displayName, "Provider:", provider || "evolution");
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
@@ -140,6 +141,7 @@ export function useWhatsAppInstances() {
       // Only include apiUrl/apiKey if provided (for backwards compatibility)
       if (apiUrl) requestBody.apiUrl = normalizeApiUrl(apiUrl);
       if (apiKey) requestBody.apiKey = apiKey;
+      if (provider) requestBody.provider = provider;
 
       const response = await supabase.functions.invoke<EvolutionResponse>("evolution-api", {
         body: requestBody,
