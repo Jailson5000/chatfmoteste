@@ -1256,6 +1256,94 @@ serve(async (req) => {
           }
         }
 
+        // ---- AUDIO MODE STATE MACHINE (ported from evolution-webhook) ----
+        function isAudioRequestedFromText(userText: string): boolean {
+          if (!userText) return false;
+          const t = userText.toLowerCase();
+          const explicitAudioPatterns: RegExp[] = [
+            /(manda|envia|responde|responda|responder).{0,40}(áudio|audio|mensagem de voz|voz)/i,
+            /(áudio|audio|mensagem de voz|voz).{0,40}(manda|envia|responde|responda|responder)/i,
+            /por\s+(áudio|audio)/i,
+            /em\s+(áudio|audio)/i,
+            /em\s+voz/i,
+            /pode\s+(falar|responder|mandar).{0,20}(áudio|audio|voz)/i,
+            /prefiro\s+(áudio|audio|voz)/i,
+          ];
+          const readingDifficultyPatterns: RegExp[] = [
+            /n[aã]o\s+(sei|consigo)\s+ler/i,
+            /dificuldade\s+(de|para|em)\s+ler/i,
+            /n[aã]o\s+leio\s+bem/i,
+            /problema\s+(de|para|com)\s+(leitura|ler)/i,
+            /n[aã]o\s+enxergo\s+bem/i,
+            /tenho\s+dificuldade\s+(visual|de\s+vis[aã]o)/i,
+          ];
+          return explicitAudioPatterns.some((p) => p.test(t)) || readingDifficultyPatterns.some((p) => p.test(t));
+        }
+
+        function isAudioDeactivationRequest(userText: string): boolean {
+          if (!userText) return false;
+          const deactivationPatterns: RegExp[] = [
+            /n[aã]o\s+(manda|envia|responde).{0,20}(áudio|audio|voz)/i,
+            /sem\s+(áudio|audio|voz)/i,
+            /(pode|responde|responda|responder)\s+(por|em|com)?\s*texto/i,
+            /prefiro\s+texto/i,
+            /para\s+(com|de)\s+(áudio|audio|voz)/i,
+            /volta\s+(pro|para\s+o?)?\s*texto/i,
+            /só\s+texto/i,
+            /desativa\s+(o)?\s*(áudio|audio|voz)/i,
+            /n[aã]o\s+precis[ao]\s+(de)?\s*(áudio|audio|voz)/i,
+          ];
+          return deactivationPatterns.some((p) => p.test(userText.toLowerCase()));
+        }
+
+        async function updateAudioModeState(
+          client: any, convId: string, enabled: boolean,
+          reason: 'user_request' | 'text_message_received' | 'manual_toggle' | 'accessibility_need'
+        ): Promise<boolean> {
+          try {
+            const now = new Date().toISOString();
+            const updateData: any = { ai_audio_enabled: enabled, ai_audio_enabled_by: reason };
+            if (enabled) { updateData.ai_audio_last_enabled_at = now; } else { updateData.ai_audio_last_disabled_at = now; }
+            const { error } = await client.from('conversations').update(updateData).eq('id', convId);
+            if (error) { console.warn("[UAZAPI_WEBHOOK] Failed to update audio state:", error); return false; }
+            console.log(`[UAZAPI_WEBHOOK] 🔊 Audio state updated: enabled=${enabled}, reason=${reason}, conv=${convId}`);
+            return true;
+          } catch (e) { console.warn("[UAZAPI_WEBHOOK] Error updating audio state:", e); return false; }
+        }
+
+        async function shouldRespondWithAudio(
+          client: any, convId: string, currentMessageText: string, currentMsgType: string
+        ): Promise<boolean> {
+          try {
+            const { data: conversation, error: convError } = await client
+              .from('conversations').select('ai_audio_enabled, ai_audio_enabled_by').eq('id', convId).single();
+            if (convError) { console.warn("[UAZAPI_WEBHOOK] Error loading audio state:", convError); return false; }
+            const currentAudioEnabled = conversation?.ai_audio_enabled === true;
+            console.log(`[UAZAPI_WEBHOOK] 🔊 Audio state from DB: enabled=${currentAudioEnabled}, by=${conversation?.ai_audio_enabled_by}`);
+
+            if (isAudioDeactivationRequest(currentMessageText)) {
+              console.log("[UAZAPI_WEBHOOK] 🔊 Client requested to DISABLE audio");
+              await updateAudioModeState(client, convId, false, 'user_request');
+              return false;
+            }
+            if (isAudioRequestedFromText(currentMessageText)) {
+              console.log("[UAZAPI_WEBHOOK] 🔊 Client requested to ENABLE audio");
+              await updateAudioModeState(client, convId, true, 'user_request');
+              return true;
+            }
+            if (currentAudioEnabled && currentMsgType === 'text') {
+              console.log("[UAZAPI_WEBHOOK] 🔊 Audio was enabled but client sent TEXT - auto-disabling");
+              await updateAudioModeState(client, convId, false, 'text_message_received');
+              return false;
+            }
+            if (currentAudioEnabled && currentMsgType === 'audio') {
+              console.log("[UAZAPI_WEBHOOK] 🔊 Audio mode active, client sent audio - keeping");
+              return true;
+            }
+            return currentAudioEnabled;
+          } catch (e) { console.warn("[UAZAPI_WEBHOOK] Error in shouldRespondWithAudio:", e); return false; }
+        }
+
         // ---- TRIGGER AI PROCESSING ----
         // Use contentForAI (which has transcription for audio) instead of raw content
         if (!isFromMe && (contentForAI || (messageType === "audio"))) {
@@ -1309,15 +1397,46 @@ serve(async (req) => {
 
               if (aiResponse.ok) {
                 const result = await aiResponse.json();
-                const aiText = result.response;
+                let aiText = result.response;
                 console.log("[UAZAPI_WEBHOOK] AI response received:", aiText?.substring(0, 80));
+
+                // ---- Process AI audio commands (@Ativar áudio / @Desativar áudio) ----
+                if (aiText) {
+                  let shouldEnableAudio = false;
+                  let shouldDisableAudio = false;
+
+                  const enablePattern = /@[Aa]tivar\s*[aáAÁ]udio/g;
+                  if (enablePattern.test(aiText)) {
+                    shouldEnableAudio = true;
+                    aiText = aiText.replace(/@[Aa]tivar\s*[aáAÁ]udio/gi, '');
+                    console.log("[UAZAPI_WEBHOOK] 🔊 Detected @Ativar áudio command in AI response");
+                  }
+
+                  const disablePattern = /@[Dd]esativar\s*[aáAÁ]udio/g;
+                  if (disablePattern.test(aiText)) {
+                    shouldDisableAudio = true;
+                    aiText = aiText.replace(/@[Dd]esativar\s*[aáAÁ]udio/gi, '');
+                    console.log("[UAZAPI_WEBHOOK] 🔊 Detected @Desativar áudio command in AI response");
+                  }
+
+                  aiText = aiText.replace(/\n{3,}/g, '\n\n').trim();
+
+                  if (shouldEnableAudio) {
+                    await updateAudioModeState(supabaseClient, conversationId, true, 'user_request');
+                  }
+                  if (shouldDisableAudio) {
+                    await updateAudioModeState(supabaseClient, conversationId, false, 'user_request');
+                  }
+                }
 
                 if (aiText && instance.api_url && instance.api_key) {
                   const apiUrl = instance.api_url.replace(/\/+$/, "");
                   const targetNumber = remoteJid.replace("@s.whatsapp.net", "");
 
-                  // ---- CHECK IF AUDIO RESPONSE IS ENABLED ----
-                  const audioEnabled = conv?.ai_audio_enabled === true;
+                  // ---- CHECK IF AUDIO RESPONSE IS ENABLED (state machine) ----
+                  const audioEnabled = await shouldRespondWithAudio(
+                    supabaseClient, conversationId, contentForAI || '', messageType
+                  );
                   let sentAsAudio = false;
 
                   if (audioEnabled) {
