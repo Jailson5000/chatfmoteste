@@ -1,99 +1,104 @@
 
 
-# QR Code Dialog Nao Fecha Apos Escanear (Stale Closure no Polling)
+# QR Scan Mostra "Conectado" e Depois Reverte para "Desconectado"
 
 ## Diagnostico
 
-O problema e um **bug de stale closure** no polling de status.
+O problema e uma **race condition no ciclo de polling** que causa reconexao acidental apos o QR ser escaneado.
 
-### Como funciona o polling
-
-A funcao `pollOnce` tem duas ramificacoes:
-- **Sem QR code** (`!currentQRCode`): chama `getQRCode` (linha 227-273)
-- **Com QR code**: chama `getStatus` (linha 276-296)
-
-### O bug
-
-`pollOnce` captura `currentQRCode` via closure e esta nos deps do `useCallback` (linha 306). Quando o QR code e obtido e `setCurrentQRCode(qrCode)` e chamado, o React recria `pollOnce` com o novo valor.
-
-**Porem**, o `setTimeout` na linha 305 ja foi agendado com a versao ANTIGA de `pollOnce` (onde `currentQRCode === null`):
+### Sequencia do bug
 
 ```text
-T=0s   pollOnce v1 (currentQRCode=null) → getQRCode → obtem QR → setCurrentQRCode("abc")
-       setTimeout(() => pollOnce_v1(id), 8000)  ← CAPTURA pollOnce v1!
-       
-T=8s   pollOnce v1 executa (currentQRCode=null!) → getQRCode novamente!
-       setTimeout(() => pollOnce_v1(id), 8000)
-       
-T=16s  pollOnce v1 executa → getQRCode novamente...
+T=0.0s  pollOnce v1 inicia → agenda setTimeout(() => pollOnce(id), 3000)
+T=0.5s  Usuario escaneia QR → uazapi envia webhook "connected"
+T=0.6s  Realtime detecta → stopPolling() + setCurrentQRCode(null) + refetch()
+        → UI mostra "Conectado" ✓
+        → stopPolling() cancela o PROXIMO setTimeout agendado
+        → MAS pollOnce v1 pode AINDA ESTAR executando (await pendente)
+
+T=3.0s  setTimeout do T=0.0s JA FOI agendado antes do stopPolling
+        → pollOnce executa novamente
+        → currentQRCodeRef.current === null (foi limpo no T=0.6s!)
+        → Entra na ramificacao "sem QR" → chama getQRCode.mutateAsync
+        → getQRCode chama provider.connect() no uazapi
+        → uazapi REINICIA a sessao → envia webhook "disconnected"
+        → DB atualizado para "disconnected"
+        → UI reverte para "Desconectado" ✗
 ```
 
-O polling **nunca muda para a ramificacao `getStatus`** porque o `setTimeout` sempre usa a versao antiga de `pollOnce` onde `currentQRCode` e `null`.
+### Causa raiz (2 falhas)
 
-Consequencias:
-1. Em vez de verificar status com `getStatus`, o polling continua chamando `getQRCode`
-2. `getQRCode` chama `provider.connect()` que pode retornar status `connected`, mas o check na linha 242 so verifica `result.status === "open"` — o valor `"connected"` **funciona** (esta la), mas `getQRCode` para uazapi chama `connect()` que pode reenviar um novo QR em vez de reportar status
-3. O dialogo fica preso mostrando QR code indefinidamente
+**Falha 1: `stopPolling()` nao impede polls em andamento.** `clearTimeout` cancela o proximo setTimeout agendado, mas se `pollOnce` esta no meio de um `await`, ele continua executando e agenda um NOVO setTimeout na linha 311 (sobrescrevendo o null do `pollIntervalRef`).
 
-### Porque funciona ao clicar "Conectar" manualmente
-
-Ao fechar e clicar "Conectar", `handleConnectInstance` chama `getQRCode` que para uazapi chama `provider.connect()`. Se a instancia ja esta conectada, retorna `status: "connected"` e o polling detecta corretamente. Mas isso so funciona porque e uma chamada fresca, nao presa no stale closure.
+**Falha 2: `setCurrentQRCode(null)` ao detectar conexao cria armadilha.** Quando a conexao e detectada, o QR code e limpo. Se qualquer poll residual executa depois disso, ele ve `currentQRCodeRef.current === null` e chama `getQRCode` → `provider.connect()`, que REINICIA a sessao no uazapi, causando desconexao temporaria.
 
 ## Correcao
 
 ### Arquivo: `src/pages/Connections.tsx`
 
-**Usar ref para `currentQRCode` no polling** em vez de depender do state diretamente no closure. Isso elimina o stale closure:
+**Correcao 1: Adicionar flag `isPollingActiveRef` para controle absoluto do polling**
 
-1. Adicionar `currentQRCodeRef` que espelha `currentQRCode`:
 ```typescript
-const currentQRCodeRef = useRef<string | null>(null);
-
-// Sync ref with state
-useEffect(() => {
-  currentQRCodeRef.current = currentQRCode;
-}, [currentQRCode]);
+const isPollingActiveRef = useRef(false);
 ```
 
-2. No `pollOnce`, usar `currentQRCodeRef.current` em vez de `currentQRCode`:
+- `startPolling` seta `isPollingActiveRef.current = true`
+- `stopPolling` seta `isPollingActiveRef.current = false`
+- `pollOnce` verifica `isPollingActiveRef.current` NO INICIO antes de qualquer acao e ANTES de agendar o proximo poll
+
+Isso garante que nenhum poll residual (em andamento ou agendado) execute apos a conexao ser detectada.
+
+**Correcao 2: Nao limpar `currentQRCode` durante deteccao de conexao no polling**
+
+Atualmente, quando a conexao e detectada no `pollOnce` (linhas 250-260, 288-298) e no Realtime (linha 192), o codigo faz `setCurrentQRCode(null)` ANTES de parar o polling. Isso cria a armadilha onde polls residuais veem `null` e chamam `connect()`.
+
+Mover `setCurrentQRCode(null)` para DENTRO do `setTimeout` que fecha o dialog (apos 1 segundo), garantindo que o QR permanece setado ate o polling estar completamente parado.
+
+**Correcao 3: `handleCloseQRDialog` deve aguardar `getStatus` antes de `refetch`**
+
+Atualmente:
 ```typescript
-if (!currentQRCodeRef.current) {
-  // fetch QR...
-} else {
-  // check status...
+getStatus.mutateAsync(currentInstanceId).catch(() => {});
+setCurrentInstanceId(null); // Limpa ANTES do getStatus terminar
+refetch(); // Refetch ANTES do DB ser atualizado
+```
+
+Corrigir para:
+```typescript
+const instanceIdToCheck = currentInstanceId;
+setCurrentInstanceId(null);
+if (instanceIdToCheck) {
+  try {
+    await getStatus.mutateAsync(instanceIdToCheck);
+  } catch {}
 }
+refetch();
 ```
 
-3. Remover `currentQRCode` dos deps do `useCallback` de `pollOnce` para evitar recriacao desnecessaria (agora usa a ref).
+## Mudancas especificas
 
-**Adicionar refetch imediato apos fechar o dialog**: Quando o usuario fecha o dialog manualmente (sem conexao detectada), fazer um `refetch()` e `getStatus` imediato para atualizar o estado da instancia:
-
-```typescript
-const handleQRDialogClose = () => {
-  stopPolling();
-  setIsQRDialogOpen(false);
-  setCurrentQRCode(null);
-  setConnectionStatus(null);
-  setPollCount(0);
-  // Refetch status imediato ao fechar
-  if (currentInstanceId) {
-    getStatus.mutateAsync(currentInstanceId).catch(() => {});
-  }
-  refetch();
-};
-```
+| Local | Mudanca |
+|---|---|
+| `stopPolling` | Adicionar `isPollingActiveRef.current = false` |
+| `startPolling` | Adicionar `isPollingActiveRef.current = true` |
+| `pollOnce` (inicio) | Checar `if (!isPollingActiveRef.current) return;` |
+| `pollOnce` (antes do setTimeout) | Checar `if (!isPollingActiveRef.current) return;` |
+| `pollOnce` (deteccao de conexao) | Mover `setCurrentQRCode(null)` para dentro do setTimeout de 1s |
+| Realtime handler | Mover `setCurrentQRCode(null)` para dentro do setTimeout de 1s |
+| `handleCloseQRDialog` | Await `getStatus` antes de `refetch`, separar captura do instanceId |
 
 ## Resultado Esperado
 
-1. Usuario escaneia QR code
-2. Polling muda corretamente para ramificacao `getStatus` (ref sempre atualizada)
-3. `getStatus` retorna `status: "connected"` para uazapi
-4. Dialog fecha automaticamente com mensagem "Conectado!"
-5. Se usuario fechar manualmente, refetch imediato atualiza o status na lista
+1. Usuario escaneia QR → conexao detectada (Realtime ou polling)
+2. `stopPolling()` seta `isPollingActiveRef = false`
+3. Qualquer poll residual verifica a flag e para imediatamente
+4. `currentQRCode` mantem valor ate o dialog fechar (nenhum poll vazio dispara `connect()`)
+5. UI mostra "Conectado" e PERMANECE conectado
+6. Ao fechar dialog manualmente, `getStatus` atualiza DB antes do `refetch`
 
 ## Arquivos Afetados
 
 | Arquivo | Mudanca |
 |---|---|
-| `src/pages/Connections.tsx` | Usar ref para QR code no polling, adicionar refetch ao fechar dialog |
+| `src/pages/Connections.tsx` | Adicionar `isPollingActiveRef`, proteger `pollOnce` com flag, mover limpeza de QR para apos dialog fechar, corrigir `handleCloseQRDialog` |
 
