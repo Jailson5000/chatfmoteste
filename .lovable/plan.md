@@ -1,156 +1,159 @@
 
+## 0) Bloqueio imediato: erro de build (GitHub token)
+**Erro:** `failed to get github access token ... invalid character '<'`
+Isso normalmente acontece quando a resposta do GitHub volta como HTML (ex: página de login), indicando **token expirado / app sem permissão / sessão inválida**.
 
-# Corrigir recebimento de midias do WhatsApp -- Diagnostico real dos logs de producao
+**Ação necessária (sua, 1 min):**
+1. Abra **Project Settings → GitHub**.
+2. Clique em **Reconnect / Re-authorize** (reautorizar o app).
+3. Garanta que você escolheu a **conta/organização correta** e que o app tem permissão no repositório.
+4. Refaça o build/deploy.
 
-## Problema confirmado pelos logs
-
-Os logs de producao mostram **dois bugs criticos** que impedem o funcionamento de midias:
-
-### Bug 1: `detectMessageType` retorna "text" para todas as midias
-
-O uazapi envia `msg.type = "media"` (generico) para TODOS os tipos de midia, nao PascalCase como "DocumentMessage". A funcao `detectMessageType` nao reconhece "media" e retorna "text":
-
-```text
-Logs de producao:
-Message: text from 556384622450 { mimeType: "application/pdf", msgType: "media" }
-Message: text from 556384622450 { mimeType: "image/jpeg", msgType: "media" }
-Message: text from 556384622450 { mimeType: "audio/ogg; codecs=opus", msgType: "media" }
-Message: text from 556384622450 { mimeType: "image/webp", msgType: "media" }
-```
-
-Todas as midias ficam com `message_type = "text"` no banco.
-
-### Bug 2: Midias nunca sao persistidas no Storage
-
-O codigo na linha 641 faz: `if (rawBase64 && !mediaUrl)` -- so persiste quando ha base64 E nao ha URL. O uazapi envia `mediaUrl` (URL do CDN do WhatsApp) mas **sem base64** (`hasBase64: false` em todos os logs). Resultado: a URL do CDN do WhatsApp e salva diretamente no banco, mas essas URLs expiram em poucas horas. Depois disso, a plataforma mostra "Imagem nao disponivel" / "Audio nao disponivel".
-
-Banco de dados confirma -- todas as `media_url` apontam para `mmg.whatsapp.net`:
-```text
-media_url: https://mmg.whatsapp.net/o1/v/t24/f2/m238/...  (EXPIRADA)
-media_url: https://mmg.whatsapp.net/v/t62.7119-24/...      (EXPIRADA)
-```
-
-Nenhuma midia foi persistida no Storage.
+> Sem isso, qualquer correção que eu fizer pode não conseguir gerar “latest commit” e o pipeline trava.
 
 ---
 
-## Solucao
+## 1) Diagnóstico real (por que mídia ainda “não aparece / não baixa / figurinha falha”)
+Pelos logs e pelo que apareceu no banco:
 
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
+### 1.1 Sticker chegando com URL errada
+No webhook do uazapi, alguns eventos chegam assim:
+- `message.content.URL = "https://web.whatsapp.net"` (isso **não é** o arquivo da figurinha)
+Resultado:
+- Nosso código tenta baixar essa URL (falha DNS no runtime) e **não persiste** a figurinha no storage.
+- O frontend vê `media_url` não-pública e tenta fallback via `get_media` (Evolution), mas **para uazapi hoje o get_media retorna erro**, então a figurinha vira “placeholder”.
 
-#### Correcao 1 -- `detectMessageType`: tratar `type: "media"` inferindo do mimeType
+### 1.2 Documento “aparece” mas ao clicar abre nova aba e não baixa
+No frontend, o `DocumentViewer` faz:
+- se URL é pública → `window.open(src, "_blank")`
+Isso abre outra aba (como você relatou) e **não dispara download**. Além disso, se o PDF estiver inválido/corrompido (ou o navegador não renderizar), ele mostra erro em vez de baixar.
 
-Quando `msg.type = "media"`, usar o mimeType extraido para determinar o tipo real:
-
-```typescript
-function detectMessageType(msg: any): string {
-  const t = (msg.type || "").toLowerCase();
-  
-  // uazapi sends generic "media" type - infer from mimeType
-  if (t === "media") {
-    const mime = extractMimeType(msg) || "";
-    const mLower = mime.toLowerCase();
-    if (mLower.startsWith("image/webp")) return "sticker";
-    if (mLower.startsWith("image/")) return "image";
-    if (mLower.startsWith("video/")) return "video";
-    if (mLower.startsWith("audio/")) return "audio";
-    return "document"; // PDFs, DOCX, etc.
-  }
-  
-  // PascalCase types (keep existing)
-  if (t === "image" || t === "imagemessage" || msg.imageMessage) return "image";
-  if (t === "video" || t === "videomessage" || msg.videoMessage) return "video";
-  if (t === "audio" || t === "audiomessage" || t === "ptt" || t === "pttmessage" || ...) return "audio";
-  if (t === "document" || t === "documentmessage" || msg.documentMessage) return "document";
-  if (t === "sticker" || t === "stickermessage" || msg.stickerMessage) return "sticker";
-  if (t === "location" || t === "locationmessage" || ...) return "location";
-  if (t === "contact" || t === "contactmessage" || ...) return "contact";
-  if (t === "extendedtextmessage") return "text";
-  return "text";
-}
-```
-
-#### Correcao 2 -- Baixar midia da URL do WhatsApp e persistir no Storage
-
-Apos o bloco de base64 (linha 641-683), adicionar um bloco que baixa a midia da URL quando base64 nao esta disponivel:
-
-```typescript
-// EXISTING: if (rawBase64 && !mediaUrl) { ... persist base64 ... }
-
-// NEW: Download from WhatsApp CDN URL when no base64
-const currentMediaUrl = messagePayload.media_url as string | null;
-if (currentMediaUrl && 
-    !currentMediaUrl.includes("supabase") && 
-    messageType !== "text") {
-  try {
-    console.log("[UAZAPI_WEBHOOK] Downloading media from CDN URL:", currentMediaUrl.slice(0, 100));
-    const response = await fetch(currentMediaUrl);
-    if (response.ok) {
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if (bytes.length > 100) { // Valid file
-        const baseMime = (mimeType || "").split(";")[0].trim().toLowerCase();
-        const ext = extMap[baseMime] || extMap[mimeType || ""] || ".bin";
-        const storagePath = `${lawFirmId}/${conversationId}/${whatsappMessageId}${ext}`;
-        
-        const { error: uploadError } = await supabaseClient.storage
-          .from("chat-media")
-          .upload(storagePath, bytes, {
-            contentType: baseMime || "application/octet-stream",
-            upsert: true,
-          });
-        
-        if (!uploadError) {
-          const { data: publicUrlData } = supabaseClient.storage
-            .from("chat-media")
-            .getPublicUrl(storagePath);
-          if (publicUrlData?.publicUrl) {
-            messagePayload.media_url = publicUrlData.publicUrl;
-            console.log("[UAZAPI_WEBHOOK] Media downloaded and persisted:", storagePath);
-          }
-        }
-      }
-    }
-  } catch (dlErr) {
-    console.warn("[UAZAPI_WEBHOOK] CDN download failed (will use original URL):", dlErr);
-  }
-}
-```
-
-#### Correcao 3 -- Mover `extMap` para escopo acessivel
-
-O `extMap` atualmente esta dentro do bloco `if (rawBase64 && !mediaUrl)`. Precisa ser movido para antes dos dois blocos (base64 e download) para ser reutilizado.
-
-#### Correcao 4 -- Usar `chat.wa_lastMessageType` como fallback para tipo
-
-O payload do uazapi inclui `body.chat.wa_lastMessageType` com o tipo correto em PascalCase (ex: "DocumentMessage", "ImageMessage"). Usar como fallback quando `msg.type = "media"`:
-
-```typescript
-// Na funcao detectMessageType, aceitar segundo parametro opcional:
-function detectMessageType(msg: any, chat?: any): string {
-  let t = (msg.type || "").toLowerCase();
-  
-  // uazapi sends "media" as generic type - try chat.wa_lastMessageType first
-  if (t === "media" && chat?.wa_lastMessageType) {
-    t = chat.wa_lastMessageType.toLowerCase();
-  }
-  // ... rest of function
-```
+### 1.3 Áudio/imagem “não disponível”
+Mesmo quando a mídia foi persistida no storage, o UI só funciona 100% quando:
+- a URL é pública e o blob é baixável/reproduzível; ou
+- o fallback `get_media` funciona (para casos de URL ausente/ruim).
+Hoje, para uazapi, o `get_media` ainda está negando (“verifique o Storage”), então quando alguma mídia vier sem URL boa, o UI quebra.
 
 ---
 
-## Resumo de mudancas
+## 2) Correção de backend (uazapi): parar de depender de `content.URL` e usar o endpoint correto de download
+A documentação oficial do uazapi possui o endpoint:
+- `POST /message/download` (Baixar arquivo de uma mensagem)
 
-| Mudanca | Impacto |
-|---|---|
-| `detectMessageType`: tratar `type: "media"` via mimeType + `wa_lastMessageType` | Imagens, audios, PDFs e figurinhas classificados corretamente |
-| Download de midia da URL do CDN do WhatsApp | Midias persistidas no Storage com URL permanente |
-| Mover `extMap` para escopo compartilhado | Base64 e download usam o mesmo mapeamento de extensoes |
+Ele retorna:
+- `fileURL` (link público temporário do próprio uazapi, válido por 2 dias no storage deles)
+- `base64Data` (opcional)
+- `mimetype`
 
-## Resultado esperado
+### 2.1 Ajuste no `uazapi-webhook` (principal)
+Arquivo: `supabase/functions/uazapi-webhook/index.ts`
 
-- Imagens aparecerao na conversa (persistidas no Storage)
-- Audios serao reproduziveis (URL permanente em vez de CDN expirado)
-- PDFs e documentos serao visualizaveis e baixaveis
-- Figurinhas (.webp) serao exibidas corretamente
-- Fotos de perfil continuam sendo capturadas do `chat.imagePreview`
+**Mudanças:**
+1. **Detectar URLs inválidas/suspeitas**:
+   - Se `mediaUrl` for `https://web.whatsapp.net` (ou vazio), tratar como **não confiável**.
+2. **Quando mensagem for mídia (image/audio/document/sticker/video)**, ao invés de baixar do CDN diretamente:
+   - Chamar `POST {instance.api_url}/message/download` com header `token: instance.api_key`
+   - Body mínimo:
+     ```json
+     { "id": "<whatsappMessageId>", "return_link": true, "return_base64": false }
+     ```
+   - Para áudio, decidir `generate_mp3: true` (melhor compatibilidade web) ou `false` (manter ogg). Recomendo **true** para reduzir “áudio não disponível” no browser.
+3. **Persistir sempre no nosso storage**:
+   - Baixar o `fileURL` retornado pelo uazapi (não o `content.URL`)
+   - Fazer upload no bucket `chat-media`
+   - Salvar `messagePayload.media_url` com a URL pública do nosso storage
+   - Salvar `media_mime_type` com o `mimetype` retornado
+4. **Extensão correta**:
+   - Usar `mimetype.split(';')[0]` e extMap (incluindo `.webp`, `.mp3`, `.ogg`, `.pdf`, etc.).
+5. **Concorrência/duplicatas**:
+   - Trocar a lógica de “duplicate check” e/ou tratar erro 23505 como “ok” **antes** de gastar tempo baixando e subindo arquivo.
+   - Ideal: `upsert` por `(law_firm_id, whatsapp_message_id)` com `ignoreDuplicates`, ou capturar `23505` e abortar sem logar como erro.
 
+**Resultado esperado:**
+- Sticker, áudio, imagem e documento sempre ganham `media_url` pública real no storage.
+- Nada mais tenta baixar `https://web.whatsapp.net`.
+
+### 2.2 Corrigir fallback `get_media` para uazapi (muito importante)
+Arquivo: `supabase/functions/evolution-api/index.ts` (action `get_media`)
+
+Hoje ele faz:
+- se uazapi → retorna erro “verifique o Storage”.
+
+Vamos mudar para:
+- se uazapi → chamar `POST /message/download` com:
+  ```json
+  { "id": "<whatsappMessageId>", "return_base64": true, "return_link": false, "generate_mp3": true }
+  ```
+- Retornar para o frontend no mesmo formato atual:
+  ```json
+  { "success": true, "base64": "<...>", "mimetype": "audio/mpeg" }
+  ```
+
+**Por que isso é crítico?**
+- Mesmo com webhook bom, vai existir caso de falha temporária de download/persistência.
+- O frontend (ImageViewer/StickerViewer/AudioPlayer/DocumentViewer) já tem lógica para buscar `get_media` quando precisa (decriptação/fallback). Sem isso, “Imagem/Áudio não disponível” volta.
+
+---
+
+## 3) Correção do frontend: download correto (sem abrir nova aba)
+Arquivo: `src/components/conversations/MessageBubble.tsx` (DocumentViewer)
+
+### 3.1 Para URLs públicas (storage), fazer download de verdade
+Trocar o comportamento:
+- Em vez de `window.open(src, "_blank")`
+- Fazer:
+  1) `fetch(src)` → `blob()`  
+  2) criar `URL.createObjectURL(blob)`  
+  3) `a.download = displayName`  
+  4) clicar programaticamente e limpar URL.
+
+### 3.2 Fallback se fetch falhar
+Se o `fetch(src)` falhar (404, conteúdo inválido etc):
+- Tentar o fallback atual (`supabase.functions.invoke("evolution-api", { action:"get_media" ... })`)
+- E baixar via `dataUrl → blob` (como já existe).
+
+**Resultado esperado:**
+- Clique no documento → baixa o arquivo (sem “ir pra outra página”).
+- Mesmo que PDF não renderize, o arquivo ainda baixa.
+
+---
+
+## 4) Backfill/recuperação do histórico (mídias antigas quebradas)
+Depois das mudanças acima, ainda haverá mensagens antigas com:
+- `media_url = https://web.whatsapp.net` ou `mmg.whatsapp.net` expirado
+
+Plano de correção do histórico (2 opções):
+1) **On-demand (recomendado e rápido)**: quando o usuário tentar abrir/baixar e falhar, o frontend chama `get_media` (agora suportado para uazapi) e funciona sem reprocessar tudo.
+2) **Job de reparo (opcional)**: criar uma função de backend “repair_uazapi_media” para varrer mensagens recentes com URL ruim e repersistir no storage em lote.
+
+---
+
+## 5) Validação (checklist de teste)
+Após aplicar:
+1. Envie pelo WhatsApp (uazapi):
+   - 1 figurinha
+   - 1 áudio (PTT)
+   - 1 imagem
+   - 1 PDF
+2. Confirme no chat:
+   - figurinha aparece como imagem webp
+   - áudio toca no player (sem “Áudio não disponível”)
+   - imagem renderiza
+   - PDF baixa diretamente (sem abrir aba)
+
+---
+
+## 6) Observação final sobre “remover Evolution”
+Você aprovou **Dual-provider estável**. Então:
+- Vamos **manter Evolution** para tenants legados
+- Mas o fluxo do uazapi ficará completo e independente:
+  - webhook persistindo mídia corretamente
+  - `get_media` funcionando para uazapi (fallback universal)
+  - downloads no frontend sem depender do Evolution
+
+---
+
+<lov-actions>
+  <lov-open-history>View History</lov-open-history>
+  <lov-link url="https://docs.lovable.dev/tips-tricks/troubleshooting">Troubleshooting docs</lov-link>
+</lov-actions>
