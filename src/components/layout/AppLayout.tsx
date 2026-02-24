@@ -3,7 +3,6 @@ import { AppSidebar } from "./AppSidebar";
 import { useMessageNotifications } from "@/hooks/useMessageNotifications";
 import { usePresenceTracking } from "@/hooks/usePresenceTracking";
 import { SystemAlertBanner } from "./SystemAlertBanner";
-import { TenantProvider } from "@/hooks/useTenant";
 import { RealtimeSyncProvider } from "@/contexts/RealtimeSyncContext";
 
 export function AppLayout() {
@@ -17,24 +16,22 @@ export function AppLayout() {
   const isConversations = location.pathname.startsWith("/conversations");
 
   return (
-    <TenantProvider>
-      <RealtimeSyncProvider>
-        <div className="flex flex-col h-screen w-full bg-background overflow-hidden">
-          <SystemAlertBanner />
-          <div className="flex flex-1 min-h-0 overflow-hidden">
-            <AppSidebar />
-            <main
-              className={
-                isConversations
-                  ? "flex-1 h-full min-h-0 min-w-0 overflow-hidden transition-all duration-300"
-                  : "flex-1 h-full min-h-0 min-w-0 overflow-auto transition-all duration-300"
-              }
-            >
-              <Outlet />
-            </main>
-          </div>
+    <RealtimeSyncProvider>
+      <div className="flex flex-col h-screen w-full bg-background overflow-hidden">
+        <SystemAlertBanner />
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+          <AppSidebar />
+          <main
+            className={
+              isConversations
+                ? "flex-1 h-full min-h-0 min-w-0 overflow-hidden transition-all duration-300"
+                : "flex-1 h-full min-h-0 min-w-0 overflow-auto transition-all duration-300"
+            }
+          >
+            <Outlet />
+          </main>
         </div>
-      </RealtimeSyncProvider>
-    </TenantProvider>
+      </div>
+    </RealtimeSyncProvider>
   );
 }
