@@ -1,99 +1,129 @@
 
 
-# Diagnostico: Mensagens Nao Chegando Apos Transferencia + Agrupamento
+# Correcoes: Alerta Sonoro + Desarquivamento Automatico
 
-## Analise Tecnica
+## Diagnostico
 
-### Problema 1: Mensagem de resposta nao chega apos transferencia de instancia
+### Problema 1: Conversa arquivada nao desarquiva ao receber mensagem
 
-**Investigacao nos logs:** Os logs recentes do `uazapi-webhook` mostram APENAS eventos do tipo `chats` (sincronizacao de lista de contatos) e ZERO eventos do tipo `messages`. Isso indica que:
+**Causa raiz confirmada:** O `uazapi-webhook` NAO tem logica de desarquivamento. Quando uma mensagem chega de um contato cuja conversa esta arquivada:
+1. O webhook encontra a conversa (Step 1 — sem filtro de `archived_at`)
+2. Salva a mensagem corretamente
+3. Atualiza `last_message_at`
+4. **MAS nunca limpa `archived_at`** → conversa continua aparecendo como arquivada
 
-1. A instancia FMOANTIGO (`inst_7tdqx6d8`) esta conectada e recebendo eventos
-2. Mas os eventos de mensagem (`messages`) nao estao chegando ao webhook
+O `evolution-webhook` tem ~40 linhas de logica de desarquivamento (linhas 5808-5849) que:
+- Detecta `conversation.archived_at !== null`
+- Limpa `archived_at` e `archived_reason`
+- Restaura o handler correto (`archived_next_responsible_type/id`)
+- Ou usa defaults da instancia se nao ha proximo responsavel definido
 
-**Causa raiz identificada — LID (`@lid`) blocking silencioso:**
-Os logs revelam que o uazapi envia `chat.phone` no formato LID (ex: `134613502546020@lid`) para muitos contatos. Quando o Jailson responde:
-- `msg.from` pode ser `NUMERO@lid` em vez de `556384622450@s.whatsapp.net`  
-- `remoteJidRaw` recebe o LID
-- `toRemoteJid()` converte para `NUMERO_LID@s.whatsapp.net` (errado)
-- A busca por `remote_jid + whatsapp_instance_id` FALHA (o armazenado e `556384622450@s.whatsapp.net`)
-- A busca de orfao tambem FALHA (mesmo motivo — `remote_jid` nao bate)
-- Resultado: cria uma conversa FANTASMA com JID errado que nao aparece na interface
+Essa logica esta **completamente ausente** no `uazapi-webhook`.
 
-**Diferenca critica vs Evolution:** O `evolution-webhook` (linha 4555) tem um bloco explicito `BLOCK LID` que ignora mensagens `@lid`. O `uazapi-webhook` NAO tem esse tratamento. Pior: o uazapi usa LID internamente e as vezes envia `@lid` como JID primario mas disponibiliza o JID real em `chat.wa_chatid` ou `chat.wa_fastid`.
+### Problema 2: Alerta sonoro sumiu
 
-### Problema 2: Fluxo de continuidade apos transferencia
+**Causa raiz:** O som depende de `useMessageNotifications` → `RealtimeSyncContext` → callback de mensagens → verifica `conversation.current_handler` e `conversation.assigned_to` no cache do React Query.
 
-A conversa do Jailson JA esta corretamente atribuida a instancia FMOANTIGO no banco (`whatsapp_instance_id: fc9dbbd6...`). O envio de mensagens pela plataforma funciona. O que falta e o webhook receber a resposta e associar ao conversa correta — resolvido pelo fix do LID.
+O fluxo funciona assim:
+1. Mensagem INSERT chega via Realtime
+2. `handleNewMessage` busca a conversa no cache: `queryClient.getQueryData(["conversations", lawFirmId])`
+3. Se `conversation.current_handler === 'ai'` → **NAO toca som**
 
-### Problema 3: Agrupar conversas do mesmo contato
+**Problema:** Quando o uazapi-webhook encontra a conversa arquivada e nao desarquiva, o campo `current_handler` pode ainda estar como `'ai'` (da ultima sessao). O cache local reflete isso. Resultado: o filtro `if (conversation?.current_handler === 'ai') return;` bloqueia o som.
 
-Atualmente, se o mesmo numero tem conversas em instancias diferentes, elas aparecem como conversas separadas. A funcao `unify_duplicate_conversations` ja existe no banco. O que falta e:
-- No webhook, ao receber mensagem de contato que ja existe, associar a conversa EXISTENTE (nao criar nova)
-- Na UI, permitir visualizar historico completo de um contato independente da instancia
+Alem disso, a conversa da Gabrielle Martins no screenshot mostra que foi atribuida a "Jailson Ferreira" (`assigned_to` definido). O `useMessageNotifications` verifica: `if (conversation.assigned_to !== user?.id) return;` — ou seja, se o usuario logado NAO e o Jailson, ele nao ouve o som.
+
+**Mas o problema principal e que conversas novas de contatos novos (sem cache) tambem podem nao tocar som**, porque `cachedData?.find()` retorna `undefined`, e o codigo continua sem tocar (nao ha `if (!conversation)` para notificar em caso de conversa nao encontrada no cache).
 
 ## Correcoes Propostas
 
 ### Arquivo 1: `supabase/functions/uazapi-webhook/index.ts`
 
-**Mudanca A — Resolucao de LID para JID real (CRITICO):**
+**Mudanca A — Logica de desarquivamento (CRITICO):**
 
-Apos extrair `remoteJidRaw` (linhas 476-478), adicionar logica de resolucao LID:
-
-```text
-1. Se remoteJidRaw contem "@lid":
-   a. Tentar chat.wa_chatid (ex: "557196084344@s.whatsapp.net")
-   b. Tentar chat.wa_fastid — formato "owner:realphone" — extrair parte apos ":"
-   c. Tentar chat.phone se formato "+55 XX XXXX-XXXX" (nao LID)
-   d. Se ainda LID, tentar busca por phone no banco (clients/conversations)
-   e. Se impossivel resolver, logar e ignorar (como evolution-webhook faz)
-```
-
-Isso resolve o problema principal: mensagens com LID nao serao mais perdidas se o JID real estiver disponivel nos campos auxiliares do payload.
-
-**Mudanca B — Lookup de conversa por telefone como fallback (ALTO):**
-
-Apos a busca por `remote_jid + whatsapp_instance_id` (linha 561), se nao encontrar, adicionar busca por `contact_phone`:
+Na secao de "Update conversation" (linhas 1101-1113), ANTES de fazer o update, buscar o estado completo da conversa (incluindo `archived_at`, `archived_next_responsible_type/id`, `current_handler`) e aplicar a mesma logica do evolution-webhook:
 
 ```text
-1. Busca exata: remote_jid + whatsapp_instance_id (atual)
-2. NOVO: Busca por contact_phone + whatsapp_instance_id 
-3. Busca orfao: remote_jid em qualquer instancia (atual)
-4. NOVO: Busca orfao por contact_phone em qualquer instancia
-5. Criar nova conversa (atual)
+// Buscar estado da conversa para verificar se esta arquivada
+const { data: convState } = await supabaseClient
+  .from("conversations")
+  .select("archived_at, archived_reason, archived_next_responsible_type, archived_next_responsible_id, current_handler, current_automation_id, assigned_to, client_id")
+  .eq("id", conversationId)
+  .single();
+
+if (convState?.archived_at && !isFromMe) {
+  // Desarquivar
+  convUpdate.archived_at = null;
+  convUpdate.archived_reason = null;
+  
+  // Restaurar handler
+  if (convState.archived_next_responsible_type === 'ai' && convState.archived_next_responsible_id) {
+    convUpdate.current_handler = 'ai';
+    convUpdate.current_automation_id = convState.archived_next_responsible_id;
+    convUpdate.assigned_to = null;
+  } else if (convState.archived_next_responsible_type === 'human' && convState.archived_next_responsible_id) {
+    convUpdate.current_handler = 'human';
+    convUpdate.assigned_to = convState.archived_next_responsible_id;
+    convUpdate.current_automation_id = null;
+  } else {
+    // Defaults da instancia
+    if (instance.default_automation_id) {
+      convUpdate.current_handler = 'ai';
+      convUpdate.current_automation_id = instance.default_automation_id;
+      convUpdate.assigned_to = null;
+    } else if (instance.default_assigned_to) {
+      convUpdate.current_handler = 'human';
+      convUpdate.assigned_to = instance.default_assigned_to;
+    } else {
+      convUpdate.current_handler = 'human';
+      convUpdate.assigned_to = null;
+      convUpdate.current_automation_id = null;
+    }
+  }
+  
+  // Limpar metadata de arquivo
+  convUpdate.archived_next_responsible_type = null;
+  convUpdate.archived_next_responsible_id = null;
+}
 ```
 
-Isso garante que mesmo se o `remote_jid` mudar (ex: de `@s.whatsapp.net` para `@lid` ou vice-versa), a conversa e encontrada pelo telefone.
+**Mudanca B — Busca prioriza conversas ativas sobre arquivadas:**
 
-**Mudanca C — Atualizar `remote_jid` quando resolvido (MEDIO):**
+No Step 1 (linha 623), adicionar filtro `is('archived_at', null)` como prioridade, e se nao encontrar, buscar arquivadas (excluindo `instance_unification`). Isso evita que mensagens caiam em conversas permanentemente inativas.
 
-Se a conversa foi encontrada por telefone mas com JID diferente, atualizar o `remote_jid` para o JID atual. Isso corrige gradualmente os dados.
+### Arquivo 2: `src/hooks/useMessageNotifications.tsx`
 
-### Arquivo 2: `supabase/functions/_shared/whatsapp-provider.ts`
+**Mudanca C — Tocar som quando conversa nao esta no cache (MEDIO):**
 
-**Nenhuma mudanca necessaria** — o problema e exclusivamente no webhook de processamento de mensagens.
+No `handleNewMessage`, quando `conversation` e `undefined` (conversa nova ou nao carregada no cache), o som deve tocar. Adicionar:
 
-### Sobre agrupamento de conversas (Pergunta 3)
+```typescript
+// Se conversa nao esta no cache, e provavelmente uma conversa nova ou recem-ativada
+// Tocar som para alertar
+if (!conversation) {
+  if (soundEnabled) playNotification();
+  if (browserEnabled && "Notification" in window && Notification.permission === "granted") {
+    new Notification("Nova mensagem do WhatsApp", { ... });
+  }
+  onNewMessage?.(message);
+  return;
+}
+```
 
-O sistema ja tem a funcao `unify_duplicate_conversations` no banco e o webhook ja faz reassociacao de orfaos. Com os fixes acima:
-- Quando um contato responde em uma nova instancia, a conversa existente e **reassociada** (nao duplicada)
-- O historico de mensagens e **preservado** na mesma conversa
-- A transferencia manual de instancia (que voce fez) ja funciona — o problema era apenas o webhook nao saber receber a resposta
-
-Para cenarios onde o MESMO numero tem conversas DIFERENTES em instancias DIFERENTES (ex: uma na 3528, outra na FMOANTIGO), o sistema mantem separadas por design (por instancia). Mas com o fix de fallback por telefone, ao receber mensagem na nova instancia, ele encontra e reutiliza a conversa existente em vez de criar duplicata.
+Isso resolve o caso de conversas que acabaram de ser desarquivadas e ainda nao estao no cache local.
 
 ## Resumo de Mudancas
 
 | Arquivo | Mudanca | Prioridade |
 |---|---|---|
-| `uazapi-webhook/index.ts` | Resolver LID → JID real usando `wa_chatid`, `wa_fastid`, telefone | CRITICO |
-| `uazapi-webhook/index.ts` | Fallback de busca de conversa por `contact_phone` | CRITICO |
-| `uazapi-webhook/index.ts` | Atualizar `remote_jid` quando encontrado por telefone | MEDIO |
+| `uazapi-webhook/index.ts` | Adicionar logica de desarquivamento automatico ao receber mensagem | CRITICO |
+| `uazapi-webhook/index.ts` | Priorizar conversas ativas sobre arquivadas na busca | ALTO |
+| `useMessageNotifications.tsx` | Tocar som quando conversa nao esta no cache (conversa nova/reativada) | ALTO |
 
 ## Resultado Esperado
 
-- Mensagens de resposta via WhatsApp chegam corretamente mesmo quando uazapi envia LID
-- Conversas transferidas de instancia continuam recebendo mensagens normalmente
-- Nenhuma conversa fantasma e criada por JIDs invalidos
-- Historico preservado ao reagrupar automaticamente por telefone
+- Conversas arquivadas desarquivam automaticamente ao receber nova mensagem do cliente
+- Handler correto e restaurado (IA ou humano) conforme configuracao de proximo responsavel
+- Alerta sonoro toca mesmo para conversas que acabaram de ser criadas ou reativadas
+- Vinculacao de conversas antigas continua funcionando normalmente (os 5 steps de lookup nao sao alterados)
 
