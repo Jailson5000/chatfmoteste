@@ -1,46 +1,66 @@
 
-# Corrigir Tela Travada em "Verificando acesso..."
 
-## Problema Raiz
+# Corrigir QR Code nao aparecendo para instancias uazapi
 
-O `ProtectedRoute` usa o hook `useTenant()` para verificar o subdominio do usuario. Porem, o `TenantProvider` (que fornece os dados para esse hook) esta dentro do `AppLayout`, que e um **filho** do `ProtectedRoute`.
+## Problema Encontrado
 
-Isso significa que quando o `ProtectedRoute` chama `useTenant()`, ele recebe o valor padrao do contexto, que tem `isLoading: true` **para sempre**. A tela nunca sai do estado "Verificando acesso..." porque `tenantLoading` nunca se torna `false`.
+Quando o frontend faz polling via `get_qrcode`, o backend chama `provider.connect()` no uazapi, mas:
 
-```text
-Hierarquia ATUAL (com bug):
+1. **Sem logs de debug**: O resultado do `connect()` nao e logado, entao nao sabemos o que a API retorna
+2. **Possivel campo diferente**: O QR code pode vir em um campo que o `connect()` nao extrai (ex: `data.data.qrcode`, `data.image`, etc.)
+3. **Estado da instancia**: O DB mostra status `disconnected` apos criacao, o que indica que a etapa 2 (connect) da criacao tambem nao retornou QR code
 
-  App
-    AuthProvider
-      ProtectedRoute  <-- usa useTenant() aqui (sem TenantProvider acima!)
-        AppLayout
-          TenantProvider  <-- provider esta aqui, muito abaixo
-            Outlet
-```
+## Diagnostico
+
+Os logs mostram:
+- `Step 1: init` -- OK (token obtido)
+- `Step 2: connect` -- chamado, mas nao ha log do resultado
+- `get_qrcode` -- chamado repetidamente (~10s intervalo), mas nenhum log de resultado
+
+O polling funciona, mas o `connect()` retorna `qrCode: null` silenciosamente.
 
 ## Solucao
 
-Mover o `TenantProvider` para o `App.tsx`, envolvendo todas as rotas. Isso garante que tanto o `ProtectedRoute` quanto o `AppLayout` tenham acesso ao contexto do tenant.
+### 1. Adicionar logs de debug no connect e get_qrcode (diagnostico)
 
-```text
-Hierarquia CORRIGIDA:
+**Arquivo:** `supabase/functions/_shared/whatsapp-provider.ts`
 
-  App
-    AuthProvider
-      TenantProvider  <-- movido para ca
-        ProtectedRoute  <-- agora useTenant() funciona!
-          AppLayout
-            Outlet
+No metodo `connect()` do UazapiProvider (linha ~597):
+- Logar o body da resposta: `console.log("[UazapiProvider] connect response:", JSON.stringify(data).slice(0, 500))`
+- Expandir a extracao do QR code para cobrir mais campos possiveis
+
+No metodo `createInstance()` (linha ~775):
+- Logar o body da resposta do Step 2: `console.log("[UazapiProvider] Step 2 response:", JSON.stringify(connectData).slice(0, 500))`
+
+### 2. Adicionar logs no get_qrcode do evolution-api
+
+**Arquivo:** `supabase/functions/evolution-api/index.ts`
+
+No case `get_qrcode` para uazapi (linha ~878-891):
+- Logar o resultado do connect: `console.log("[Evolution API] uazapi get_qrcode result:", JSON.stringify(result).slice(0, 500))`
+
+### 3. Expandir extracao de QR code no connect()
+
+**Arquivo:** `supabase/functions/_shared/whatsapp-provider.ts`
+
+Atualizar a linha de extracao do QR code no `connect()` para cobrir mais formatos possiveis:
+
+```
+const qrCode = data?.qrcode || data?.base64 || data?.qr || 
+               data?.data?.qrcode || data?.data?.base64 || 
+               data?.image || data?.data?.image || null;
 ```
 
-## Alteracoes
+Mesma logica no `createInstance()` Step 2.
 
-### Arquivo: `src/App.tsx`
-- Importar `TenantProvider` de `@/hooks/useTenant`
-- Envolver o `BrowserRouter` com `TenantProvider`
+## Resumo das Alteracoes
 
-### Arquivo: `src/components/layout/AppLayout.tsx`
-- Remover o `TenantProvider` de dentro do AppLayout (para evitar provider duplicado)
-- Manter o `RealtimeSyncProvider`
+| Arquivo | O que muda |
+|---|---|
+| `supabase/functions/_shared/whatsapp-provider.ts` | Adicionar logs de debug + expandir extracao de QR code nos metodos `connect()` e `createInstance()` |
+| `supabase/functions/evolution-api/index.ts` | Adicionar log do resultado no `get_qrcode` para uazapi |
 
-Estas sao alteracoes minimas e de baixo risco que corrigem o problema sem mudar nenhuma logica de negocio.
+## Resultado Esperado
+
+Com os logs adicionados, poderemos ver exatamente o que a API uazapi retorna e ajustar a extracao. A expansao dos campos de QR code deve resolver o problema caso o QR venha em um campo diferente do esperado.
+
