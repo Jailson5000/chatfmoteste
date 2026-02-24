@@ -56,12 +56,11 @@ import {
   Filter,
   History,
   Bell,
-  Settings2,
+  Server,
 } from "lucide-react";
-import { useGlobalAdminInstances, InstanceWithCompany, EvolutionConnection } from "@/hooks/useGlobalAdminInstances";
+import { useGlobalAdminInstances, InstanceWithCompany } from "@/hooks/useGlobalAdminInstances";
 import { InstanceUptimeChart } from "@/components/connections/InstanceUptimeChart";
 import { InstanceHealthSummary } from "@/components/connections/InstanceHealthSummary";
-import { EvolutionApiConnectionsCard } from "@/components/global-admin/EvolutionApiConnectionsCard";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -69,7 +68,6 @@ import { formatDistanceToNow, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
 type StatusFilter = "all" | "problems" | "connected" | "disconnected" | "awaiting_qr" | "suspended";
-type ViewMode = "grouped" | "list";
 
 interface WebhookLog {
   id: string;
@@ -83,7 +81,9 @@ interface WebhookLog {
 
 // Component for webhook logs
 function WebhookLogsViewer({ instanceName }: { instanceName: string }) {
-  const { data: logs = [], isLoading } = useQuery({
+  // Use useQuery for logs
+  const { useQuery } = require("@tanstack/react-query");
+  const { data: logsData = [], isLoading: isLogsLoading } = useQuery({
     queryKey: ["webhook-logs", instanceName],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -93,8 +93,6 @@ function WebhookLogsViewer({ instanceName }: { instanceName: string }) {
         .limit(50);
 
       if (error) throw error;
-
-      // Filter logs that contain this instance name in the payload
       return (data as WebhookLog[]).filter((log) => {
         const payloadStr = JSON.stringify(log.payload || {});
         return payloadStr.includes(instanceName);
@@ -103,7 +101,7 @@ function WebhookLogsViewer({ instanceName }: { instanceName: string }) {
     staleTime: 30000,
   });
 
-  if (isLoading) {
+  if (isLogsLoading) {
     return (
       <div className="flex items-center justify-center py-8">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -111,7 +109,7 @@ function WebhookLogsViewer({ instanceName }: { instanceName: string }) {
     );
   }
 
-  if (logs.length === 0) {
+  if (logsData.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground">
         <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -122,7 +120,7 @@ function WebhookLogsViewer({ instanceName }: { instanceName: string }) {
 
   return (
     <div className="space-y-2">
-      {logs.map((log) => {
+      {logsData.map((log: WebhookLog) => {
         const eventType = log.payload?.event || log.payload?.data?.event || "unknown";
         const isError = log.error_message || (log.status_code && log.status_code >= 400);
 
@@ -175,30 +173,19 @@ export default function GlobalAdminConnections() {
   const { toast } = useToast();
   const {
     instances,
-    instancesByConnection,
-    evolutionConnections,
     isLoading,
-    evolutionHealth,
-    isHealthLoading,
-    refetchHealth,
     refreshInstanceStatus,
     restartInstance,
     suspendInstance,
     reactivateInstance,
     refreshAllStatuses,
-    syncEvolutionInstances,
     fetchPhoneNumber,
-    reapplyAllWebhooks,
-    forceSyncAll,
-    recreateAllLostInstances,
   } = useGlobalAdminInstances();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [viewMode, setViewMode] = useState<ViewMode>("grouped");
   const [selectedInstance, setSelectedInstance] = useState<InstanceWithCompany | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-
 
   // Manual alert trigger mutation
   const triggerAlertCheck = useMutation({
@@ -227,7 +214,6 @@ export default function GlobalAdminConnections() {
   // Apply filters
   const filteredInstances = useMemo(() => {
     return instances.filter((instance) => {
-      // Search filter
       const matchesSearch =
         instance.instance_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         instance.phone_number?.includes(searchQuery) ||
@@ -236,7 +222,6 @@ export default function GlobalAdminConnections() {
 
       if (!matchesSearch) return false;
 
-      // Status filter
       switch (statusFilter) {
         case "problems":
           return ["disconnected", "error", "suspended"].includes(instance.status);
@@ -258,13 +243,17 @@ export default function GlobalAdminConnections() {
     ["disconnected", "error", "suspended"].includes(i.status)
   ).length;
 
-  const lostCount = instances.filter((i) => i.status === "not_found_in_evolution").length;
+  // Provider counts
+  const uazapiCount = instances.filter((i) => i.api_provider === "uazapi").length;
+  const evolutionCount = instances.filter((i) => i.api_provider !== "uazapi").length;
+  const connectedCount = instances.filter((i) => i.status === "connected").length;
+  const connectingCount = instances.filter((i) => i.status === "connecting" || i.status === "awaiting_qr").length;
+  const disconnectedCount = instances.filter((i) => i.status === "disconnected").length;
+  const errorCount = instances.filter((i) => i.status === "error" || i.status === "suspended").length;
 
   // CRITICAL: Detect duplicate phone numbers across connected instances
-  // This is a security issue that can cause message duplication and tenant data mixing
   const duplicatePhoneNumbers = useMemo(() => {
     const phoneMap = new Map<string, InstanceWithCompany[]>();
-    
     instances.forEach((instance) => {
       if (instance.phone_number && instance.status === "connected") {
         const existing = phoneMap.get(instance.phone_number) || [];
@@ -272,15 +261,12 @@ export default function GlobalAdminConnections() {
         phoneMap.set(instance.phone_number, existing);
       }
     });
-
-    // Return only phones that have more than one connected instance
     const duplicates = new Map<string, InstanceWithCompany[]>();
     phoneMap.forEach((instancesWithPhone, phone) => {
       if (instancesWithPhone.length > 1) {
         duplicates.set(phone, instancesWithPhone);
       }
     });
-
     return duplicates;
   }, [instances]);
 
@@ -302,48 +288,7 @@ export default function GlobalAdminConnections() {
     disconnected: "Desconectada",
     suspended: "Suspensa",
     error: "Erro",
-  };
-
-  const getEvolutionStatusIcon = () => {
-    if (isHealthLoading) {
-      return <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />;
-    }
-    switch (evolutionHealth?.status) {
-      case "online":
-        return <CheckCircle2 className="h-5 w-5 text-green-500" />;
-      case "unstable":
-        return <AlertTriangle className="h-5 w-5 text-yellow-500" />;
-      case "offline":
-        return <XCircle className="h-5 w-5 text-destructive" />;
-      default:
-        return <Activity className="h-5 w-5 text-muted-foreground" />;
-    }
-  };
-
-  const getEvolutionStatusColor = () => {
-    switch (evolutionHealth?.status) {
-      case "online":
-        return "bg-green-500/10 border-green-500/20 text-green-600";
-      case "unstable":
-        return "bg-yellow-500/10 border-yellow-500/20 text-yellow-600";
-      case "offline":
-        return "bg-destructive/10 border-destructive/20 text-destructive";
-      default:
-        return "bg-muted border-border text-muted-foreground";
-    }
-  };
-
-  const getEvolutionStatusLabel = () => {
-    switch (evolutionHealth?.status) {
-      case "online":
-        return "Online";
-      case "unstable":
-        return "Instável";
-      case "offline":
-        return "Offline";
-      default:
-        return "Verificando...";
-    }
+    not_found_in_evolution: "Não encontrada",
   };
 
   const handleViewDetails = (instance: InstanceWithCompany) => {
@@ -364,7 +309,7 @@ export default function GlobalAdminConnections() {
                   ⚠️ ALERTA CRÍTICO: {duplicateCount} número(s) duplicado(s) detectado(s)
                 </h3>
                 <p className="text-sm text-destructive/80 mt-1">
-                  O mesmo número de WhatsApp está conectado em múltiplas instâncias. 
+                  O mesmo número de WhatsApp está conectado em múltiplas instâncias.
                   Isso causa <strong>duplicação de mensagens</strong> e <strong>mistura de dados entre empresas</strong>.
                 </p>
                 <div className="mt-3 space-y-2">
@@ -383,9 +328,6 @@ export default function GlobalAdminConnections() {
                     </div>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground mt-3">
-                  Solução: Desconecte as instâncias duplicadas mantendo apenas UMA por número.
-                </p>
               </div>
             </div>
           </div>
@@ -400,7 +342,6 @@ export default function GlobalAdminConnections() {
             </p>
           </div>
           <div className="flex gap-2">
-            {/* Evolution API buttons disabled - using uazapi */}
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -417,7 +358,6 @@ export default function GlobalAdminConnections() {
                 <p>Enviar alertas para instâncias desconectadas há mais de 30 minutos</p>
               </TooltipContent>
             </Tooltip>
-            {/* Verificar Evolution - desabilitado, usando uazapi */}
             <Button
               variant="outline"
               size="sm"
@@ -430,40 +370,34 @@ export default function GlobalAdminConnections() {
           </div>
         </div>
 
-        {/* Evolution Global Status */}
-        <Card className={`border-2 ${getEvolutionStatusColor()}`}>
+        {/* Provider Summary Card */}
+        <Card className="border-2 border-primary/20 bg-primary/5">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="p-3 rounded-full bg-background/50">
-                  {getEvolutionStatusIcon()}
+                <div className="p-3 rounded-full bg-primary/10">
+                  <Server className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-lg">Evolution API</h3>
-                    <Badge variant="outline" className={getEvolutionStatusColor()}>
-                      {getEvolutionStatusLabel()}
-                    </Badge>
-                  </div>
+                  <h3 className="font-semibold text-lg">Provedores WhatsApp</h3>
                   <p className="text-sm text-muted-foreground">
-                    {evolutionHealth?.message || "Verificando conexão com a API..."}
+                    {instances.length} instância(s) cadastrada(s)
                   </p>
                 </div>
               </div>
-              <div className="text-right text-sm text-muted-foreground">
-                {evolutionHealth?.latency_ms && (
-                  <div className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {evolutionHealth.latency_ms}ms
-                  </div>
-                )}
-                {evolutionHealth?.checked_at && (
-                  <div>
-                    Verificado{" "}
-                    {formatDistanceToNow(new Date(evolutionHealth.checked_at), {
-                      addSuffix: true,
-                      locale: ptBR,
-                    })}
+              <div className="flex items-center gap-6">
+                <div className="text-center">
+                  <Badge className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 text-sm">
+                    uazapi
+                  </Badge>
+                  <p className="text-lg font-bold mt-1">{uazapiCount}</p>
+                </div>
+                {evolutionCount > 0 && (
+                  <div className="text-center">
+                    <Badge variant="secondary" className="px-3 py-1 text-sm">
+                      evolution
+                    </Badge>
+                    <p className="text-lg font-bold mt-1">{evolutionCount}</p>
                   </div>
                 )}
               </div>
@@ -479,9 +413,7 @@ export default function GlobalAdminConnections() {
               <Link2 className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
-                {evolutionHealth?.instances_summary?.total || instances.length}
-              </div>
+              <div className="text-2xl font-bold">{instances.length}</div>
             </CardContent>
           </Card>
           <Card>
@@ -490,10 +422,7 @@ export default function GlobalAdminConnections() {
               <Wifi className="h-4 w-4 text-green-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">
-                {evolutionHealth?.instances_summary?.connected ||
-                  instances.filter((i) => i.status === "connected").length}
-              </div>
+              <div className="text-2xl font-bold text-green-600">{connectedCount}</div>
             </CardContent>
           </Card>
           <Card>
@@ -502,11 +431,7 @@ export default function GlobalAdminConnections() {
               <Activity className="h-4 w-4 text-yellow-500" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-yellow-600">
-                {evolutionHealth?.instances_summary?.connecting ||
-                  instances.filter((i) => i.status === "connecting" || i.status === "awaiting_qr")
-                    .length}
-              </div>
+              <div className="text-2xl font-bold text-yellow-600">{connectingCount}</div>
             </CardContent>
           </Card>
           <Card>
@@ -515,258 +440,19 @@ export default function GlobalAdminConnections() {
               <WifiOff className="h-4 w-4 text-destructive" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-destructive">
-                {evolutionHealth?.instances_summary?.disconnected ||
-                  instances.filter((i) => i.status === "disconnected").length}
-              </div>
+              <div className="text-2xl font-bold text-destructive">{disconnectedCount}</div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Erro</CardTitle>
+              <CardTitle className="text-sm font-medium">Erro/Suspensa</CardTitle>
               <AlertTriangle className="h-4 w-4 text-destructive" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-destructive">
-                {evolutionHealth?.instances_summary?.error ||
-                  instances.filter((i) => i.status === "error").length}
-              </div>
+              <div className="text-2xl font-bold text-destructive">{errorCount}</div>
             </CardContent>
           </Card>
         </div>
-
-        {/* Evolution API Connections */}
-        <EvolutionApiConnectionsCard />
-
-        {/* Grouped Instances by Evolution Connection */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Building2 className="h-5 w-5" />
-                Empresas por Conexão
-              </CardTitle>
-              <div className="flex gap-2">
-                <Button
-                  variant={viewMode === "grouped" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setViewMode("grouped")}
-                >
-                  Agrupado
-                </Button>
-                <Button
-                  variant={viewMode === "list" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setViewMode("list")}
-                >
-                  Lista
-                </Button>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              </div>
-            ) : viewMode === "grouped" ? (
-              <div className="space-y-6">
-                {evolutionConnections.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Globe className="h-12 w-12 mx-auto mb-4 opacity-30" />
-                    <p>Nenhuma conexão Evolution API configurada</p>
-                    <p className="text-sm mt-1">Configure uma conexão no card acima para começar</p>
-                  </div>
-                ) : (
-                  evolutionConnections.map((connection) => {
-                    const connectionInstances = instancesByConnection[connection.id]?.instances || [];
-                    const connectedCount = connectionInstances.filter(i => i.status === "connected").length;
-                    const disconnectedCount = connectionInstances.filter(i => ["disconnected", "error", "suspended"].includes(i.status)).length;
-                    
-                    return (
-                      <div key={connection.id} className="border rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-full ${
-                              connection.health_status === "online" 
-                                ? "bg-green-500/10" 
-                                : connection.health_status === "offline"
-                                ? "bg-destructive/10"
-                                : "bg-muted"
-                            }`}>
-                              {connection.health_status === "online" ? (
-                                <CheckCircle2 className="h-5 w-5 text-green-500" />
-                              ) : connection.health_status === "offline" ? (
-                                <XCircle className="h-5 w-5 text-destructive" />
-                              ) : (
-                                <Activity className="h-5 w-5 text-muted-foreground" />
-                              )}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-semibold">{connection.name}</h4>
-                                {connection.is_default && (
-                                  <Badge variant="secondary" className="text-xs">Padrão</Badge>
-                                )}
-                              </div>
-                              <p className="text-xs text-muted-foreground font-mono">{connection.api_url}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-4 text-sm">
-                            <div className="flex items-center gap-1">
-                              <Wifi className="h-4 w-4 text-green-500" />
-                              <span className="font-medium">{connectedCount}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <WifiOff className="h-4 w-4 text-destructive" />
-                              <span className="font-medium">{disconnectedCount}</span>
-                            </div>
-                            <Badge variant="outline">
-                              {connectionInstances.length} instância(s)
-                            </Badge>
-                          </div>
-                        </div>
-                        
-                        {connectionInstances.length === 0 ? (
-                          <div className="text-center py-4 text-muted-foreground text-sm bg-muted/30 rounded-md">
-                            Nenhuma empresa conectada nesta API
-                          </div>
-                        ) : (
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Empresa</TableHead>
-                                <TableHead>Instância</TableHead>
-                                <TableHead>Número</TableHead>
-                                <TableHead>Status</TableHead>
-                                <TableHead>Último Evento</TableHead>
-                                <TableHead className="text-right">Ações</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {connectionInstances.map((instance) => (
-                                <TableRow key={instance.id}>
-                                  <TableCell>
-                                    <div className="flex flex-col">
-                                      <span className="font-medium">{instance.company_name}</span>
-                                      {instance.subdomain && (
-                                        <span className="text-xs text-muted-foreground">{instance.subdomain}</span>
-                                      )}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <div className={`h-2 w-2 rounded-full ${
-                                        instance.status === "connected" ? "bg-green-500" :
-                                        instance.status === "connecting" || instance.status === "awaiting_qr" ? "bg-yellow-500" :
-                                        "bg-destructive"
-                                      }`} />
-                                      <span className="font-mono text-sm">{instance.instance_name}</span>
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <Phone className="h-3 w-3 text-muted-foreground" />
-                                      {instance.phone_number 
-                                        ? `+${instance.phone_number.replace(/\D/g, '').replace(/^(\d{2})(\d{2})(\d+)(\d{4})$/, '$1 ($2) •••••-$4')}`
-                                        : "-"}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Badge variant={statusColors[instance.status] || "outline"}>
-                                      {statusLabels[instance.status] || instance.status}
-                                    </Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    {instance.last_webhook_at ? (
-                                      <span className="text-xs text-muted-foreground">
-                                        {formatDistanceToNow(new Date(instance.last_webhook_at), {
-                                          addSuffix: true,
-                                          locale: ptBR,
-                                        })}
-                                      </span>
-                                    ) : "-"}
-                                  </TableCell>
-                                  <TableCell className="text-right">
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                                          <MoreVertical className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={() => handleViewDetails(instance)}>
-                                          <Eye className="h-4 w-4 mr-2" />
-                                          Ver Detalhes
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem
-                                          onClick={() => refreshInstanceStatus.mutate(instance.id)}
-                                          disabled={refreshInstanceStatus.isPending}
-                                        >
-                                          <RefreshCw className="h-4 w-4 mr-2" />
-                                          Atualizar Status
-                                        </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-                
-                {/* Orphan instances (not matched to any connection) */}
-                {instancesByConnection["unknown"]?.instances?.length > 0 && (
-                  <div className="border border-yellow-500/30 rounded-lg p-4 bg-yellow-500/5">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="p-2 rounded-full bg-yellow-500/10">
-                        <AlertTriangle className="h-5 w-5 text-yellow-500" />
-                      </div>
-                      <div>
-                        <h4 className="font-semibold">Instâncias sem Conexão Identificada</h4>
-                        <p className="text-xs text-muted-foreground">
-                          Estas instâncias não estão vinculadas a nenhuma conexão Evolution cadastrada
-                        </p>
-                      </div>
-                    </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Empresa</TableHead>
-                          <TableHead>Instância</TableHead>
-                          <TableHead>API URL</TableHead>
-                          <TableHead>Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {instancesByConnection["unknown"].instances.map((instance) => (
-                          <TableRow key={instance.id}>
-                            <TableCell>{instance.company_name}</TableCell>
-                            <TableCell className="font-mono text-sm">{instance.instance_name}</TableCell>
-                            <TableCell className="font-mono text-xs">{instance.api_url}</TableCell>
-                            <TableCell>
-                              <Badge variant={statusColors[instance.status] || "outline"}>
-                                {statusLabels[instance.status] || instance.status}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-muted-foreground text-center py-4">
-                Use o modo "Lista" abaixo para visualização tradicional
-              </p>
-            )}
-          </CardContent>
-        </Card>
 
         {/* Health Summary & Uptime Chart */}
         <div className="grid gap-6 lg:grid-cols-2">
@@ -836,12 +522,12 @@ export default function GlobalAdminConnections() {
           </CardContent>
         </Card>
 
-        {/* Table */}
+        {/* Table — Todas as Instâncias */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Link2 className="h-5 w-5" />
-              Instâncias do Evolution ({filteredInstances.length})
+              Todas as Instâncias ({filteredInstances.length})
               {statusFilter !== "all" && (
                 <Badge variant="outline" className="ml-2">
                   <Filter className="h-3 w-3 mr-1" />
@@ -861,6 +547,7 @@ export default function GlobalAdminConnections() {
                   <TableRow>
                     <TableHead>Empresa</TableHead>
                     <TableHead>Instância</TableHead>
+                    <TableHead>Provedor</TableHead>
                     <TableHead>Número</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Último Evento</TableHead>
@@ -871,7 +558,7 @@ export default function GlobalAdminConnections() {
                 <TableBody>
                   {filteredInstances.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         {searchQuery || statusFilter !== "all"
                           ? "Nenhuma instância encontrada para estes filtros"
                           : "Nenhuma instância cadastrada"}
@@ -915,6 +602,18 @@ export default function GlobalAdminConnections() {
                           )}
                         </TableCell>
                         <TableCell>
+                          <Badge
+                            variant={instance.api_provider === "uazapi" ? "default" : "secondary"}
+                            className={
+                              instance.api_provider === "uazapi"
+                                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                : ""
+                            }
+                          >
+                            {instance.api_provider || "evolution"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
                           <div className="flex items-center gap-2">
                             {instance.phone_number ? (
                               <>
@@ -927,7 +626,6 @@ export default function GlobalAdminConnections() {
                                       <p className="font-semibold text-destructive">⚠️ NÚMERO DUPLICADO</p>
                                       <p className="text-xs mt-1">
                                         Este número está conectado em {duplicatePhoneNumbers.get(instance.phone_number)?.length} instâncias diferentes.
-                                        Isso causa duplicação de mensagens!
                                       </p>
                                     </TooltipContent>
                                   </Tooltip>
@@ -1048,13 +746,25 @@ export default function GlobalAdminConnections() {
           </CardContent>
         </Card>
 
-        {/* Instance Details Dialog with Tabs */}
+        {/* Instance Details Dialog */}
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
           <DialogContent className="max-w-3xl max-h-[90vh]">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Link2 className="h-5 w-5" />
                 {selectedInstance?.instance_name}
+                {selectedInstance && (
+                  <Badge
+                    variant={selectedInstance.api_provider === "uazapi" ? "default" : "secondary"}
+                    className={
+                      selectedInstance.api_provider === "uazapi"
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white ml-2"
+                        : "ml-2"
+                    }
+                  >
+                    {selectedInstance.api_provider || "evolution"}
+                  </Badge>
+                )}
               </DialogTitle>
               <DialogDescription>
                 Informações completas e histórico de eventos
@@ -1076,7 +786,6 @@ export default function GlobalAdminConnections() {
                 <TabsContent value="details" className="mt-4">
                   <ScrollArea className="max-h-[50vh]">
                     <div className="space-y-4">
-                      {/* Instance Info */}
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                           <label className="text-xs text-muted-foreground">Empresa</label>
@@ -1096,6 +805,19 @@ export default function GlobalAdminConnections() {
                           <label className="text-xs text-muted-foreground">Status</label>
                           <Badge variant={statusColors[selectedInstance.status] || "outline"}>
                             {statusLabels[selectedInstance.status] || selectedInstance.status}
+                          </Badge>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs text-muted-foreground">Provedor</label>
+                          <Badge
+                            variant={selectedInstance.api_provider === "uazapi" ? "default" : "secondary"}
+                            className={
+                              selectedInstance.api_provider === "uazapi"
+                                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                : ""
+                            }
+                          >
+                            {selectedInstance.api_provider || "evolution"}
                           </Badge>
                         </div>
                       </div>
@@ -1182,6 +904,12 @@ export default function GlobalAdminConnections() {
                               {selectedInstance.company_id}
                             </div>
                           )}
+                          {selectedInstance.evolution_connection_id && (
+                            <div>
+                              <span className="text-muted-foreground">connection_id: </span>
+                              {selectedInstance.evolution_connection_id}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1197,7 +925,6 @@ export default function GlobalAdminConnections() {
             )}
           </DialogContent>
         </Dialog>
-
       </div>
     </TooltipProvider>
   );

@@ -14,6 +14,7 @@ export interface InstanceWithCompany {
   created_at: string;
   updated_at: string;
   law_firm_id: string;
+  api_provider: string | null;
   // Joined data
   law_firm_name?: string;
   company_name?: string;
@@ -163,6 +164,7 @@ export function useGlobalAdminInstances() {
 
           return {
             ...instance,
+            api_provider: instance.api_provider || null,
             law_firm_name: lawFirm?.name || "Sem escritório",
             subdomain: lawFirm?.subdomain || null,
             company_name: company?.name || "Sem empresa",

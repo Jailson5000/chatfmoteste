@@ -2337,7 +2337,7 @@ async function executeTemplateTool(
                 // uazapi: /send/media with token header and file field
                 mediaEndpoint = `${apiUrl}/send/media`;
                 mediaHeaders = { 'Content-Type': 'application/json', 'token': instance.api_key || '' };
-                mediaPayload = { number: targetNumber, file: finalMediaUrl };
+                mediaPayload = { number: targetNumber, file: finalMediaUrl, type: finalMediaType || 'image' };
               } else {
                 // Evolution API
                 mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
