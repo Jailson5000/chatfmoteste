@@ -23,7 +23,7 @@ const corsHeaders = {
 // Webhook token for security validation — uses the same secret as evolution-api webhook URL builder
 const UAZAPI_WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN");
 
-function validateWebhookToken(req: Request): Response | null {
+function validateWebhookToken(req: Request, body?: any): Response | null {
   if (!UAZAPI_WEBHOOK_TOKEN) {
     console.error("[UAZAPI_WEBHOOK] ❌ EVOLUTION_WEBHOOK_TOKEN not configured");
     return new Response(
@@ -38,6 +38,12 @@ function validateWebhookToken(req: Request): Response | null {
   const providedToken = headerToken ?? queryToken;
 
   if (!providedToken || providedToken !== UAZAPI_WEBHOOK_TOKEN) {
+    // Allow through if body has BaseUrl (uazapi sends duplicate calls, some without token)
+    // Instance will be identified by BaseUrl instead
+    if (body?.BaseUrl) {
+      console.log("[UAZAPI_WEBHOOK] Token missing but BaseUrl present, allowing through for BaseUrl matching");
+      return null; // Allow through
+    }
     console.warn("[UAZAPI_WEBHOOK] ❌ Invalid or missing token");
     return new Response(
       JSON.stringify({ error: "Unauthorized" }),
@@ -151,15 +157,17 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Validate webhook token
-  const tokenError = validateWebhookToken(req);
-  if (tokenError) return tokenError;
-
   try {
     const body = await req.json();
+
+    // Validate webhook token (pass body for BaseUrl fallback)
+    const tokenError = validateWebhookToken(req, body);
+    if (tokenError) return tokenError;
     
     // Detect event type from uazapi payload
-    const event = body.event || body.type || "unknown";
+    // uazapi sends EventType (PascalCase), normalize to lowercase
+    const rawEvent = body.event || body.type || body.EventType || "unknown";
+    const event = rawEvent.toLowerCase();
     
     console.log(`[UAZAPI_WEBHOOK] Event: ${event}`, JSON.stringify(body).slice(0, 500));
 
@@ -199,12 +207,31 @@ serve(async (req) => {
       instance = data;
     }
 
-    // If instance not found, try to match by api_url subdomain from the request origin
+    // If instance not found, try to match by BaseUrl from uazapi payload
+    if (!instance && body.BaseUrl) {
+      try {
+        const baseHostname = new URL(body.BaseUrl).hostname;
+        const { data } = await supabaseClient
+          .from("whatsapp_instances")
+          .select("*")
+          .eq("api_provider", "uazapi")
+          .ilike("api_url", `%${baseHostname}%`)
+          .limit(1)
+          .maybeSingle();
+        instance = data;
+        if (instance) {
+          console.log(`[UAZAPI_WEBHOOK] Instance found via BaseUrl: ${baseHostname}`);
+        }
+      } catch (urlErr) {
+        console.warn("[UAZAPI_WEBHOOK] Failed to parse BaseUrl:", body.BaseUrl);
+      }
+    }
+
     if (!instance) {
-      // Log for debugging - we need at least one way to identify the instance
       console.warn("[UAZAPI_WEBHOOK] Could not identify instance from payload", {
         hasToken: !!instanceToken,
         hasPhone: !!instancePhone,
+        hasBaseUrl: !!body.BaseUrl,
         event,
       });
       
@@ -297,8 +324,11 @@ serve(async (req) => {
       case "MESSAGES_UPSERT": {
         const msg = body.data || body.message || body;
         
+        // uazapi sends chat info at root level
+        const chat = body.chat || {};
+        
         // Skip group messages
-        const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid || "";
+        const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid || chat.id || "";
         if (remoteJidRaw.includes("@g.us")) {
           console.log("[UAZAPI_WEBHOOK] Skipping group message");
           break;
@@ -326,7 +356,7 @@ serve(async (req) => {
         const mimeType = extractMimeType(msg);
         const fileName = extractFileName(msg);
         const whatsappMessageId = msg.key?.id || msg.id || msg.messageId || crypto.randomUUID();
-        const contactName = msg.pushName || msg.notifyName || msg.senderName || phoneNumber;
+        const contactName = msg.pushName || msg.notifyName || msg.senderName || chat.name || chat.lead_name || phoneNumber;
         const timestamp = msg.messageTimestamp 
           ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
           : new Date().toISOString();
