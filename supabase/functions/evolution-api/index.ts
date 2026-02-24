@@ -2311,6 +2311,39 @@ serve(async (req) => {
 
         // Use isGlobalAdmin to allow access to any instance
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
+
+        // ── UAZAPI PROVIDER ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          const statusResult = await provider.getStatus(config);
+          const phoneNumber = statusResult.phoneNumber || null;
+
+          if (phoneNumber) {
+            const duplicate = await checkPhoneNumberDuplicate(supabaseClient, phoneNumber, body.instanceId);
+            if (duplicate) {
+              console.log(`[Evolution API] ⚠️ DUPLICATE PHONE DETECTED: ${phoneNumber} already on instance ${duplicate.instance_name}`);
+              return new Response(
+                JSON.stringify({
+                  success: false,
+                  error: `Este número (${phoneNumber}) já está conectado em outra instância: ${duplicate.instance_name}. Desconecte a outra instância primeiro.`,
+                  duplicateInstance: duplicate,
+                }),
+                { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+              );
+            }
+            await supabaseClient.from("whatsapp_instances")
+              .update({ phone_number: phoneNumber, updated_at: new Date().toISOString() })
+              .eq("id", body.instanceId);
+          }
+
+          return new Response(
+            JSON.stringify({ success: true, phoneNumber }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         // Use enhanced phone fetching that tries multiple endpoints
@@ -2435,6 +2468,27 @@ serve(async (req) => {
         console.log(`[Evolution API] Logging out (disconnecting) instance: ${body.instanceId}`);
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+
+        // ── UAZAPI PROVIDER ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          try {
+            await provider.disconnect(config);
+          } catch (e) {
+            console.log(`[Evolution API] Uazapi disconnect call failed (non-fatal):`, e);
+          }
+
+          const { data: updatedInstance } = await supabaseClient.from("whatsapp_instances")
+            .update({ status: "disconnected", manual_disconnect: true, updated_at: new Date().toISOString() })
+            .eq("id", body.instanceId).eq("law_firm_id", lawFirmId).select().single();
+
+          return new Response(JSON.stringify({ success: true, message: "Instance disconnected", instance: updatedInstance }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         // Call Evolution API logout endpoint (best effort)
