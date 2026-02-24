@@ -1,136 +1,104 @@
 
 
-# Corrigir envio e recebimento de midia via uazapi
+# Corrigir persistencia de midia enviada e exibicao
 
-## Problemas identificados
+## Problema raiz
 
-### 1. Envio de midia falha: campo `file` ausente
-Os logs mostram claramente:
+Ao enviar midia (imagem, documento, audio), o sistema:
+1. Envia o base64 para o WhatsApp via uazapi -- **funciona** (as midias chegam no WhatsApp)
+2. Mas **NAO salva o base64 no Storage** -- entao `media_url` fica `null` no banco
+3. Resultado: imagens mostram "Imagem nao disponivel", documentos mostram UUID em vez do nome, audios nao tocam
+
+Confirmacao via banco de dados -- TODAS as midias enviadas recentemente tem `media_url: null`:
+```text
+[Imagem]   media_url: null  status: sent
+[document] media_url: null  status: sent
+[Audio]    media_url: null  status: sent
 ```
-Background media send error: Error: Falha ao enviar midia (500): {"error":"missing file field"}
-```
 
-O `UazapiProvider.sendMedia` envia os campos `base64` e `url`, mas a API do uazapi espera o campo `file` para midia. Isso afeta **todos os tipos de midia**: imagens, documentos, videos e audios.
-
-### 2. Envio de audio usa endpoint errado
-O `UazapiProvider.sendAudio` simplesmente redireciona para `sendMedia` com `mediaType: 'audio'`. Para audios PTT (gravados), o uazapi tem endpoint especifico `/send/audio` com campos diferentes (`audio` em vez de `file`).
-
-### 3. Conversas antigas com numero errado ainda tentam enviar
-Conversas criadas antes da correcao do telefone ainda tem `remote_jid: "60688537@s.whatsapp.net"` e falham:
-```
-the number 60688537@s.whatsapp.net is not on WhatsApp
-```
+As midias chegam no WhatsApp (confirmado pelos screenshots), mas nao sao visiveis na interface do MiauChat.
 
 ## Solucao
 
-### Arquivo: `supabase/functions/_shared/whatsapp-provider.ts`
+### Arquivo: `supabase/functions/evolution-api/index.ts` (funcao backgroundSendMedia)
 
-**Correcao 1 -- Campo `file` no sendMedia (linhas 554-594)**
+**Mudanca principal**: Apos enviar com sucesso, salvar o base64 no bucket `chat-media` do Storage e atualizar `media_url` com a URL publica.
 
-O payload do `UazapiProvider.sendMedia` precisa usar `file` em vez de `base64`/`url`:
+Dentro da funcao `backgroundSendMedia` (linha ~3473), apos o envio bem-sucedido e antes do update da mensagem:
 
-Antes:
+1. Se `body.mediaBase64` existe e `extractedMediaUrl` e null (caso uazapi que nao retorna URL):
+   - Determinar extensao do arquivo pelo mimeType
+   - Fazer upload do base64 para `chat-media/{conversationId}/{tempMessageId}.{ext}`
+   - Obter URL publica do Storage
+   - Usar essa URL como `media_url` no update da mensagem
+
+2. Tambem garantir que `body.fileName` seja preservado no `content` do documento (em vez de UUID)
+
 ```typescript
-if (opts.mediaBase64) {
-  payload.base64 = opts.mediaBase64;
-  payload.mimetype = opts.mimeType || "application/octet-stream";
-} else if (opts.mediaUrl) {
-  payload.url = opts.mediaUrl;
-}
-```
-
-Depois:
-```typescript
-if (opts.mediaBase64) {
-  payload.file = opts.mediaBase64;
-  payload.mimetype = opts.mimeType || "application/octet-stream";
-} else if (opts.mediaUrl) {
-  payload.file = opts.mediaUrl;
-}
-```
-
-A API do uazapi aceita tanto URL quanto base64 no campo `file`.
-
-**Correcao 2 -- Endpoint e payload de audio (linhas 836-844)**
-
-Para audios PTT (voz), usar endpoint `/send/audio` com campo `audio` e flag `ptt`:
-
-Antes:
-```typescript
-async sendAudio(config: ProviderConfig, opts: SendAudioOptions): Promise<SendMediaResult> {
-  return UazapiProvider.sendMedia(config, {
-    number: opts.number,
-    mediaType: 'audio',
-    mediaBase64: opts.audioBase64,
-    mimeType: opts.mimeType || 'audio/ogg',
-  });
-}
-```
-
-Depois:
-```typescript
-async sendAudio(config: ProviderConfig, opts: SendAudioOptions): Promise<SendMediaResult> {
-  const apiUrl = normalizeUrl(config.apiUrl);
-
-  const payload = {
-    number: opts.number,
-    audio: opts.audioBase64,
-    ptt: true,
-    mimetype: opts.mimeType || "audio/ogg;codecs=opus",
-  };
-
-  const res = await fetchWithTimeout(
-    `${apiUrl}/send/audio`,
-    {
-      method: "POST",
-      headers: {
-        token: config.apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    },
-    SEND_TIMEOUT_MS,
-  );
-
-  if (!res.ok) {
-    // Fallback: tentar /send/media com campo file
-    return UazapiProvider.sendMedia(config, {
-      number: opts.number,
-      mediaType: 'audio',
-      mediaBase64: opts.audioBase64,
-      mimeType: opts.mimeType || 'audio/ogg',
-      ptt: true,
-    });
+// Apos envio bem-sucedido, persistir midia no Storage se nao tiver URL
+if (!extractedMediaUrl && body.mediaBase64 && conversationId) {
+  try {
+    const ext = getExtFromMime(body.mimeType || "application/octet-stream");
+    const storagePath = `${conversationId}/${tempMessageId}.${ext}`;
+    
+    // Decode base64 to Uint8Array
+    const binaryStr = atob(body.mediaBase64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+    
+    const { error: uploadError } = await supabaseClient.storage
+      .from("chat-media")
+      .upload(storagePath, bytes, {
+        contentType: body.mimeType || "application/octet-stream",
+        upsert: true,
+      });
+    
+    if (!uploadError) {
+      const { data: urlData } = supabaseClient.storage
+        .from("chat-media")
+        .getPublicUrl(storagePath);
+      extractedMediaUrl = urlData?.publicUrl || null;
+    }
+  } catch (storageErr) {
+    console.warn("[Evolution API] Failed to persist media to storage:", storageErr);
   }
-
-  const data = await res.json().catch(() => ({}));
-  const whatsappMessageId = data?.key?.id || data?.id || data?.messageId || null;
-  return { success: true, whatsappMessageId, raw: data };
 }
 ```
 
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
+3. Garantir que o `content` do documento mostre o nome real do arquivo:
 
-**Correcao 3 -- Persistir midia recebida no Storage**
+No update da mensagem (linha ~3476), adicionar logica para documentos:
+```typescript
+const displayContent = body.mediaType === "document" && body.fileName
+  ? `[${body.fileName}]`
+  : (body.caption || mediaTypeDisplay);
+```
 
-Atualmente o webhook salva apenas a URL da midia que vem do uazapi. Se o uazapi envia base64 diretamente no payload (campo `msg.base64` ou `body.base64`), essa midia precisa ser salva no bucket `chat-media` para persistencia. Adicionar logica para extrair base64 do payload e salvar no Storage quando disponivel, seguindo o mesmo padrao do `evolution-webhook`.
+### Funcao auxiliar `getExtFromMime`
 
-**Correcao 4 -- Log de debug para midia recebida**
-
-Adicionar log dos campos de midia do payload para verificar se base64, URL, mimetype e fileName estao sendo extraidos corretamente.
+Adicionar funcao simples no inicio da funcao ou inline:
+```typescript
+function getExtFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+    "audio/ogg": "ogg", "audio/webm": "webm", "audio/mpeg": "mp3",
+    "video/mp4": "mp4", "application/pdf": "pdf",
+  };
+  return map[mime.split(";")[0]] || "bin";
+}
+```
 
 ## Resumo de mudancas
 
 | Arquivo | Mudanca |
 |---|---|
-| `_shared/whatsapp-provider.ts` | Trocar `base64`/`url` por `file` no sendMedia do uazapi |
-| `_shared/whatsapp-provider.ts` | Implementar endpoint `/send/audio` dedicado para PTT |
-| `uazapi-webhook/index.ts` | Persistir midia recebida (base64) no Storage |
-| `uazapi-webhook/index.ts` | Logs de debug para campos de midia |
+| `supabase/functions/evolution-api/index.ts` | Salvar base64 no Storage apos envio bem-sucedido |
+| | Usar URL do Storage como `media_url` da mensagem |
+| | Mostrar nome real do arquivo em vez de UUID para documentos |
 
 ## Resultado esperado
 
-- Documentos, imagens, videos e audios serao enviados com sucesso via uazapi
-- Audios gravados serao enviados como PTT (voz) corretamente
-- Midias recebidas serao persistidas no Storage para acesso futuro
-
+- Imagens enviadas ficarao visiveis na interface (URL do Storage)
+- Documentos mostrarao o nome correto do arquivo
+- Audios enviados terao URL para reproduzir
+- Tudo sera persistido permanentemente no Storage
