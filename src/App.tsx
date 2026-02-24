@@ -11,6 +11,7 @@ import { GlobalAdminLayout } from "@/components/layout/GlobalAdminLayout";
 import { AdminAuthProvider } from "@/hooks/useAdminAuth";
 import { TabSessionProvider } from "@/contexts/TabSessionContext";
 import { AuthProvider } from "@/hooks/useAuth";
+import { TenantProvider } from "@/hooks/useTenant";
 import { Loader2 } from "lucide-react";
 
 // Only Index and Auth are synchronous (landing + login = first screens)
@@ -86,6 +87,7 @@ const LazyFallback = () => (
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
+      <TenantProvider>
       <TabSessionProvider>
         <TooltipProvider>
           <Toaster />
@@ -205,6 +207,7 @@ const App = () => (
           </BrowserRouter>
         </TooltipProvider>
       </TabSessionProvider>
+      </TenantProvider>
     </AuthProvider>
   </QueryClientProvider>
 );
