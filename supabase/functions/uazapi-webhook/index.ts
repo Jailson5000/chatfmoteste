@@ -367,6 +367,22 @@ serve(async (req) => {
           timestamp = new Date(rawTs * 1000).toISOString();
         }
 
+        // Debug: log all phone-related fields from payload
+        console.log(`[UAZAPI_WEBHOOK] Phone debug:`, {
+          "msg.from": msg.from,
+          "msg.remoteJid": msg.remoteJid,
+          "msg.key?.remoteJid": msg.key?.remoteJid,
+          "chat.id": chat.id,
+          "chat.phone": chat.phone,
+          "body.SenderJid": body.SenderJid,
+          "body.senderJid": body.senderJid,
+          "body.sender": body.sender,
+          "body.number": body.number,
+          "chat.lead_phone": chat.lead_phone,
+          "remoteJidRaw": remoteJidRaw,
+          "extractedPhone": phoneNumber,
+        });
+
         console.log(`[UAZAPI_WEBHOOK] Message: ${messageType} from ${phoneNumber} (fromMe: ${isFromMe})`, {
           contentPreview: content?.slice(0, 50),
           hasMedia: !!mediaUrl,
@@ -505,8 +521,7 @@ serve(async (req) => {
           ai_generated: false,
           created_at: timestamp,
           media_url: mediaUrl || null,
-          mime_type: mimeType || null,
-          file_name: fileName || null,
+          media_mime_type: mimeType || null,
           law_firm_id: lawFirmId,
         };
 
