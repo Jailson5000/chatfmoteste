@@ -51,6 +51,7 @@ export interface AgendaProSettings {
   sunday_enabled: boolean;
   sunday_start_time: string;
   sunday_end_time: string;
+  whatsapp_instance_id: string | null;
   created_at: string;
   updated_at: string;
 }
