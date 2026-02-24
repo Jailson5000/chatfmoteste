@@ -5716,6 +5716,7 @@ export type Database = {
           alert_sent_for_current_disconnect: boolean | null
           api_key: string | null
           api_key_encrypted: boolean | null
+          api_provider: string
           api_url: string
           awaiting_qr: boolean | null
           created_at: string
@@ -5743,6 +5744,7 @@ export type Database = {
           alert_sent_for_current_disconnect?: boolean | null
           api_key?: string | null
           api_key_encrypted?: boolean | null
+          api_provider?: string
           api_url: string
           awaiting_qr?: boolean | null
           created_at?: string
@@ -5770,6 +5772,7 @@ export type Database = {
           alert_sent_for_current_disconnect?: boolean | null
           api_key?: string | null
           api_key_encrypted?: boolean | null
+          api_provider?: string
           api_url?: string
           awaiting_qr?: boolean | null
           created_at?: string
@@ -6053,6 +6056,7 @@ export type Database = {
       whatsapp_instances_safe: {
         Row: {
           alert_sent_for_current_disconnect: boolean | null
+          api_provider: string | null
           api_url: string | null
           awaiting_qr: boolean | null
           created_at: string | null
@@ -6078,6 +6082,7 @@ export type Database = {
         }
         Insert: {
           alert_sent_for_current_disconnect?: boolean | null
+          api_provider?: string | null
           api_url?: string | null
           awaiting_qr?: boolean | null
           created_at?: string | null
@@ -6103,6 +6108,7 @@ export type Database = {
         }
         Update: {
           alert_sent_for_current_disconnect?: boolean | null
+          api_provider?: string | null
           api_url?: string | null
           awaiting_qr?: boolean | null
           created_at?: string | null

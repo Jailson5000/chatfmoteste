@@ -68,3 +68,6 @@ verify_jwt = false
 
 [functions.get-billing-status]
 verify_jwt = false
+
+[functions.uazapi-webhook]
+verify_jwt = false
