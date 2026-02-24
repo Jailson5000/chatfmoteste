@@ -1,48 +1,59 @@
 
 
-# Corrigir auto-deteccao do numero da instancia Uazapi
+# Corrigir botoes da pagina de Conexoes
 
 ## Problema
 
-A instancia "Miauz" (`inst_xcehi4b8`) esta conectada mas `phone_number` continua null. Motivo:
+A pagina de Conexoes tem dois problemas com os botoes de acao:
 
-1. O auto-fetch via `/instance/status` so roda quando chega um **evento de conexao** (`case "connection"`). Como a instancia ja estava conectada quando o codigo foi deployado, esse evento nunca disparou.
-2. Cada mensagem recebida traz `chat.owner = "556399540484"` -- esse e o numero da propria instancia. Mas o webhook nao usa esse campo para preencher `phone_number`.
+1. **"Atualizar status" desconecta**: A instancia "MIAUHOJE" e do provedor **Evolution** (desativado). Quando voce clica em "Atualizar status", o backend tenta chamar a API do Evolution que esta fora do ar, falha/timeout, e retorna `status = "disconnected"` -- mesmo que a instancia ja estivesse assim. Pior: para instancias uazapi **conectadas**, esse endpoint chama `/instance/status` que pode retornar estado transitorio e sobrescrever o status no banco, gerando a sensacao de "desconectou".
+
+2. **Botoes descontextualizados**: O dropdown mostra as mesmas opcoes para todas as instancias, sem considerar o provedor (uazapi vs evolution) ou o status atual. Por exemplo:
+   - "Atualizar status" aparece para instancias Evolution desativadas (inutil e perigoso)
+   - "Conectar" aparece mesmo para instancias Evolution antigas que nao devem ser reconectadas
+   - Nao tem opcao "Atualizar numero" no dropdown
 
 ## Solucao
 
-**Arquivo:** `supabase/functions/uazapi-webhook/index.ts`
+### 1. Dropdown contextual por provedor e status
 
-No bloco de processamento de mensagens (case "messages"), logo apos extrair o `chat` object (~linha 458), adicionar logica para preencher `phone_number` automaticamente quando ainda estiver null:
+**Arquivo:** `src/pages/Connections.tsx` (linhas 774-805)
+
+Reescrever o `DropdownMenuContent` para mostrar opcoes relevantes:
+
+- **Instancia uazapi conectada**: "Ver detalhes", "Atualizar número", "Excluir"
+- **Instancia uazapi desconectada**: "Ver detalhes", "Conectar", "Excluir"  
+- **Instancia Evolution (desativada)**: "Ver detalhes", "Excluir" (sem "Atualizar status" nem "Conectar")
+
+Remover o botao "Atualizar status" do dropdown -- ele e redundante pois o status ja e atualizado automaticamente via webhook e o botao causa problemas. Em vez dele, manter apenas "Atualizar número" para instancias conectadas (que chama `refreshPhone`).
+
+### 2. Protecao no backend (opcional, seguranca extra)
+
+**Arquivo:** `supabase/functions/evolution-api/index.ts` (case `refresh_status`, linha 2187)
+
+Adicionar validacao: se a instancia for Evolution e o Evolution estiver desativado, retornar o status atual do banco sem chamar a API externa:
 
 ```typescript
-// Auto-populate instance phone_number from chat.owner if missing
-const chatOwner = chat.owner || chat.wa_owner || "";
-if (chatOwner && !instance.phone_number) {
-  const ownerPhone = extractPhone(chatOwner);
-  if (ownerPhone && ownerPhone.length >= 10) {
-    console.log("[UAZAPI_WEBHOOK] Auto-populating phone from chat.owner:", ownerPhone);
-    await supabaseClient
-      .from("whatsapp_instances")
-      .update({ phone_number: ownerPhone, updated_at: new Date().toISOString() })
-      .eq("id", instance.id);
-    // Update local reference to avoid re-running
-    (instance as any).phone_number = ownerPhone;
-  }
+if (!isUazapi(instance)) {
+  // Evolution desativada -- retorna status atual sem chamar API
+  return new Response(
+    JSON.stringify({ success: true, status: instance.status, instance }),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
 }
 ```
 
-Isso roda na **primeira mensagem recebida** apos deploy e preenche o numero permanentemente. Impacto zero em performance -- e uma unica query extra apenas quando `phone_number` e null.
-
-## Resultado
-
-- Na proxima mensagem recebida pela instancia "Miauz", `phone_number` sera preenchido com `556399540484`
-- O card de conversa passara a exibir `**0484`
-- A pagina de conexoes mostrara o numero formatado
-
-## Arquivos alterados
+## Resumo de mudancas
 
 | Arquivo | Mudanca |
 |---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Adicionar auto-populate de `phone_number` via `chat.owner` no handler de mensagens |
+| `src/pages/Connections.tsx` | Dropdown contextual: botoes diferentes por provedor/status |
+| `supabase/functions/evolution-api/index.ts` | (Opcional) Protecao para nao chamar Evolution API desativada |
+
+## Resultado esperado
+
+- "Atualizar status" nao aparece mais (substituido por "Atualizar número" quando conectado)
+- Instancias Evolution antigas so mostram "Ver detalhes" e "Excluir"
+- Nenhum botao causa desconexao acidental
+- Opcoes claras e contextuais para cada situacao
 
