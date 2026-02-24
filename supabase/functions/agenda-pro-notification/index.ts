@@ -381,21 +381,23 @@ serve(async (req) => {
           const phone = clientPhone.replace(/\D/g, "");
           const remoteJid = phone.startsWith("55") ? `${phone}@s.whatsapp.net` : `55${phone}@s.whatsapp.net`;
           const apiUrl = (instance.api_url as string).replace(/\/$/, "");
+          const isUazapi = apiUrl.toLowerCase().includes("uazapi");
 
-          const response = await fetch(
-            `${apiUrl}/message/sendText/${instance.instance_name}`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                apikey: instance.api_key as string,
-              },
-              body: JSON.stringify({
-                number: remoteJid,
-                text: whatsappMessage,
-              }),
-            }
-          );
+          const sendEndpoint = isUazapi
+            ? `${apiUrl}/send/text`
+            : `${apiUrl}/message/sendText/${instance.instance_name}`;
+          const sendHeaders: Record<string, string> = isUazapi
+            ? { "Content-Type": "application/json", token: instance.api_key as string }
+            : { "Content-Type": "application/json", apikey: instance.api_key as string };
+
+          const response = await fetch(sendEndpoint, {
+            method: "POST",
+            headers: sendHeaders,
+            body: JSON.stringify({
+              number: isUazapi ? remoteJid.replace("@s.whatsapp.net", "") : remoteJid,
+              text: whatsappMessage,
+            }),
+          });
 
           if (response.ok) {
             results.whatsapp.sent = true;
@@ -666,20 +668,21 @@ serve(async (req) => {
                   `📋 *Serviço:* ${serviceName}\n\n` +
                   `Acesse o sistema para mais detalhes.`;
 
-                const ownerResponse = await fetch(
-                  `${apiUrl}/message/sendText/${instance.instance_name}`,
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      apikey: instance.api_key as string,
-                    },
-                    body: JSON.stringify({
-                      number: profJid,
-                      text: ownerMessage,
-                    }),
-                  }
-                );
+                const ownerEndpoint = isUazapi
+                  ? `${apiUrl}/send/text`
+                  : `${apiUrl}/message/sendText/${instance.instance_name}`;
+                const ownerHeaders: Record<string, string> = isUazapi
+                  ? { "Content-Type": "application/json", token: instance.api_key as string }
+                  : { "Content-Type": "application/json", apikey: instance.api_key as string };
+
+                const ownerResponse = await fetch(ownerEndpoint, {
+                  method: "POST",
+                  headers: ownerHeaders,
+                  body: JSON.stringify({
+                    number: isUazapi ? profJid.replace("@s.whatsapp.net", "") : profJid,
+                    text: ownerMessage,
+                  }),
+                });
 
                 if (ownerResponse.ok) {
                   results.ownerNotification.sent = true;
