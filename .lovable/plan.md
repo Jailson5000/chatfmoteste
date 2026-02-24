@@ -1,99 +1,85 @@
 
 
-# Correção do Alerta Sonoro + Recepção de Templates WhatsApp
+# A IA Diz Que Nao Pode Enviar Audio (Mas Envia Audio Dizendo Isso)
 
-## Problema 1: Alerta Sonoro Não Funciona
+## Diagnostico
 
-### Causa Raiz
+O problema e uma **falha de sequenciamento e contexto**:
 
-Bug de arquitetura no `AppLayout.tsx`. O `useMessageNotifications` é chamado **fora** do `RealtimeSyncProvider`:
+1. Cliente envia: "Me envie em audio, porque eu nao sei ler"
+2. O webhook chama `ai-chat` para gerar a resposta
+3. A IA **nao sabe que tem capacidade de audio** — nao existe nenhuma instrucao no prompt dizendo isso
+4. A IA responde: "nao consigo enviar mensagens em audio"
+5. **Depois** da resposta, o webhook detecta o padrao de audio e ativa o TTS
+6. O TTS converte o texto "nao consigo enviar audio" em audio e envia
 
-```text
-AppLayout() {
-  useMessageNotifications();   ← FORA do Provider!
-  
-  return (
-    <RealtimeSyncProvider>     ← Provider está AQUI
-      ...
-    </RealtimeSyncProvider>
-  );
-}
-```
+Resultado: a IA envia um audio dizendo que nao pode enviar audio.
 
-O hook `useMessageNotifications` usa `useRealtimeSyncOptional()` para registrar callbacks de mensagem e conversa. Como ele roda fora do provider, `realtimeSync` é `null`, e os callbacks nunca são registrados. Nenhuma notificação sonora dispara.
+### Causa raiz (2 falhas)
 
-### Correção
+**Falha 1 - ai-chat ignora `audioRequested`**: O campo `context.audioRequested` existe na interface mas **nunca e usado** no codigo. A IA nao recebe nenhuma instrucao sobre sua capacidade de audio.
 
-Mover o `useMessageNotifications` para dentro do `RealtimeSyncProvider` criando um componente wrapper interno:
+**Falha 2 - uazapi-webhook nao passa `audioRequested`**: O evolution-webhook calcula `shouldRespondWithAudio` **ANTES** de chamar o ai-chat e passa `audioRequested: true` no contexto. O uazapi-webhook nao faz isso — calcula o audio **DEPOIS** de receber a resposta.
 
-**Arquivo: `src/components/layout/AppLayout.tsx`**
+## Correcoes
 
-```tsx
-function AppLayoutInner() {
-  useMessageNotifications({ enabled: true });
-  usePresenceTracking();
-  // ... resto do layout
-}
+### Arquivo 1: `supabase/functions/uazapi-webhook/index.ts`
 
-export function AppLayout() {
-  return (
-    <RealtimeSyncProvider>
-      <AppLayoutInner />
-    </RealtimeSyncProvider>
-  );
-}
-```
-
-Isso garante que o hook rode dentro do contexto Realtime e consiga registrar os callbacks de som.
-
----
-
-## Problema 2: Templates WhatsApp Não São Recebidos Corretamente
-
-### Causa
-
-O `uazapi-webhook` usa `extractContent()` que só extrai texto básico (`text`, `caption`, `conversation`). Ele não trata os tipos especiais de mensagem do WhatsApp:
-
-| Tipo | Descrição | Status no uazapi-webhook |
-|---|---|---|
-| `buttonsResponseMessage` | Resposta a botão quick reply | NÃO tratado |
-| `listResponseMessage` | Seleção de item de lista | NÃO tratado |
-| `templateButtonReplyMessage` | Clique em botão de template | NÃO tratado |
-| `interactiveResponseMessage` | Resposta interativa genérica | NÃO tratado |
-| `templateMessage` | Template de marketing/utilidade | NÃO tratado |
-
-Todos esses tipos já são tratados no `evolution-webhook` (linhas 5310-5420).
-
-### Correção
-
-**Arquivo: `supabase/functions/uazapi-webhook/index.ts`**
-
-Adicionar tratamento para mensagens interativas/template na função de detecção de tipo e na extração de conteúdo. Especificamente:
-
-1. **Na detecção de tipo (`detectMessageType`)**: Reconhecer tipos como `buttonsresponsemessage`, `listresponsemessage`, `templatebuttonreplymessage`, `interactiveresponsemessage`, `templatemessage` e retornar `"text"` (são tratados como texto com metadados).
-
-2. **Na extração de conteúdo (`extractContent`)**: Adicionar blocos antes do fallback para extrair texto dos payloads estruturados:
+**Mover deteccao de audio para ANTES da chamada ai-chat** (mesmo padrao do evolution-webhook):
 
 ```typescript
-// buttonsResponseMessage → selectedDisplayText
-// listResponseMessage → title ou description
-// templateButtonReplyMessage → selectedDisplayText
-// interactiveResponseMessage → body.text
-// templateMessage → hydratedTemplate.hydratedContentText + botões
+// ANTES da chamada ai-chat:
+const audioRequestedForThisMessage = await shouldRespondWithAudio(
+  supabaseClient, conversationId, contentForAI || '', messageType
+);
+
+// Passar no contexto:
+context: {
+  ...
+  audioRequested: audioRequestedForThisMessage,  // ADICIONAR
+}
 ```
 
-3. **Para templateMessage com mídia**: Detectar `hydratedTemplate.imageMessage`, `videoMessage`, `documentMessage` e ajustar o `messageType` e `mediaUrl` apropriadamente.
+E depois, ao enviar a resposta, usar `audioRequestedForThisMessage` em vez de chamar `shouldRespondWithAudio` novamente.
 
-4. **Botões de template**: Extrair botões e formatar como `[Opções: Botão1 | Botão2 | Botão3]` no final do conteúdo (mesmo formato do evolution-webhook).
+### Arquivo 2: `supabase/functions/ai-chat/index.ts`
 
-A lógica será portada diretamente do `evolution-webhook` (linhas 5310-5420) adaptada para o formato de payload do uazapi (onde os dados podem estar em `msg.content` ao invés de `messageData`).
+**Injetar instrucao de capacidade de audio no prompt quando `audioRequested` for `true`**:
 
----
+Na construcao do `fullSystemPrompt` (linha ~3713), adicionar um bloco condicional:
+
+```typescript
+let audioContextInstructions = '';
+if (context?.audioRequested) {
+  audioContextInstructions = `
+
+### MODO DE AUDIO ATIVO ###
+Voce TEM capacidade de responder por audio. O sistema converte automaticamente sua resposta em audio de voz.
+O cliente solicitou ou prefere comunicacao por audio. Responda normalmente com texto — o sistema cuidara da conversao.
+IMPORTANTE: NAO diga que nao pode enviar audio. Voce PODE. Apenas escreva sua resposta e ela sera convertida em audio automaticamente.
+Mantenha respostas concisas e naturais para audio (sem formatacao markdown, sem listas, sem links).
+`;
+}
+
+const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText 
+  + audioContextInstructions + toolBehaviorRules + toolExecutionRules;
+```
+
+Quando `audioRequested` for `false` ou ausente, nenhuma instrucao extra e adicionada e o comportamento permanece identico ao atual.
+
+## Resultado Esperado
+
+1. Cliente envia "Me envie em audio, porque eu nao sei ler"
+2. `shouldRespondWithAudio` detecta o padrao → retorna `true`
+3. `audioRequested: true` e passado para `ai-chat`
+4. O prompt da IA recebe a instrucao "Voce TEM capacidade de responder por audio"
+5. A IA responde naturalmente: "Claro! Estou aqui para ajudar. O que voce precisa?"
+6. O TTS converte essa resposta em audio e envia
 
 ## Arquivos Afetados
 
-| Arquivo | Mudança |
+| Arquivo | Mudanca |
 |---|---|
-| `src/components/layout/AppLayout.tsx` | Mover hooks para dentro do RealtimeSyncProvider |
-| `supabase/functions/uazapi-webhook/index.ts` | Adicionar tratamento de templates, botões e mensagens interativas |
+| `supabase/functions/uazapi-webhook/index.ts` | Mover `shouldRespondWithAudio` para antes do `ai-chat` e passar `audioRequested` no contexto |
+| `supabase/functions/ai-chat/index.ts` | Usar `context.audioRequested` para injetar instrucoes de capacidade de audio no prompt |
 
