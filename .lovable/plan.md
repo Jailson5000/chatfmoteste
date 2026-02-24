@@ -1,60 +1,52 @@
 
 
-# Correção: Detecção de Anúncio CTWA (Click-to-WhatsApp) no Webhook UAZAPi
+# Diagnóstico: Mensagens Perdidas no UAZAPi Webhook
 
-## Problema
+## Causa raiz identificada
 
-Após a migração para UAZAPi, o banner "Via Anúncio do Facebook" parou de aparecer nas conversas. A causa é que o `uazapi-webhook` **não possui** a lógica de detecção de `externalAdReply` que existe no `evolution-webhook`.
+O bug está na **linha 361** do `uazapi-webhook/index.ts`:
 
-Quando um usuário clica em um anúncio do Facebook/Instagram e abre o WhatsApp (CTWA - Click-to-WhatsApp), a primeira mensagem contém metadados do anúncio em `contextInfo.externalAdReply`. O Evolution webhook já extrai esses dados e salva em `origin = 'whatsapp_ctwa'` + `origin_metadata` na conversa. O UAZAPi webhook simplesmente ignora esses dados.
+```typescript
+const rawEvent = body.event || body.type || body.EventType || "unknown";
+```
+
+O UAZAPi envia payloads onde:
+- `body.EventType` = `"messages"` (string correta)  
+- `body.event` = `{ Chat: "...", IsFromMe: false, ... }` (objeto com dados do evento)
+
+Como `body.event` é um **objeto truthy**, ele é capturado primeiro. `String({...}).toLowerCase()` resulta em `"[object object]"`, que **não entra em nenhum case** do switch e cai no `default` ("Unhandled event"). A mensagem é completamente descartada.
+
+Isso é confirmado pelos logs: os eventos aparecem como `Event: [object object]` — exatamente este bug. Para `messages_update`, o efeito era inofensivo (já era ignorado). Mas para eventos `messages`, **a mensagem inteira é perdida**.
+
+A conversa é criada porque o UAZAPi também envia um evento `chats` separado (com `body.EventType = "chats"`, sem `body.event` como objeto), que cai no `default` mas depois que o evento `messages` já tentou e falhou. Na verdade, a conversa foi criada por um evento `messages` anterior que **funcionou** (quando `body.event` era string ou ausente), e os subsequentes falharam.
 
 ## Correção
 
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
+### Arquivo: `supabase/functions/uazapi-webhook/index.ts` (linha 361)
 
-Adicionar detecção de `externalAdReply` logo após a criação/resolução da conversa (após linha ~870) e antes da atualização de `convUpdate` (linha ~1245).
+Inverter a prioridade: usar `body.EventType` (string confiável da UAZAPi) **antes** de `body.event`, e validar que o valor selecionado é realmente uma string:
 
-A lógica será:
+```typescript
+// ANTES (bugado):
+const rawEvent = body.event || body.type || body.EventType || "unknown";
 
-1. Extrair `externalAdReply` de vários locais possíveis na mensagem UAZAPi:
-   - `msg.contextInfo?.externalAdReply`
-   - `msg.message?.extendedTextMessage?.contextInfo?.externalAdReply`
-   - `msg.message?.imageMessage?.contextInfo?.externalAdReply`
-   - `msg.message?.videoMessage?.contextInfo?.externalAdReply`
-   - `msg.content?.contextInfo?.externalAdReply` (formato UAZAPi específico)
+// DEPOIS (corrigido):
+const rawEvent = body.EventType || body.type || 
+  (typeof body.event === "string" ? body.event : null) || "unknown";
+```
 
-2. Se detectado e `!isFromMe`, adicionar ao `convUpdate`:
-   ```typescript
-   convUpdate.origin = 'whatsapp_ctwa';
-   convUpdate.origin_metadata = {
-     ad_title: externalAdReply.title || null,
-     ad_body: externalAdReply.body || null,
-     ad_thumbnail: externalAdReply.thumbnailUrl || externalAdReply.thumbnail || null,
-     ad_media_url: externalAdReply.mediaUrl || null,
-     ad_source_id: externalAdReply.sourceId || null,
-     ad_source_url: externalAdReply.sourceUrl || null,
-     ad_source_type: externalAdReply.sourceType || null,
-     detected_at: new Date().toISOString(),
-   };
-   ```
+Essa mudança:
+1. Prioriza `body.EventType` (campo padrão da UAZAPi, sempre string)
+2. Usa `body.type` como segundo fallback
+3. Só usa `body.event` se for **string** (ignora quando é objeto)
+4. Garante que o evento `messages` será corretamente roteado para o case handler
 
-3. Adicionar log para monitoramento: `[UAZAPI_WEBHOOK] 📢 CTWA ad detected`
+### Impacto
 
-## Inserção no código
-
-O bloco será inserido no `convUpdate` que já existe (linhas 1191-1248), adicionando a verificação de `externalAdReply` antes do `await supabaseClient.from("conversations").update(convUpdate)`.
-
-Também precisa cobrir o caso de criação de conversa nova (linha 836-849), onde o `origin` é definido como `"WHATSAPP"` — se tiver ad, deve ser `"whatsapp_ctwa"` desde o início.
-
-## Resumo
-
-| Problema | Causa | Correção |
-|---|---|---|
-| Banner "Via Anúncio" não aparece | UAZAPi webhook não lê `externalAdReply` | Adicionar detecção de CTWA ad idêntica ao Evolution webhook |
-
-## Arquivo afetado
-
-| Arquivo | Mudança |
+| Antes | Depois |
 |---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Adicionar extração de `externalAdReply` + salvar `origin`/`origin_metadata` na conversa |
+| Eventos `messages` com `body.event` como objeto → `[object object]` → `default` (descartado) | Eventos `messages` → lidos de `body.EventType` → case `"messages"` (processado) |
+| Mensagens perdidas silenciosamente | Todas as mensagens capturadas |
+
+Nenhuma outra mudança necessária. O restante do pipeline (criação de conversa, inserção de mensagem, IA) já funciona — o problema era exclusivamente no roteamento do evento.
 
