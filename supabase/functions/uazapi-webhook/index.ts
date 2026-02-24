@@ -1106,6 +1106,52 @@ serve(async (req) => {
         if (!isFromMe && contactName) {
           convUpdate.contact_name = contactName;
         }
+
+        // ---- AUTO-UNARCHIVE if conversation is archived and message is incoming ----
+        if (!isFromMe) {
+          const { data: convState } = await supabaseClient
+            .from("conversations")
+            .select("archived_at, archived_reason, archived_next_responsible_type, archived_next_responsible_id, current_handler, current_automation_id, assigned_to")
+            .eq("id", conversationId)
+            .single();
+
+          if (convState?.archived_at) {
+            console.log(`[UAZAPI_WEBHOOK] 📦 Unarchiving conversation ${conversationId}`);
+            convUpdate.archived_at = null;
+            convUpdate.archived_reason = null;
+
+            // Restore handler based on archived_next_responsible
+            if (convState.archived_next_responsible_type === 'ai' && convState.archived_next_responsible_id) {
+              convUpdate.current_handler = 'ai';
+              convUpdate.current_automation_id = convState.archived_next_responsible_id;
+              convUpdate.assigned_to = null;
+            } else if (convState.archived_next_responsible_type === 'human' && convState.archived_next_responsible_id) {
+              convUpdate.current_handler = 'human';
+              convUpdate.assigned_to = convState.archived_next_responsible_id;
+              convUpdate.current_automation_id = null;
+            } else {
+              // Use instance defaults
+              if (instance.default_automation_id) {
+                convUpdate.current_handler = 'ai';
+                convUpdate.current_automation_id = instance.default_automation_id;
+                convUpdate.assigned_to = null;
+              } else if (instance.default_assigned_to) {
+                convUpdate.current_handler = 'human';
+                convUpdate.assigned_to = instance.default_assigned_to;
+                convUpdate.current_automation_id = null;
+              } else {
+                convUpdate.current_handler = 'human';
+                convUpdate.assigned_to = null;
+                convUpdate.current_automation_id = null;
+              }
+            }
+
+            // Clear archived metadata
+            convUpdate.archived_next_responsible_type = null;
+            convUpdate.archived_next_responsible_id = null;
+            convUpdate.archived_by = null;
+          }
+        }
         
         await supabaseClient
           .from("conversations")
