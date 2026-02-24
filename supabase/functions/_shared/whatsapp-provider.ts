@@ -777,7 +777,7 @@ const UazapiProvider = {
           admintoken: config.apiKey,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ name: config.instanceName }),
+        body: JSON.stringify({ name: config.instanceName, systemName: "MiauChat" }),
       },
       30000,
     );
