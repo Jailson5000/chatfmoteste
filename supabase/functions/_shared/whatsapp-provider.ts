@@ -623,7 +623,8 @@ const UazapiProvider = {
                    data?.data?.qrcode || data?.data?.base64 ||
                    data?.image || data?.data?.image ||
                    data?.instance?.qrcode || null;
-    const state = data?.status || data?.state || "unknown";
+    const state = data?.instance?.status || data?.status || data?.state ||
+                  (data?.connected === true ? "connected" : "unknown");
     
     let status = "awaiting_qr";
     if (state === "connected" || state === "open") status = "connected";
