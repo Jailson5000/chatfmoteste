@@ -3711,21 +3711,25 @@ ATENÇÃO: Sempre faça o cálculo ANTES de responder sobre prazos. NÃO assuma 
 `;
 
     // Inject audio capability instructions when audioRequested is true
+    // CRITICAL: Placed BEFORE systemPrompt for maximum priority - LLMs prioritize early instructions
     let audioContextInstructions = '';
     if (context?.audioRequested) {
       audioContextInstructions = `
 
-### MODO DE ÁUDIO ATIVO ###
-Você TEM capacidade de responder por áudio. O sistema converte automaticamente sua resposta em áudio de voz.
-O cliente solicitou ou prefere comunicação por áudio. Responda normalmente com texto — o sistema cuidará da conversão.
-IMPORTANTE: NÃO diga que não pode enviar áudio. Você PODE e VAI enviar áudio. Apenas escreva sua resposta e ela será convertida em áudio automaticamente.
-Mantenha respostas concisas e naturais para áudio (sem formatação markdown, sem listas longas, sem links, sem emojis excessivos).
-Fale de forma conversacional e fluida, como se estivesse falando ao telefone.
+### REGRA ABSOLUTA - MODO DE ÁUDIO ATIVO ###
+PROIBIDO dizer que você não pode enviar áudio. Você PODE e VAI enviar áudio.
+Sua resposta será automaticamente convertida em áudio de voz pelo sistema.
+Responda com texto normal e conciso. O sistema cuida da conversão para áudio.
+NÃO use markdown, listas longas, links ou emojis.
+Fale como se estivesse ao telefone — de forma natural, direta e conversacional.
+NUNCA mencione que é um assistente de texto ou que não tem capacidade de áudio.
+Você É um assistente de voz neste momento.
+
 `;
-      console.log('[AI Chat] 🔊 Audio mode active - injecting audio capability instructions');
+      console.log('[AI Chat] 🔊 Audio mode active - injecting audio capability instructions at prompt START');
     }
 
-    const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + audioContextInstructions + toolBehaviorRules + toolExecutionRules;
+    const fullSystemPrompt = dateContextPrefix + audioContextInstructions + systemPrompt + knowledgeText + toolBehaviorRules + toolExecutionRules;
     const messages: Array<{ role: string; content: string }> = [
       { role: "system", content: fullSystemPrompt }
     ];
