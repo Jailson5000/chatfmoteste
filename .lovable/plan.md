@@ -1,54 +1,59 @@
 
 
-# Configurar Webhook uazapi
+# Simplificar Criacao de Conexao WhatsApp (Sempre uazapi, Automatico)
 
-## O que precisa ser feito
+## Problema Atual
 
-### 1. Criar o secret UAZAPI_WEBHOOK_TOKEN
+1. O dialogo "Nova Conexao" mostra selector de provedor (Evolution/uazapi) e pede subdomain + token ao cliente
+2. O cliente nao deveria ver nada tecnico -- so digitar o nome e escanear o QR
+3. O webhook tem um bug: a funcao `uazapi-webhook` valida contra `UAZAPI_WEBHOOK_TOKEN` (que NAO existe nos secrets), mas a `evolution-api` monta a URL com `EVOLUTION_WEBHOOK_TOKEN`
 
-Definir um token seguro no backend que sera usado para validar as requisicoes vindas do uazapi. Voce escolhe o valor (ex: uma string aleatoria longa).
+## Solucao
 
-### 2. Corrigir bug no uazapi-webhook (import esm.sh)
+### 1. Simplificar o NewInstanceDialog
 
-O arquivo `supabase/functions/uazapi-webhook/index.ts` usa `import { createClient } from "https://esm.sh/@supabase/supabase-js@2"` -- o mesmo bug critico que ja corrigimos em 3 outras funcoes. Trocar para `npm:@supabase/supabase-js@2`.
+Remover completamente:
+- Selector de provedor (Evolution vs uazapi)
+- Campos de subdomain e token
 
-### 3. Deploy da funcao corrigida
+O dialogo ficara apenas com:
+- Campo "Nome da Conexao" (ex: "WhatsApp Principal")
+- Botao "Criar Conexao"
 
-Redeployar a edge function `uazapi-webhook` apos a correcao.
+### 2. Buscar credenciais uazapi automaticamente no backend
 
-### 4. Configuracao manual no painel do uazapi (por voce)
+Alterar o `create_instance` na edge function `evolution-api` para:
+- Quando `provider === 'uazapi'` e `apiUrl`/`apiKey` nao forem fornecidos, buscar automaticamente da tabela `system_settings` (`uazapi_server_url` e `uazapi_admin_token`)
+- Remover a validacao que exige `apiUrl` e `apiKey` obrigatorios para uazapi
 
-Apos os passos acima, voce deve ir ao painel do uazapi (a tela da imagem) e configurar:
+### 3. Ajustar handleCreateInstance no Connections.tsx
 
-| Campo | Valor |
+Sempre enviar `provider: "uazapi"` sem `apiUrl`/`apiKey` -- o backend resolve sozinho.
+
+### 4. Corrigir o bug do webhook token
+
+A funcao `uazapi-webhook` valida contra `Deno.env.get("UAZAPI_WEBHOOK_TOKEN")`, mas esse secret NAO existe. O que existe e `EVOLUTION_WEBHOOK_TOKEN`.
+
+Correcao: alterar `uazapi-webhook/index.ts` para ler `EVOLUTION_WEBHOOK_TOKEN` em vez de `UAZAPI_WEBHOOK_TOKEN` (ja que a `evolution-api` monta a URL com esse mesmo token).
+
+### 5. Simplificar botao "Nova Conexao"
+
+Remover o dropdown com opcoes (QR Code / Cloud API). O botao "Nova Conexao" abre diretamente o dialogo simplificado.
+
+## Sobre o Webhook (resposta a sua pergunta)
+
+A configuracao na imagem esta **quase correta**, porem:
+- O token na URL (`Meupau110591`) precisa corresponder ao valor do secret `EVOLUTION_WEBHOOK_TOKEN` no backend
+- O webhook e configurado **automaticamente** pelo sistema ao criar a instancia, entao voce nao precisa configurar manualmente -- desde que o bug do token seja corrigido
+
+## Arquivos a Alterar
+
+| Arquivo | Alteracao |
 |---|---|
-| Habilitado | Ativar (toggle ON) |
-| Metodo | POST |
-| URL | URL da funcao + `?token=SEU_TOKEN` |
-| addUrlEvents | ON |
-| addUrlTypesMessages | ON |
-| Escutar eventos | `messages` |
-| Excluir eventos | `wasSentByApi`, `isGroupYes` |
-
-O token na URL deve ser EXATAMENTE o mesmo valor definido no secret `UAZAPI_WEBHOOK_TOKEN`.
-
-## Detalhes Tecnicos
-
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
-
-Linha 2 -- trocar:
-```
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-```
-por:
-```
-import { createClient } from "npm:@supabase/supabase-js@2";
-```
-
-### Secret a criar
-
-- Nome: `UAZAPI_WEBHOOK_TOKEN`
-- Valor: token que voce escolher (sera solicitado durante a implementacao)
+| `src/components/connections/NewInstanceDialog.tsx` | Remover selector de provedor e campos uazapi. So pedir nome |
+| `src/pages/Connections.tsx` | Simplificar `handleCreateInstance` para sempre usar uazapi. Remover dropdown do botao |
+| `supabase/functions/evolution-api/index.ts` | No `create_instance` uazapi: buscar credenciais de `system_settings` quando nao fornecidas |
+| `supabase/functions/uazapi-webhook/index.ts` | Trocar `UAZAPI_WEBHOOK_TOKEN` para `EVOLUTION_WEBHOOK_TOKEN` |
 
 Nenhuma migracao SQL necessaria.
 
