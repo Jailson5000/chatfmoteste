@@ -1,84 +1,97 @@
 
 
-# Audios da IA Nao Chegam no WhatsApp (uazapi)
+# Correção: Endpoint Errado no Envio de Áudio via UAZAPi
 
-## Diagnostico
+## Problema Real (confirmado nos logs)
 
-A analise dos logs e do codigo revelou o problema raiz:
+Os logs mostram claramente o erro:
 
-### MIME Type Incorreto no Envio
-
-O TTS (ElevenLabs) gera audio em formato **OGG/Opus** (`audio/ogg; codecs=opus`), confirmado nos logs:
 ```
-[TTS-ElevenLabs] SUCCESS: Audio generated in format opus_48000_128
-[TTS] ElevenLabs SUCCESS with mimeType: audio/ogg; codecs=opus
+/send/audio response: { status: 405, ok: false }
+/send/audio data: {"code":405,"message":"Method Not Allowed.","data":{}}
+/send/audio retry response: { status: 405, ok: false }
 ```
 
-Porem, o codigo no `uazapi-webhook` HARDCODA o MIME type como `audio/mpeg` na data URI:
-```typescript
-// Linha 1634 - BUG: MIME hardcodado como mpeg, mas o conteudo e OGG
-audio: `data:audio/mpeg;base64,${ttsData.audioContent}`,
-```
+**O endpoint `/send/audio` NÃO EXISTE na UAZAPi.** Retorna 405 Method Not Allowed.
 
-Resultado: o uazapi recebe um arquivo que diz ser MP3 mas na verdade e OGG. Isso causa falha na decodificacao e o audio nao e entregue ao WhatsApp.
+## Documentação UAZAPi (endpoint correto)
 
-### Evidencias da Falha
+A documentação oficial (`/send/media`) especifica:
 
-- **whatsapp_message_id** das ultimas mensagens audio sao UUIDs (`e6abf8fb-...`, `0efb1e64-...`) - fallback de `crypto.randomUUID()`, indicando que o uazapi NAO retornou um ID de mensagem real
-- **Nenhum log** do resultado do envio - o `audioSendRes` nao e logado, impossibilitando diagnostico
-- Audios de instancias Evolution API funcionam (IDs reais tipo `3EB0AF6D50AC38D215385E`) porque o `sendAudioToWhatsApp` usa o MIME correto
+- **Endpoint**: `POST /send/media`
+- **Parâmetros obrigatórios**:
+  - `number`: número do destinatário
+  - `type`: tipo de mídia — para áudio de voz deve ser `"ptt"` (Push-to-Talk)
+  - `file`: URL ou base64 do arquivo
+- **Parâmetro opcional**: `mimetype` (detectado automaticamente se omitido)
 
-## Correcao
-
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
-
-**1. Usar MIME type real do TTS na data URI** (linha 1634):
-```typescript
-// ANTES (bugado):
-audio: `data:audio/mpeg;base64,${ttsData.audioContent}`,
-
-// DEPOIS (correto):
-const audioMime = (ttsData.mimeType || "audio/mpeg").split(";")[0].trim();
-audio: `data:${audioMime};base64,${ttsData.audioContent}`,
-```
-
-**2. Adicionar logging detalhado da resposta do uazapi** (apos linha 1637):
-```typescript
-console.log("[UAZAPI_WEBHOOK] /send/audio response:", {
-  status: audioSendRes.status,
-  ok: audioSendRes.ok,
-});
-const audioSendData = await audioSendRes.json().catch(() => ({}));
-console.log("[UAZAPI_WEBHOOK] /send/audio data:", JSON.stringify(audioSendData).slice(0, 500));
-```
-
-**3. Se o envio com OGG falhar, tentar com base64 puro** (sem data URI prefix):
-Alguns provedores uazapi aceitam base64 puro sem o prefixo `data:...`:
-```typescript
-if (!audioSendRes.ok) {
-  // Retry: enviar base64 puro sem data URI prefix
-  const retryRes = await fetch(`${apiUrl}/send/audio`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", token: instance.api_key },
-    body: JSON.stringify({
-      number: targetNumber,
-      audio: ttsData.audioContent,  // base64 puro
-      ptt: true,
-    }),
-  });
-  // ... parse response
+Exemplo correto para enviar áudio de voz:
+```json
+{
+  "number": "5511999999999",
+  "type": "ptt",
+  "file": "data:audio/ogg;base64,AAAA..."
 }
 ```
 
-## Resumo das Mudancas
+## Correção
 
-| Arquivo | Mudanca |
+### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
+
+Substituir TODAS as chamadas a `/send/audio` por `/send/media` com os parâmetros corretos:
+
+```typescript
+// ANTES (bugado - endpoint não existe):
+const audioSendRes = await fetch(`${apiUrl}/send/audio`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", token: instance.api_key },
+  body: JSON.stringify({
+    number: targetNumber,
+    audio: `data:${audioMime};base64,${ttsData.audioContent}`,
+    ptt: true,
+  }),
+});
+
+// DEPOIS (correto conforme docs UAZAPi):
+const audioSendRes = await fetch(`${apiUrl}/send/media`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", token: instance.api_key },
+  body: JSON.stringify({
+    number: targetNumber,
+    type: "ptt",
+    file: `data:${audioMime};base64,${ttsData.audioContent}`,
+    mimetype: audioMime,
+  }),
+});
+```
+
+O fallback (retry com base64 puro) também será atualizado para usar `/send/media`:
+
+```typescript
+// Fallback: enviar com type "audio" em vez de "ptt"
+const retryRes = await fetch(`${apiUrl}/send/media`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", token: instance.api_key },
+  body: JSON.stringify({
+    number: targetNumber,
+    type: "audio",
+    file: `data:${audioMime};base64,${ttsData.audioContent}`,
+    mimetype: audioMime,
+  }),
+});
+```
+
+## Resumo
+
+| Problema | Causa | Correção |
+|---|---|---|
+| 405 Method Not Allowed | Endpoint `/send/audio` não existe na UAZAPi | Usar `/send/media` com `type: "ptt"` |
+| Parâmetros errados | `audio` e `ptt` como campos | Usar `file` e `type` conforme docs |
+| Fallback também falha | Mesmo endpoint errado | Fallback com `type: "audio"` via `/send/media` |
+
+## Arquivo afetado
+
+| Arquivo | Mudança |
 |---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Corrigir MIME type na data URI; adicionar logging; fallback base64 puro |
-
-## Resultado Esperado
-
-1. Audio da IA chega no WhatsApp do cliente com formato correto (OGG/Opus)
-2. Logs detalhados permitem diagnosticar problemas futuros
-3. Fallback para base64 puro garante compatibilidade com diferentes versoes do uazapi
+| `supabase/functions/uazapi-webhook/index.ts` | Trocar `/send/audio` → `/send/media`; ajustar payload para `type`/`file`/`mimetype` |
 
