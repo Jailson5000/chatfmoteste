@@ -113,6 +113,7 @@ export default function Connections() {
   const [isNewCloudOpen, setIsNewCloudOpen] = useState(false);
   const [isQRDialogOpen, setIsQRDialogOpen] = useState(false);
   const [currentQRCode, setCurrentQRCode] = useState<string | null>(null);
+  const currentQRCodeRef = useRef<string | null>(null);
   const [currentInstanceId, setCurrentInstanceId] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
@@ -138,6 +139,11 @@ export default function Connections() {
     const multiplier = Math.pow(1.3, Math.floor(count / 10));
     return Math.min(BASE_POLL_INTERVAL * multiplier, MAX_POLL_INTERVAL);
   }, []);
+
+  // Sync ref with state so polling always sees latest value
+  useEffect(() => {
+    currentQRCodeRef.current = currentQRCode;
+  }, [currentQRCode]);
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -224,7 +230,7 @@ export default function Connections() {
 
     try {
       // If we don't have a QR code yet, actively try to fetch one
-      if (!currentQRCode) {
+      if (!currentQRCodeRef.current) {
         // DEBOUNCE: Prevent parallel QR fetch calls (race condition prevention)
         if (qrFetchInProgressRef.current) {
           console.log("[Connections] QR fetch already in progress, skipping this poll");
@@ -290,7 +296,7 @@ export default function Connections() {
             setPollCount(0);
           }, 1000);
           return;
-        } else if (result.qrCode && result.qrCode !== currentQRCode) {
+        } else if (result.qrCode && result.qrCode !== currentQRCodeRef.current) {
           console.log("[Connections] QR code updated");
           setCurrentQRCode(result.qrCode);
         }
@@ -300,10 +306,10 @@ export default function Connections() {
     }
 
     // Schedule next poll with backoff
-    const nextInterval = getPollingInterval(count, !!currentQRCode);
+    const nextInterval = getPollingInterval(count, !!currentQRCodeRef.current);
     console.log(`[Connections] Next poll in ${nextInterval}ms`);
     pollIntervalRef.current = setTimeout(() => pollOnce(instanceId), nextInterval);
-  }, [stopPolling, getStatus, getQRCode, refetch, currentQRCode, getPollingInterval]);
+  }, [stopPolling, getStatus, getQRCode, refetch, getPollingInterval]);
 
   // Start polling for connection status
   const startPolling = useCallback((instanceId: string) => {
@@ -480,10 +486,15 @@ export default function Connections() {
     stopPolling();
     setIsQRDialogOpen(false);
     setCurrentQRCode(null);
-    setCurrentInstanceId(null);
     setQrError(null);
     setConnectionStatus(null);
     setPollCount(0);
+    // Refetch status imediato ao fechar - atualiza lista sem precisar clicar "Conectar"
+    if (currentInstanceId) {
+      getStatus.mutateAsync(currentInstanceId).catch(() => {});
+    }
+    setCurrentInstanceId(null);
+    refetch();
   };
 
   const getStatusBadge = (status: string | null) => {
