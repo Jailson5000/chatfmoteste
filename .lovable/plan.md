@@ -1,104 +1,53 @@
 
 
-# QR Scan Mostra "Conectado" e Depois Reverte para "Desconectado"
+# Kanban Nao Mostra Numeros de Telefone da Instancia
 
 ## Diagnostico
 
-O problema e uma **race condition no ciclo de polling** que causa reconexao acidental apos o QR ser escaneado.
+No `KanbanCard.tsx`, a funcao `getConnectionInfo()` (linha 156-163) so exibe o numero quando `phone_number` esta preenchido na tabela `whatsapp_instances`. Duas instancias no banco tem `phone_number` como `null`:
 
-### Sequencia do bug
+- **Z9089** (id: b2622a7e) → `phone_number: null`
+- **Z3528** (id: 10b70877) → `phone_number: null`
 
-```text
-T=0.0s  pollOnce v1 inicia → agenda setTimeout(() => pollOnce(id), 3000)
-T=0.5s  Usuario escaneia QR → uazapi envia webhook "connected"
-T=0.6s  Realtime detecta → stopPolling() + setCurrentQRCode(null) + refetch()
-        → UI mostra "Conectado" ✓
-        → stopPolling() cancela o PROXIMO setTimeout agendado
-        → MAS pollOnce v1 pode AINDA ESTAR executando (await pendente)
-
-T=3.0s  setTimeout do T=0.0s JA FOI agendado antes do stopPolling
-        → pollOnce executa novamente
-        → currentQRCodeRef.current === null (foi limpo no T=0.6s!)
-        → Entra na ramificacao "sem QR" → chama getQRCode.mutateAsync
-        → getQRCode chama provider.connect() no uazapi
-        → uazapi REINICIA a sessao → envia webhook "disconnected"
-        → DB atualizado para "disconnected"
-        → UI reverte para "Desconectado" ✗
-```
-
-### Causa raiz (2 falhas)
-
-**Falha 1: `stopPolling()` nao impede polls em andamento.** `clearTimeout` cancela o proximo setTimeout agendado, mas se `pollOnce` esta no meio de um `await`, ele continua executando e agenda um NOVO setTimeout na linha 311 (sobrescrevendo o null do `pollIntervalRef`).
-
-**Falha 2: `setCurrentQRCode(null)` ao detectar conexao cria armadilha.** Quando a conexao e detectada, o QR code e limpo. Se qualquer poll residual executa depois disso, ele ve `currentQRCodeRef.current === null` e chama `getQRCode` → `provider.connect()`, que REINICIA a sessao no uazapi, causando desconexao temporaria.
+Quando `phone_number` e null, o codigo retorna `{ label: "----" }`, causando os cards sem numero vistos no screenshot.
 
 ## Correcao
 
-### Arquivo: `src/pages/Connections.tsx`
+### Arquivo: `src/components/kanban/KanbanCard.tsx`
 
-**Correcao 1: Adicionar flag `isPollingActiveRef` para controle absoluto do polling**
+Na funcao `getConnectionInfo()`, quando `phone_number` for null, exibir o `display_name` da instancia como fallback em vez de "----":
 
 ```typescript
-const isPollingActiveRef = useRef(false);
-```
-
-- `startPolling` seta `isPollingActiveRef.current = true`
-- `stopPolling` seta `isPollingActiveRef.current = false`
-- `pollOnce` verifica `isPollingActiveRef.current` NO INICIO antes de qualquer acao e ANTES de agendar o proximo poll
-
-Isso garante que nenhum poll residual (em andamento ou agendado) execute apos a conexao ser detectada.
-
-**Correcao 2: Nao limpar `currentQRCode` durante deteccao de conexao no polling**
-
-Atualmente, quando a conexao e detectada no `pollOnce` (linhas 250-260, 288-298) e no Realtime (linha 192), o codigo faz `setCurrentQRCode(null)` ANTES de parar o polling. Isso cria a armadilha onde polls residuais veem `null` e chamam `connect()`.
-
-Mover `setCurrentQRCode(null)` para DENTRO do `setTimeout` que fecha o dialog (apos 1 segundo), garantindo que o QR permanece setado ate o polling estar completamente parado.
-
-**Correcao 3: `handleCloseQRDialog` deve aguardar `getStatus` antes de `refetch`**
-
-Atualmente:
-```typescript
-getStatus.mutateAsync(currentInstanceId).catch(() => {});
-setCurrentInstanceId(null); // Limpa ANTES do getStatus terminar
-refetch(); // Refetch ANTES do DB ser atualizado
-```
-
-Corrigir para:
-```typescript
-const instanceIdToCheck = currentInstanceId;
-setCurrentInstanceId(null);
-if (instanceIdToCheck) {
-  try {
-    await getStatus.mutateAsync(instanceIdToCheck);
-  } catch {}
+// Linha 156-163 - Adicionar fallback para display_name
+const phoneNumber = conversation.whatsapp_instance?.phone_number;
+if (phoneNumber) {
+  const digits = phoneNumber.replace(/\D/g, "");
+  if (digits.length >= 4) {
+    return { label: `•••${digits.slice(-4)}`, isWidget: false, tooltipText: ... };
+  }
 }
-refetch();
+// FALLBACK: mostrar display_name quando phone_number nao existe
+if (conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name) {
+  return { 
+    label: conversation.whatsapp_instance.display_name || conversation.whatsapp_instance.instance_name, 
+    isWidget: false, 
+    tooltipText: conversation.whatsapp_instance.display_name || "WhatsApp" 
+  };
+}
+return { label: "----", isWidget: false, tooltipText: "Canal não identificado" };
 ```
 
-## Mudancas especificas
-
-| Local | Mudanca |
-|---|---|
-| `stopPolling` | Adicionar `isPollingActiveRef.current = false` |
-| `startPolling` | Adicionar `isPollingActiveRef.current = true` |
-| `pollOnce` (inicio) | Checar `if (!isPollingActiveRef.current) return;` |
-| `pollOnce` (antes do setTimeout) | Checar `if (!isPollingActiveRef.current) return;` |
-| `pollOnce` (deteccao de conexao) | Mover `setCurrentQRCode(null)` para dentro do setTimeout de 1s |
-| Realtime handler | Mover `setCurrentQRCode(null)` para dentro do setTimeout de 1s |
-| `handleCloseQRDialog` | Await `getStatus` antes de `refetch`, separar captura do instanceId |
+A mesma logica ja existe para `WHATSAPP_CLOUD` (linha 152-154). Esta correcao alinha o comportamento do caso padrao.
 
 ## Resultado Esperado
 
-1. Usuario escaneia QR → conexao detectada (Realtime ou polling)
-2. `stopPolling()` seta `isPollingActiveRef = false`
-3. Qualquer poll residual verifica a flag e para imediatamente
-4. `currentQRCode` mantem valor ate o dialog fechar (nenhum poll vazio dispara `connect()`)
-5. UI mostra "Conectado" e PERMANECE conectado
-6. Ao fechar dialog manualmente, `getStatus` atualiza DB antes do `refetch`
+- Cards com instancias sem `phone_number` mostrarao o nome da instancia (ex: "Z9089", "Z3528")
+- Cards com `phone_number` preenchido continuam mostrando `•••XXXX`
+- Nenhum card mostra "----" a menos que nao tenha instancia associada
 
 ## Arquivos Afetados
 
 | Arquivo | Mudanca |
 |---|---|
-| `src/pages/Connections.tsx` | Adicionar `isPollingActiveRef`, proteger `pollOnce` com flag, mover limpeza de QR para apos dialog fechar, corrigir `handleCloseQRDialog` |
+| `src/components/kanban/KanbanCard.tsx` | Fallback para display_name em getConnectionInfo |
 
