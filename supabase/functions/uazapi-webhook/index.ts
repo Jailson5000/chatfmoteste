@@ -357,9 +357,15 @@ serve(async (req) => {
         const fileName = extractFileName(msg);
         const whatsappMessageId = msg.key?.id || msg.id || msg.messageId || crypto.randomUUID();
         const contactName = msg.pushName || msg.notifyName || msg.senderName || chat.name || chat.lead_name || phoneNumber;
-        const timestamp = msg.messageTimestamp 
-          ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
-          : new Date().toISOString();
+        const rawTs = Number(msg.messageTimestamp);
+        let timestamp: string;
+        if (!msg.messageTimestamp || isNaN(rawTs) || rawTs <= 0) {
+          timestamp = new Date().toISOString();
+        } else if (rawTs > 1e12) {
+          timestamp = new Date(rawTs).toISOString();
+        } else {
+          timestamp = new Date(rawTs * 1000).toISOString();
+        }
 
         console.log(`[UAZAPI_WEBHOOK] Message: ${messageType} from ${phoneNumber} (fromMe: ${isFromMe})`, {
           contentPreview: content?.slice(0, 50),
