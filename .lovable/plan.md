@@ -1,52 +1,73 @@
 
 
-# Diagnóstico: Mensagens Perdidas no UAZAPi Webhook
+# Escolher Instância WhatsApp para Envio na Agenda Pro
 
-## Causa raiz identificada
+## Situação Atual
 
-O bug está na **linha 361** do `uazapi-webhook/index.ts`:
-
-```typescript
-const rawEvent = body.event || body.type || body.EventType || "unknown";
-```
-
-O UAZAPi envia payloads onde:
-- `body.EventType` = `"messages"` (string correta)  
-- `body.event` = `{ Chat: "...", IsFromMe: false, ... }` (objeto com dados do evento)
-
-Como `body.event` é um **objeto truthy**, ele é capturado primeiro. `String({...}).toLowerCase()` resulta em `"[object object]"`, que **não entra em nenhum case** do switch e cai no `default` ("Unhandled event"). A mensagem é completamente descartada.
-
-Isso é confirmado pelos logs: os eventos aparecem como `Event: [object object]` — exatamente este bug. Para `messages_update`, o efeito era inofensivo (já era ignorado). Mas para eventos `messages`, **a mensagem inteira é perdida**.
-
-A conversa é criada porque o UAZAPi também envia um evento `chats` separado (com `body.EventType = "chats"`, sem `body.event` como objeto), que cai no `default` mas depois que o evento `messages` já tentou e falhou. Na verdade, a conversa foi criada por um evento `messages` anterior que **funcionou** (quando `body.event` era string ou ausente), e os subsequentes falharam.
-
-## Correção
-
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts` (linha 361)
-
-Inverter a prioridade: usar `body.EventType` (string confiável da UAZAPi) **antes** de `body.event`, e validar que o valor selecionado é realmente uma string:
+Confirmei: tanto `agenda-pro-notification` quanto `process-scheduled-messages` pegam a **primeira instância conectada** da empresa:
 
 ```typescript
-// ANTES (bugado):
-const rawEvent = body.event || body.type || body.EventType || "unknown";
+// agenda-pro-notification (linha 372-378)
+.from("whatsapp_instances")
+.eq("law_firm_id", appointment.law_firm_id)
+.eq("status", "connected")
+.limit(1)
+.maybeSingle();
 
-// DEPOIS (corrigido):
-const rawEvent = body.EventType || body.type || 
-  (typeof body.event === "string" ? body.event : null) || "unknown";
+// process-scheduled-messages (linha 170-175) - mesmo padrão
 ```
 
-Essa mudança:
-1. Prioriza `body.EventType` (campo padrão da UAZAPi, sempre string)
-2. Usa `body.type` como segundo fallback
-3. Só usa `body.event` se for **string** (ignora quando é objeto)
-4. Garante que o evento `messages` será corretamente roteado para o case handler
+Não existe coluna `whatsapp_instance_id` na tabela `agenda_pro_settings`. Se a empresa tem 2+ instâncias, o sistema escolhe uma arbitrariamente.
 
-### Impacto
+---
 
-| Antes | Depois |
+## Plano de Correção
+
+### 1. Migração: Adicionar coluna na tabela `agenda_pro_settings`
+
+```sql
+ALTER TABLE agenda_pro_settings 
+ADD COLUMN whatsapp_instance_id uuid REFERENCES whatsapp_instances(id) ON DELETE SET NULL;
+```
+
+### 2. Backend: `agenda-pro-notification/index.ts`
+
+Alterar a query de instância (linha 372-378) para:
+
+- Primeiro buscar `whatsapp_instance_id` do `agenda_pro_settings` da empresa
+- Se configurado, usar essa instância específica (validando que está `connected`)
+- Se não configurado ou a instância configurada estiver offline, fallback para a primeira conectada (comportamento atual)
+
+### 3. Backend: `process-scheduled-messages/index.ts`
+
+Mesmo ajuste na query de instância (linha 170-175):
+
+- Buscar `whatsapp_instance_id` do `agenda_pro_settings` antes de pegar qualquer instância
+- Fallback para primeira conectada se não configurado
+
+### 4. Frontend: `AgendaProSettings.tsx`
+
+Na seção "Notificações e Lembretes", adicionar um seletor de instância WhatsApp **antes** dos switches de WhatsApp/Email:
+
+- Select com lista de instâncias da empresa (nome + número de telefone)
+- Opção padrão: "Automático (primeira disponível)"
+- Só aparece se `send_whatsapp_confirmation` está ativo
+- Usa `useWhatsAppInstances` para listar instâncias conectadas
+
+### 5. Hook: `useAgendaPro.tsx`
+
+- Adicionar `whatsapp_instance_id` na interface `AgendaProSettings`
+- Incluir o campo no `select` e no `update`
+
+---
+
+## Resumo de Arquivos
+
+| Arquivo | Mudança |
 |---|---|
-| Eventos `messages` com `body.event` como objeto → `[object object]` → `default` (descartado) | Eventos `messages` → lidos de `body.EventType` → case `"messages"` (processado) |
-| Mensagens perdidas silenciosamente | Todas as mensagens capturadas |
-
-Nenhuma outra mudança necessária. O restante do pipeline (criação de conversa, inserção de mensagem, IA) já funciona — o problema era exclusivamente no roteamento do evento.
+| `agenda_pro_settings` (migração) | Adicionar coluna `whatsapp_instance_id` |
+| `supabase/functions/agenda-pro-notification/index.ts` | Usar instância configurada com fallback |
+| `supabase/functions/process-scheduled-messages/index.ts` | Usar instância configurada com fallback |
+| `src/components/agenda-pro/AgendaProSettings.tsx` | Adicionar seletor de instância WhatsApp |
+| `src/hooks/useAgendaPro.tsx` | Incluir `whatsapp_instance_id` no tipo e queries |
 
