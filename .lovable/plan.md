@@ -1,147 +1,271 @@
 
 
-# Corrigir recebimento de arquivos do WhatsApp via uazapi
+# Corrigir recebimento de midias, fotos de perfil e adicionar suporte a figurinhas e contatos
 
-## Problema raiz identificado
+## Diagnostico real (confirmado pelos logs)
 
-Os logs mostram que **todas as midias recebidas** do WhatsApp estao sendo classificadas como `text` com conteudo vazio:
+O payload real do uazapi tem esta estrutura (confirmado nos logs de producao):
 
-```
-Message: text from 556384622450 (fromMe: false) {
-  contentPreview: "",
-  hasMedia: false,
-  hasBase64: false,
-  mimeType: null,
-  fileName: null
+```text
+body = {
+  EventType: "messages",
+  chat: {
+    phone: "+55 63 8462-2450",
+    name: "Jailson Ferreira",
+    imagePreview: "https://pps.whatsapp.net/...",   <-- FOTO DO PERFIL
+    wa_lastMessageType: "DocumentMessage"
+  },
+  message: {                                        <-- body.message (NAO body.msg)
+    type: "DocumentMessage",                        <-- PascalCase!
+    content: {                                      <-- TUDO DENTRO DE content
+      URL: "https://mmg.whatsapp.net/...enc...",
+      mimetype: "application/pdf",
+      fileName: "document.pdf",
+      text: "rrr",                                  <-- texto fica aqui
+      base64: "...",                                <-- base64 fica aqui
+    },
+    fromMe: false,
+    id: "3EB0...",
+    timestamp: 1771936645,
+    pushName: "Jailson"
+  }
 }
 ```
 
-A causa esta na linha 325 do `uazapi-webhook/index.ts`:
-```typescript
-const msg = body.data || body.message || body;
-```
+O codigo atual faz `msg = body.msg || body.data || body.message || body` -- pega `body.message` corretamente. Porem TODAS as funcoes de extracao estao erradas porque buscam dados na raiz de `msg` (ex: `msg.text`, `msg.base64`, `msg.mimetype`), quando na verdade estao em `msg.content.text`, `msg.content.base64`, `msg.content.mimetype`.
 
-O payload real do uazapi tem a estrutura:
-```json
-{
-  "BaseUrl": "https://miauchat.uazapi.com",
-  "EventType": "messages",
-  "chat": { "phone": "+55 63 ...", "name": "..." },
-  "msg": { "type": "document", "base64": "...", "mimetype": "application/pdf", "fileName": "..." }
-}
-```
+Alem disso, `msg.type` e "DocumentMessage" (PascalCase), nao "document" (lowercase).
 
-O campo `body.msg` **nunca e verificado**. O codigo cai em `body` (fallback), e como o body raiz nao tem `type`, `base64`, `imageMessage`, etc., tudo e classificado como texto vazio.
-
-## Problema secundario no envio
-
-A API do uazapi espera `docName` para nome de documento e `text` para caption, mas estamos enviando `fileName` e `caption`.
+---
 
 ## Solucao
 
 ### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
 
-**Correcao 1 -- Extrair mensagem de `body.msg` (linha 325)**
-
-Antes:
-```typescript
-const msg = body.data || body.message || body;
-```
-
-Depois:
-```typescript
-const msg = body.msg || body.data || body.message || body;
-```
-
-Isso garante que o objeto `msg` do uazapi (com `type`, `base64`, `mimetype`, `fileName`, etc.) seja usado corretamente.
-
-**Correcao 2 -- Ampliar deteccao de tipo para campos uazapi (funcao `detectMessageType`)**
-
-Adicionar verificacao do campo `msg.type` que o uazapi usa diretamente com valores como `"image"`, `"video"`, `"document"`, `"audio"`, `"ptt"`:
+#### Correcao 1 -- detectMessageType: suportar PascalCase do uazapi
 
 ```typescript
 function detectMessageType(msg: any): string {
   const t = (msg.type || "").toLowerCase();
-  if (t === "image" || msg.imageMessage) return "image";
-  if (t === "video" || msg.videoMessage) return "video";
-  if (t === "audio" || t === "ptt" || t === "myaudio" || msg.audioMessage) return "audio";
-  if (t === "document" || msg.documentMessage) return "document";
-  if (t === "sticker" || msg.stickerMessage) return "sticker";
-  if (t === "location" || msg.locationMessage) return "location";
-  if (t === "contact" || msg.contactMessage || msg.contactsArrayMessage) return "contact";
+  // uazapi sends PascalCase: "DocumentMessage", "ImageMessage", "StickerMessage", etc.
+  if (t === "image" || t === "imagemessage" || msg.imageMessage) return "image";
+  if (t === "video" || t === "videomessage" || msg.videoMessage) return "video";
+  if (t === "audio" || t === "audiomessage" || t === "ptt" || t === "pttmessage" || t === "myaudio" || msg.audioMessage) return "audio";
+  if (t === "document" || t === "documentmessage" || msg.documentMessage) return "document";
+  if (t === "sticker" || t === "stickermessage" || msg.stickerMessage) return "sticker";
+  if (t === "location" || t === "locationmessage" || msg.locationMessage) return "location";
+  if (t === "contact" || t === "contactmessage" || t === "contactcardmessage" || msg.contactMessage || msg.contactsArrayMessage) return "contact";
   return "text";
 }
 ```
 
-**Correcao 3 -- Extrair base64, URL e nome do `msg` diretamente**
-
-O uazapi coloca `base64`, `mimetype`, `file` (URL ou base64) e `fileName` diretamente no objeto `msg`. Atualizar as funcoes de extracao:
+#### Correcao 2 -- extractContent: buscar em msg.content
 
 ```typescript
-// extractMediaUrl - adicionar campos do uazapi
+function extractContent(msg: any): string {
+  // Direct text at msg level
+  if (msg.text) return msg.text;
+  if (msg.body) return msg.body;
+  if (msg.conversation) return msg.conversation;
+  
+  // uazapi: content is an object with the actual data
+  const c = msg.content;
+  if (c && typeof c === "object") {
+    if (c.text) return c.text;
+    if (c.caption) return c.caption;
+    if (c.conversation) return c.conversation;
+    // ExtendedTextMessage
+    if (c.extendedTextMessage?.text) return c.extendedTextMessage.text;
+  }
+  
+  // Fallback: content as string
+  if (typeof msg.content === "string") return msg.content;
+  
+  // Extended text
+  if (msg.extendedTextMessage?.text) return msg.extendedTextMessage.text;
+  
+  // Media captions
+  if (msg.imageMessage?.caption) return msg.imageMessage.caption;
+  if (msg.videoMessage?.caption) return msg.videoMessage.caption;
+  if (msg.documentMessage?.caption) return msg.documentMessage.caption;
+  if (msg.caption) return msg.caption;
+  
+  return "";
+}
+```
+
+#### Correcao 3 -- extractMediaUrl: buscar URL em msg.content
+
+```typescript
 function extractMediaUrl(msg: any): string | null {
+  // uazapi: media URL inside msg.content
+  const c = msg.content;
+  if (c && typeof c === "object") {
+    if (c.URL) return c.URL;
+    if (c.url) return c.url;
+    if (c.mediaUrl) return c.mediaUrl;
+  }
+  
+  // Direct URL fields
   if (msg.mediaUrl) return msg.mediaUrl;
   if (msg.url) return msg.url;
   if (msg.file && typeof msg.file === "string" && msg.file.startsWith("http")) return msg.file;
-  // ... nested fields existentes
+  
+  // Nested type-specific messages
+  if (msg.imageMessage?.url) return msg.imageMessage.url;
+  // ... (keep existing)
+  
   return null;
 }
 ```
 
-E para base64 na secao de persistencia (linha ~529), verificar tambem `msg.file` quando nao e URL:
-```typescript
-const rawBase64 = msg.base64 || body.base64
-  || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http") ? msg.file : null)
-  || msg.imageMessage?.base64 || msg.videoMessage?.base64
-  || msg.audioMessage?.base64 || msg.documentMessage?.base64
-  || msg.stickerMessage?.base64 || null;
-```
+#### Correcao 4 -- extractMimeType: buscar em msg.content
 
-**Correcao 4 -- Conteudo de documentos deve mostrar nome do arquivo**
-
-Para mensagens de midia sem texto, mostrar tipo ou nome do arquivo:
 ```typescript
-// Apos extrair content e messageType
-let finalContent = content;
-if (!finalContent && messageType !== "text") {
-  if (fileName) finalContent = `[${fileName}]`;
-  else finalContent = `[${messageType}]`;
+function extractMimeType(msg: any): string | null {
+  // uazapi: nested in content
+  const c = msg.content;
+  if (c && typeof c === "object" && c.mimetype) return c.mimetype;
+  
+  if (msg.mimetype) return msg.mimetype;
+  // ... (keep existing nested)
+  return null;
 }
-messagePayload.content = finalContent || null;
 ```
 
-**Correcao 5 -- Log do payload completo para debug**
+#### Correcao 5 -- extractFileName: buscar em msg.content
 
-Logar os primeiros 2000 chars em vez de 500 para capturar o `msg`:
 ```typescript
-console.log(`[UAZAPI_WEBHOOK] Event: ${event}`, JSON.stringify(body).slice(0, 2000));
+function extractFileName(msg: any): string | null {
+  const c = msg.content;
+  if (c && typeof c === "object" && c.fileName) return c.fileName;
+  
+  if (msg.fileName) return msg.fileName;
+  if (msg.documentMessage?.fileName) return msg.documentMessage.fileName;
+  return null;
+}
+```
+
+#### Correcao 6 -- base64 extraction: buscar em msg.content
+
+Na secao de persistencia de base64 (linha ~540), adicionar `msg.content?.base64`:
+```typescript
+const c = msg.content;
+const rawBase64 = (c && typeof c === "object" ? c.base64 : null)
+  || msg.base64 || body.base64 
+  || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http") ? msg.file : null)
+  || msg.imageMessage?.base64 || ...
+```
+
+#### Correcao 7 -- Extrair messageId e timestamp de msg corretamente
+
+```typescript
+const whatsappMessageId = msg.id || msg.key?.id || msg.messageId || crypto.randomUUID();
+const rawTs = Number(msg.timestamp || msg.messageTimestamp);
+```
+
+#### Correcao 8 -- Salvar foto de perfil do chat.imagePreview
+
+Apos criar ou encontrar o cliente, verificar se `chat.imagePreview` existe e o cliente nao tem `avatar_url`. Se sim, baixar e persistir no Storage:
+
+```typescript
+// After client creation/update section
+if (!isFromMe && chat.imagePreview && typeof chat.imagePreview === "string" && chat.imagePreview.startsWith("http")) {
+  // Background: persist profile picture
+  const clientId = existingClient?.id || newClient?.id;
+  if (clientId) {
+    persistProfilePicture(supabaseClient, clientId, lawFirmId, chat.imagePreview).catch(() => {});
+  }
+}
+```
+
+Nova funcao auxiliar `persistProfilePicture`:
+```typescript
+async function persistProfilePicture(supabaseClient, clientId, lawFirmId, imageUrl) {
+  // Check if client already has avatar
+  const { data: client } = await supabaseClient.from("clients").select("avatar_url").eq("id", clientId).single();
+  if (client?.avatar_url) return; // Already has avatar
+  
+  // Download and upload to Storage
+  const response = await fetch(imageUrl);
+  if (!response.ok) return;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const storagePath = `${lawFirmId}/avatars/${clientId}.jpg`;
+  
+  await supabaseClient.storage.from("chat-media").upload(storagePath, bytes, {
+    contentType: "image/jpeg", upsert: true
+  });
+  
+  const { data } = supabaseClient.storage.from("chat-media").getPublicUrl(storagePath);
+  if (data?.publicUrl) {
+    await supabaseClient.from("clients").update({ avatar_url: data.publicUrl }).eq("id", clientId);
+  }
+}
+```
+
+#### Correcao 9 -- Suporte a figurinhas (sticker)
+
+A deteccao de tipo ja inclui "stickermessage". No banco, `message_type = "sticker"` sera salvo. A URL sera extraida de `msg.content.URL` e o base64 de `msg.content.base64`. A extensao `.webp` sera adicionada ao extMap:
+```typescript
+"image/webp": ".webp",
 ```
 
 ---
 
 ### Arquivo: `supabase/functions/_shared/whatsapp-provider.ts`
 
-**Correcao 6 -- Campo `docName` em vez de `fileName` (linha 569-571)**
+#### Correcao 10 -- sendContact para uazapi
 
-Conforme docs uazapi, o nome do documento e enviado como `docName`:
+Adicionar tipo e metodo `sendContact` ao UazapiProvider:
+
 ```typescript
-if (opts.fileName) {
-  payload.docName = opts.fileName;
+// Novo tipo
+export interface SendContactOptions {
+  number: string;
+  fullName: string;
+  phoneNumber: string;  // pode ter multiplos separados por virgula
+  organization?: string;
+  email?: string;
+  url?: string;
+}
+
+// No UazapiProvider
+async sendContact(config: ProviderConfig, opts: SendContactOptions): Promise<SendTextResult> {
+  const apiUrl = normalizeUrl(config.apiUrl);
+  const payload = {
+    number: opts.number,
+    fullName: opts.fullName,
+    phoneNumber: opts.phoneNumber,
+    organization: opts.organization || "",
+    email: opts.email || "",
+    url: opts.url || "",
+  };
+  
+  const res = await fetchWithTimeout(`${apiUrl}/send/contact`, {
+    method: "POST",
+    headers: { token: config.apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }, SEND_TIMEOUT_MS);
+  
+  if (!res.ok) throw new Error(`Falha ao enviar contato (${res.status})`);
+  const data = await res.json().catch(() => ({}));
+  return { success: true, whatsappMessageId: data?.key?.id || null, raw: data };
 }
 ```
 
-**Correcao 7 -- Caption como `text` em vez de `caption` (linha 559)**
+Adicionar export na API publica e tambem no EvolutionProvider (como no-op ou adaptacao).
 
-Conforme docs uazapi (`/send/media`), o campo de legenda e `text`, nao `caption`:
-```typescript
-const payload: Record<string, unknown> = {
-  number: opts.number,
-  type: opts.mediaType,
-};
-if (opts.caption) {
-  payload.text = opts.caption;
-}
-```
+#### Correcao 11 -- fetchProfilePicture: usar endpoint correto
+
+O UazapiProvider.fetchProfilePicture usa `/contacts/profile-picture` mas a docs mostra `/profile/image` para alterar. Para BUSCAR foto do contato, o endpoint correto e `POST /profile/image` com `jid`. Na verdade, vou usar a API correta que e `POST /business/get/profile` para perfil comercial e para foto de contato, a foto ja vem no webhook via `chat.imagePreview`. Mantemos o endpoint existente como fallback.
+
+---
+
+### Arquivo: `supabase/functions/evolution-api/index.ts`
+
+#### Correcao 12 -- Expor sendContact como action
+
+Adicionar `"send_contact"` a lista de actions e implementar o handler que chama o provider.
 
 ---
 
@@ -149,17 +273,17 @@ if (opts.caption) {
 
 | Arquivo | Mudanca | Impacto |
 |---|---|---|
-| `uazapi-webhook/index.ts` | Extrair msg de `body.msg` | **Critico** -- corrige 100% dos arquivos nao recebidos |
-| `uazapi-webhook/index.ts` | Ampliar deteccao de tipo (ptt, myaudio) | Audios de voz recebidos corretamente |
-| `uazapi-webhook/index.ts` | Extrair base64 de `msg.file` | Midias persistidas no Storage |
-| `uazapi-webhook/index.ts` | Conteudo padrao para midias | Documentos mostram nome correto |
-| `whatsapp-provider.ts` | `docName` em vez de `fileName` | Nome correto no WhatsApp ao enviar |
-| `whatsapp-provider.ts` | `text` em vez de `caption` | Legendas funcionam ao enviar |
+| `uazapi-webhook/index.ts` | Corrigir extractors para buscar em `msg.content` | **CRITICO** -- corrige 100% das midias |
+| `uazapi-webhook/index.ts` | detectMessageType suportar PascalCase | Documentos, stickers, audios reconhecidos |
+| `uazapi-webhook/index.ts` | Persistir foto de perfil de `chat.imagePreview` | Avatares dos contatos aparecem |
+| `uazapi-webhook/index.ts` | Adicionar `.webp` ao extMap para stickers | Figurinhas salvas corretamente |
+| `whatsapp-provider.ts` | Adicionar `sendContact` | Enviar cartoes de contato via WhatsApp |
+| `evolution-api/index.ts` | Expor action `send_contact` | Frontend pode enviar contatos |
 
 ## Resultado esperado
 
-- PDFs, imagens, videos e audios enviados do WhatsApp chegarao na plataforma
-- Midias serao persistidas no Storage com URL publica
-- Documentos mostrarao o nome real do arquivo
-- Envio de midias usara os campos corretos da API uazapi
+- PDFs, imagens, videos, audios e figurinhas do WhatsApp chegarao na plataforma
+- Fotos de perfil serao salvas automaticamente no primeiro contato
+- Contatos poderao ser enviados via WhatsApp
+- Stickers serao exibidos como imagens na conversa
 
