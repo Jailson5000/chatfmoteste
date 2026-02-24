@@ -1,104 +1,102 @@
 
 
-# Corrigir persistencia de midia enviada e exibicao
+# Plano: Melhorias nas Conexoes e Pausa do Evolution API
 
-## Problema raiz
+## 1. Mostrar ultimos 4 digitos do telefone como badge
 
-Ao enviar midia (imagem, documento, audio), o sistema:
-1. Envia o base64 para o WhatsApp via uazapi -- **funciona** (as midias chegam no WhatsApp)
-2. Mas **NAO salva o base64 no Storage** -- entao `media_url` fica `null` no banco
-3. Resultado: imagens mostram "Imagem nao disponivel", documentos mostram UUID em vez do nome, audios nao tocam
+Na pagina de Conexoes do tenant (`Connections.tsx`), a badge ao lado do nome mostra `instance_id.slice(0,4)` (ex: "INST", "F57B"). Trocar para mostrar os ultimos 4 digitos do telefone quando disponivel, e manter o `instance_id` como fallback.
 
-Confirmacao via banco de dados -- TODAS as midias enviadas recentemente tem `media_url: null`:
-```text
-[Imagem]   media_url: null  status: sent
-[document] media_url: null  status: sent
-[Audio]    media_url: null  status: sent
-```
+**Arquivo:** `src/pages/Connections.tsx` (linhas 700-704)
 
-As midias chegam no WhatsApp (confirmado pelos screenshots), mas nao sao visiveis na interface do MiauChat.
-
-## Solucao
-
-### Arquivo: `supabase/functions/evolution-api/index.ts` (funcao backgroundSendMedia)
-
-**Mudanca principal**: Apos enviar com sucesso, salvar o base64 no bucket `chat-media` do Storage e atualizar `media_url` com a URL publica.
-
-Dentro da funcao `backgroundSendMedia` (linha ~3473), apos o envio bem-sucedido e antes do update da mensagem:
-
-1. Se `body.mediaBase64` existe e `extractedMediaUrl` e null (caso uazapi que nao retorna URL):
-   - Determinar extensao do arquivo pelo mimeType
-   - Fazer upload do base64 para `chat-media/{conversationId}/{tempMessageId}.{ext}`
-   - Obter URL publica do Storage
-   - Usar essa URL como `media_url` no update da mensagem
-
-2. Tambem garantir que `body.fileName` seja preservado no `content` do documento (em vez de UUID)
-
+Antes:
 ```typescript
-// Apos envio bem-sucedido, persistir midia no Storage se nao tiver URL
-if (!extractedMediaUrl && body.mediaBase64 && conversationId) {
-  try {
-    const ext = getExtFromMime(body.mimeType || "application/octet-stream");
-    const storagePath = `${conversationId}/${tempMessageId}.${ext}`;
-    
-    // Decode base64 to Uint8Array
-    const binaryStr = atob(body.mediaBase64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-    
-    const { error: uploadError } = await supabaseClient.storage
-      .from("chat-media")
-      .upload(storagePath, bytes, {
-        contentType: body.mimeType || "application/octet-stream",
-        upsert: true,
-      });
-    
-    if (!uploadError) {
-      const { data: urlData } = supabaseClient.storage
-        .from("chat-media")
-        .getPublicUrl(storagePath);
-      extractedMediaUrl = urlData?.publicUrl || null;
-    }
-  } catch (storageErr) {
-    console.warn("[Evolution API] Failed to persist media to storage:", storageErr);
-  }
-}
+{instance.instance_id && (
+  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+    {instance.instance_id.slice(0, 4).toUpperCase()}
+  </Badge>
+)}
 ```
 
-3. Garantir que o `content` do documento mostre o nome real do arquivo:
-
-No update da mensagem (linha ~3476), adicionar logica para documentos:
+Depois:
 ```typescript
-const displayContent = body.mediaType === "document" && body.fileName
-  ? `[${body.fileName}]`
-  : (body.caption || mediaTypeDisplay);
+{(instance.phone_number || instance.instance_id) && (
+  <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+    {instance.phone_number 
+      ? `••${instance.phone_number.replace(/\D/g, '').slice(-4)}`
+      : instance.instance_id?.slice(0, 4).toUpperCase()}
+  </Badge>
+)}
 ```
 
-### Funcao auxiliar `getExtFromMime`
+Na pagina Global Admin (`GlobalAdminConnections.tsx`, linha 745), tambem mostrar os ultimos 4 digitos formatados no campo "Numero".
 
-Adicionar funcao simples no inicio da funcao ou inline:
+---
+
+## 2. Puxar numero automaticamente ao conectar
+
+Quando uma instancia conecta com sucesso (status muda para "connected"), o sistema ja faz `refetch()` mas nao puxa o telefone automaticamente. Adicionar chamada de `refreshPhone` apos conexao bem-sucedida.
+
+**Arquivo:** `src/pages/Connections.tsx`
+
+No bloco do Realtime subscription (linha ~182) e no `pollOnce` (linhas ~239, ~275), apos detectar `connected`:
 ```typescript
-function getExtFromMime(mime: string): string {
-  const map: Record<string, string> = {
-    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
-    "audio/ogg": "ogg", "audio/webm": "webm", "audio/mpeg": "mp3",
-    "video/mp4": "mp4", "application/pdf": "pdf",
-  };
-  return map[mime.split(";")[0]] || "bin";
-}
+// Apos refetch e fechar dialog
+refreshPhone.mutate(currentInstanceId);
 ```
 
-## Resumo de mudancas
+Isso garante que ao escanear o QR Code, o numero sera puxado imediatamente sem precisar clicar no botao manualmente.
+
+---
+
+## 3. Pausar o Evolution API
+
+O sistema nao usa mais o Evolution API, apenas uazapi. Para evitar chamadas desnecessarias:
+
+### 3a. Desabilitar health check automatico
+
+**Arquivo:** `src/hooks/useGlobalAdminInstances.tsx` (linhas 185-206)
+
+Desativar a query de health check do Evolution (que roda a cada 60s):
+```typescript
+const {
+  data: evolutionHealth,
+  isLoading: isHealthLoading,
+  refetch: refetchHealth,
+} = useQuery({
+  queryKey: ["evolution-health"],
+  queryFn: async (): Promise<EvolutionHealthStatus> => {
+    // Evolution API pausada - retornar status offline sem chamar a funcao
+    return {
+      status: "offline",
+      latency_ms: null,
+      message: "Evolution API pausada - usando uazapi",
+      checked_at: new Date().toISOString(),
+    };
+  },
+  enabled: false, // Desabilitado - nao usar Evolution
+  refetchInterval: undefined,
+  staleTime: Infinity,
+});
+```
+
+### 3b. Atualizar texto e referencias na pagina Global Admin
+
+**Arquivo:** `src/pages/global-admin/GlobalAdminConnections.tsx`
+
+- Linha 399: Mudar "Monitore e gerencie todas as instancias do Evolution API" para "Monitore e gerencie todas as instancias WhatsApp"
+- Linha 622: Mudar "Empresas por Conexao Evolution" para "Empresas por Conexao"
+
+### 3c. Desabilitar botoes de sync do Evolution
+
+Na pagina Global Admin, os botoes "Reaplicar Webhooks", "Forcar Sync Completo" e "Recriar Perdidas" dependem do Evolution API. Como o provedor ativo e o uazapi, esses botoes devem ser desabilitados ou ocultados para evitar erros.
+
+---
+
+## Resumo de arquivos
 
 | Arquivo | Mudanca |
 |---|---|
-| `supabase/functions/evolution-api/index.ts` | Salvar base64 no Storage apos envio bem-sucedido |
-| | Usar URL do Storage como `media_url` da mensagem |
-| | Mostrar nome real do arquivo em vez de UUID para documentos |
+| `src/pages/Connections.tsx` | Badge com ultimos 4 digitos do telefone; auto-refresh phone apos conexao |
+| `src/hooks/useGlobalAdminInstances.tsx` | Desativar health check do Evolution API |
+| `src/pages/global-admin/GlobalAdminConnections.tsx` | Atualizar textos; remover referencias ao Evolution |
 
-## Resultado esperado
-
-- Imagens enviadas ficarao visiveis na interface (URL do Storage)
-- Documentos mostrarao o nome correto do arquivo
-- Audios enviados terao URL para reproduzir
-- Tudo sera persistido permanentemente no Storage
