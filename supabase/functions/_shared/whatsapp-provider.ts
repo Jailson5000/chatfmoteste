@@ -560,10 +560,10 @@ const UazapiProvider = {
     };
 
     if (opts.mediaBase64) {
-      payload.base64 = opts.mediaBase64;
+      payload.file = opts.mediaBase64;
       payload.mimetype = opts.mimeType || "application/octet-stream";
     } else if (opts.mediaUrl) {
-      payload.url = opts.mediaUrl;
+      payload.file = opts.mediaUrl;
     }
 
     if (opts.fileName) {
@@ -834,13 +834,44 @@ const UazapiProvider = {
   },
 
   async sendAudio(config: ProviderConfig, opts: SendAudioOptions): Promise<SendMediaResult> {
-    // uazapi uses the same /send/media endpoint for audio
-    return UazapiProvider.sendMedia(config, {
+    const apiUrl = normalizeUrl(config.apiUrl);
+
+    // Use dedicated /send/audio endpoint for PTT voice notes
+    const payload = {
       number: opts.number,
-      mediaType: 'audio',
-      mediaBase64: opts.audioBase64,
-      mimeType: opts.mimeType || 'audio/ogg',
-    });
+      audio: opts.audioBase64,
+      ptt: true,
+      mimetype: opts.mimeType || "audio/ogg;codecs=opus",
+    };
+
+    const res = await fetchWithTimeout(
+      `${apiUrl}/send/audio`,
+      {
+        method: "POST",
+        headers: {
+          token: config.apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+      SEND_TIMEOUT_MS,
+    );
+
+    if (!res.ok) {
+      // Fallback: try /send/media with file field
+      console.warn("[UazapiProvider] /send/audio failed, falling back to /send/media");
+      return UazapiProvider.sendMedia(config, {
+        number: opts.number,
+        mediaType: 'audio',
+        mediaBase64: opts.audioBase64,
+        mimeType: opts.mimeType || 'audio/ogg',
+        ptt: true,
+      });
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const whatsappMessageId = data?.key?.id || data?.id || data?.messageId || null;
+    return { success: true, whatsappMessageId, raw: data };
   },
 
   async fetchProfilePicture(config: ProviderConfig, phoneNumber: string): Promise<FetchProfilePictureResult> {
