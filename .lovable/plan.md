@@ -1,105 +1,125 @@
 
 
-# Correcoes: Envio de Imagens por Template + Visual Global Admin Conexoes
-
-## Problema 1: IA nao envia imagens como template para o WhatsApp
-
-### Diagnostico confirmado pelos logs
-
-```
-ERROR [AI Chat] Failed to send template media to WhatsApp: {"error":"missing text for text message"}
-```
-
-O endpoint `/send/media` do uazapi requer o campo `type` para identificar o tipo de midia. O payload atual envia apenas `{ number, file }` mas falta `type: "image"`. Comparando com o `whatsapp-provider.ts` (que funciona corretamente), o payload correto e:
-
-```
-{ number, type: "image", file: mediaUrl }
-```
-
-O `whatsapp-provider.ts` na linha 567 mostra: `type: opts.mediaType` — o campo `type` e obrigatorio no uazapi.
-
-### Correcao
-
-**Arquivo: `supabase/functions/ai-chat/index.ts`** (linhas 2336-2340)
-
-Adicionar o campo `type` ao payload de midia uazapi, mapeando `finalMediaType` para o tipo correto:
-
-```typescript
-// ANTES:
-mediaPayload = { number: targetNumber, file: finalMediaUrl };
-
-// DEPOIS:
-mediaPayload = { 
-  number: targetNumber, 
-  file: finalMediaUrl, 
-  type: finalMediaType || 'image'  // 'image', 'video', 'document'
-};
-```
+# Auditoria Completa: Fluxos de Mensagens, Performance e Kanban
 
 ---
 
-## Problema 2: Global Admin Conexoes — Visual desatualizado
+## 1. Fluxos de Envio e Recebimento de Mensagens
 
-### Diagnostico
+### Estado Atual: Funcional com 2 problemas menores
 
-A pagina `GlobalAdminConnections.tsx` tem varios problemas:
+**Fluxo de Recebimento (uazapi-webhook) — OK**
+- Resolucao de conversa em 5 etapas (JID exato → JID qualquer instancia → telefone exato → telefone orfao → criar nova) — robusto
+- Criacao automatica de cliente e persistencia de avatar — OK
+- Deteccao de duplicatas por `whatsapp_message_id` — OK
+- Persistencia de midia via base64 ou `/message/download` com fallback — OK
+- Auto-desarquivamento com restauracao de handler — OK
+- Processamento de IA com fragmentacao inteligente (`responseParts` + fallback 400 chars) — OK (corrigido recentemente)
+- Envio de templates com `type` field para midia — OK (corrigido recentemente)
 
-1. **Header diz "Evolution API"** — mas o provedor principal e uazapi
-2. **Card de status global** mostra "Evolution API" com status hardcoded "offline/pausada"
-3. **Metricas (cards)** referenciam `evolutionHealth?.instances_summary` que esta sempre null (query desabilitada)
-4. **"Empresas por Conexao"** agrupa por `evolution_api_connections` — instancias uazapi nao tem match e caem em "unknown"
-5. **Titulo da tabela** diz "Instancias do Evolution"
-6. **EvolutionApiConnectionsCard** mostra "Provedores Evolution API" — irrelevante para uazapi
-7. **Nao mostra o provedor** de cada instancia (evolution vs uazapi)
-8. **InstanceHealthSummary** busca direto de `whatsapp_instances` (funciona, mas nao filtra por provedor)
+**Fluxo de Envio (evolution-api) — OK**
+- Usa `whatsapp-provider.ts` abstraction para roteamento uazapi/evolution — OK
+- Envio assincrono com `EdgeRuntime.waitUntil` — OK
+- Reconciliacao de IDs (temp → real) via Realtime — OK
 
-### Correcao
+**Fluxo Realtime (useMessagesWithPagination) — OK com 1 bug**
+- INSERT: Merge otimista com 5 estrategias de deduplicacao — robusto
+- UPDATE: Reconciliacao de status/midia — OK
+- Scroll anchoring para paginacao — OK
+- Fallback polling a cada 3 segundos — OK
 
-**Arquivo: `src/pages/global-admin/GlobalAdminConnections.tsx`**
+### Bug Encontrado: Polling query incompleta
 
-Mudancas visuais e funcionais:
+No `useMessagesWithPagination.tsx`, linha 865, a query de polling esta faltando `client_reaction`:
 
-1. **Header**: Mudar "Conexoes WhatsApp" (ja esta) — OK, manter
-2. **Remover card "Evolution API"** (status global hardcoded offline) — substituir por card resumo que mostra contagem por provedor (uazapi vs evolution)
-3. **Cards de metricas**: Usar dados locais (`instances.filter(...)`) em vez de `evolutionHealth?.instances_summary` — ja faz fallback, mas remover referencia ao evolution
-4. **Adicionar coluna "Provedor"** na tabela — mostrar badge "uazapi" ou "evolution" por instancia (requer buscar `api_provider` do `whatsapp_instances_safe`)
-5. **Titulo da tabela**: Mudar "Instancias do Evolution" para "Todas as Instancias"
-6. **Agrupamento**: Em vez de agrupar por `evolution_api_connections`, agrupar por provedor (`api_provider`) — instancias uazapi num grupo, evolution noutro
-7. **Remover EvolutionApiConnectionsCard** da exibicao principal (mover para aba secundaria ou esconder) — esta irrelevante para uazapi
-
-**Arquivo: `src/hooks/useGlobalAdminInstances.tsx`**
-
-- Incluir `api_provider` no tipo `InstanceWithCompany`
-- O campo `api_provider` ja esta na view `whatsapp_instances_safe` (confirmado na migracao)
-
-### Resumo visual esperado
-
-```text
-+------------------------------------------+
-| Conexoes WhatsApp                        |
-| Monitore todas as instancias             |
-+------------------------------------------+
-
-+--------+  +-----------+  +----------+  +----------+  +------+
-| Total  |  | Conectadas|  | Conectando|  |Desconect.|  | Erro |
-|   4    |  |    3      |  |    0      |  |    1     |  |  0   |
-+--------+  +-----------+  +----------+  +----------+  +------+
-
-+------------------------------------------+
-| Todas as Instancias (4)                  |
-+------------------------------------------+
-| Empresa  | Instancia | Provedor | Num... |
-|----------|-----------|----------|--------|
-| FMO      | FMOANT..  | uazapi   | +55... |
-| Teste    | Teste1    | uazapi   | +55... |
-+------------------------------------------+
+```
+Linha 148 (initial load): "...my_reaction, client_reaction"  ← CORRETO
+Linha 222 (load more):    "...my_reaction, client_reaction"  ← CORRETO  
+Linha 865 (polling):      "...my_reaction"                   ← FALTA client_reaction
 ```
 
-## Resumo de mudancas
+**Impacto**: Reacoes de emoji do cliente podem desaparecer se capturadas via polling em vez de Realtime. Baixa severidade, pois Realtime normalmente captura primeiro.
 
-| Arquivo | Mudanca | Prioridade |
-|---|---|---|
-| `ai-chat/index.ts` | Adicionar campo `type` ao payload de midia uazapi | CRITICO |
-| `useGlobalAdminInstances.tsx` | Adicionar `api_provider` ao tipo e ao mapeamento | MEDIO |
-| `GlobalAdminConnections.tsx` | Remover card Evolution, renomear titulos, adicionar coluna provedor, agrupar por provedor | MEDIO |
+**Correcao**: Adicionar `, client_reaction` na query de polling (linha 865).
+
+---
+
+## 2. Velocidade de Carregamento
+
+### Metricas Atuais (Preview/Dev)
+
+| Metrica | Valor | Avaliacao |
+|---------|-------|-----------|
+| TTFB | 622ms | Aceitavel |
+| FCP | 5088ms | Lento (dev mode) |
+| DOM Content Loaded | 4426ms | Lento (dev mode) |
+| CLS | 0.0002 | Excelente |
+| JS Heap | 14.8MB | Bom |
+| DOM Nodes | 831 | Bom |
+| Layout Duration | 67ms | Bom |
+| Scripts | 120 (1346KB) | Alto para dev |
+
+**Nota importante**: Esses numeros sao do ambiente de DESENVOLVIMENTO (Vite dev server). Em producao, com bundling e minificacao, o FCP deve ficar em ~1500ms conforme ja documentado.
+
+### Otimizacoes ja implementadas — OK
+- Lazy loading em 29+ rotas via `React.lazy` com retry — OK
+- `staleTime` global 2min / `gcTime` 10min — OK
+- `RealtimeSyncProvider` apenas no AppLayout (nao no Global Admin) — OK
+- Consolidacao de Realtime (18 → 3-4 canais) — OK
+- Font externo (Google Fonts) como unico recurso render-blocking — aceitavel
+
+### Nenhuma acao necessaria
+A performance esta otimizada para producao. Os numeros altos de FCP sao exclusivamente do ambiente de preview/dev.
+
+---
+
+## 3. Kanban de Conversas
+
+### Estado Atual: Funcional com 1 bug de UI
+
+**Funcionalidades OK:**
+- Agrupamento por departamento com drag-and-drop — OK
+- Agrupamento por status com drag-and-drop de clientes — OK
+- Coluna "Sem Departamento" / "Sem Status" — OK
+- Coluna de Arquivados com permissao — OK
+- Reordenacao de departamentos via drag — OK
+- Painel lateral (KanbanChatPanel) com injecao de estado — OK
+- Auto-load de todas conversas para visao completa — OK
+- Filtros multi-select (responsavel, status, departamento, tags, conexao, data) — OK
+- Lock otimista de 3 segundos contra race conditions — OK
+
+### Bug Encontrado: Modos "Responsavel" e "Conexao" nao implementados
+
+O dropdown "Agrupar por" oferece 4 opcoes:
+1. **Departamento** — Funciona ✓
+2. **Status** — Funciona ✓
+3. **Responsavel** — Mostra colunas de STATUS (bug)
+4. **Conexao** — Mostra colunas de STATUS (bug)
+
+A causa: o JSX usa um ternario simples `groupBy === 'department' ? ... : ...` que so distingue departamento dos demais. Os modos "responsible" e "connection" caem no branch else e renderizam como status.
+
+**Impacto**: Medio. O usuario seleciona "Responsavel" esperando ver colunas por atendente/IA, mas ve colunas de status.
+
+**Correcao**: Implementar as renderizacoes para `groupBy === 'responsible'` (colunas: cada membro + "Sem Responsavel") e `groupBy === 'connection'` (colunas: cada instancia WhatsApp + "Sem Conexao").
+
+---
+
+## 4. Kanban de Tarefas (TaskKanbanView)
+
+### Estado: Funcional — OK
+- 3 colunas (A Fazer, Em Progresso, Concluido) com drag-and-drop via @dnd-kit — OK
+- DragOverlay para feedback visual — OK
+- Ativacao com distancia de 8px (evita cliques acidentais) — OK
+- Ordenacao por position — OK
+
+---
+
+## Resumo de Acoes
+
+| # | Problema | Severidade | Arquivo | Correcao |
+|---|----------|------------|---------|----------|
+| 1 | Polling falta `client_reaction` | Baixa | `useMessagesWithPagination.tsx` L865 | Adicionar `, client_reaction` |
+| 2 | Kanban "Responsavel" e "Conexao" nao implementados | Media | `Kanban.tsx` L476-618 | Implementar renderizacao de colunas para esses modos |
+
+Todos os outros fluxos — recebimento, envio, IA, midia, deduplicacao, Realtime, performance — estao corretos e otimizados.
 
