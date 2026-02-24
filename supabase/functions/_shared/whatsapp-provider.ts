@@ -666,13 +666,36 @@ const UazapiProvider = {
     }
 
     const data = await res.json().catch(() => ({}));
+    console.log("[UazapiProvider] getStatus raw response:", JSON.stringify(data).slice(0, 500));
     const state = data?.status || data?.state || "unknown";
 
     let status = "disconnected";
     if (state === "connected" || state === "open") status = "connected";
     else if (state === "connecting" || state === "qr") status = "connecting";
 
-    const phoneNumber = data?.phone || data?.number || data?.ownerJid?.split("@")[0] || null;
+    // Expanded phone extraction — try many possible fields
+    let phoneNumber = data?.phone || data?.number || data?.user ||
+      data?.me?.user || data?.me?.id?.split("@")[0] ||
+      data?.ownerJid?.split("@")[0] || data?.jid?.split("@")[0] || null;
+
+    // Fallback: if connected but no phone, try GET /me endpoint
+    if (!phoneNumber && status === "connected") {
+      try {
+        const meRes = await fetchWithTimeout(`${apiUrl}/me`, {
+          method: "GET",
+          headers: { token: config.apiKey, "Content-Type": "application/json" },
+        }, 8000);
+        if (meRes.ok) {
+          const meData = await meRes.json().catch(() => ({}));
+          console.log("[UazapiProvider] /me fallback response:", JSON.stringify(meData).slice(0, 500));
+          phoneNumber = meData?.phone || meData?.number || meData?.user ||
+            meData?.me?.user || meData?.me?.id?.split("@")[0] ||
+            meData?.jid?.split("@")[0] || meData?.id?.split("@")[0] || null;
+        }
+      } catch (e) {
+        console.log("[UazapiProvider] /me fallback failed (non-fatal):", e);
+      }
+    }
 
     return { status, phoneNumber };
   },

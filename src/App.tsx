@@ -18,55 +18,71 @@ import { Loader2 } from "lucide-react";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 
-// All other pages are lazy-loaded
-const AuthCallback = React.lazy(() => import("./pages/AuthCallback"));
-const MetaAuthCallback = React.lazy(() => import("./pages/MetaAuthCallback"));
-const ResetPassword = React.lazy(() => import("./pages/ResetPassword"));
-const ChangePassword = React.lazy(() => import("./pages/ChangePassword"));
-const Dashboard = React.lazy(() => import("./pages/Dashboard"));
-const Conversations = React.lazy(() => import("./pages/Conversations"));
-const Kanban = React.lazy(() => import("./pages/Kanban"));
-const Settings = React.lazy(() => import("./pages/Settings"));
-const Contacts = React.lazy(() => import("./pages/Contacts"));
-const Connections = React.lazy(() => import("./pages/Connections"));
-const AIAgents = React.lazy(() => import("./pages/AIAgents"));
-const AIAgentEdit = React.lazy(() => import("./pages/AIAgentEdit"));
-const Tasks = React.lazy(() => import("./pages/Tasks"));
-const Onboarding = React.lazy(() => import("./pages/Onboarding"));
-const NotFound = React.lazy(() => import("./pages/NotFound"));
-const AgendaPro = React.lazy(() => import("./pages/AgendaPro"));
-const KnowledgeBase = React.lazy(() => import("./pages/KnowledgeBase"));
-const AIVoice = React.lazy(() => import("./pages/AIVoice"));
-const Profile = React.lazy(() => import("./pages/Profile"));
-const Register = React.lazy(() => import("./pages/Register"));
-const PaymentSuccess = React.lazy(() => import("./pages/PaymentSuccess"));
-const PrivacyPolicy = React.lazy(() => import("./pages/PrivacyPolicy"));
-const TermsOfService = React.lazy(() => import("./pages/TermsOfService"));
-const PublicBooking = React.lazy(() => import("./pages/PublicBooking"));
-const ConfirmAppointment = React.lazy(() => import("./pages/ConfirmAppointment"));
-const Support = React.lazy(() => import("./pages/Support"));
-const Tutorials = React.lazy(() => import("./pages/Tutorials"));
+// Helper: retry lazy imports with auto-reload on stale chunk errors
+function lazyWithRetry(importFn: () => Promise<any>) {
+  return React.lazy(() =>
+    importFn().catch(() => {
+      const hasReloaded = sessionStorage.getItem("chunk_reload");
+      if (!hasReloaded) {
+        sessionStorage.setItem("chunk_reload", "1");
+        window.location.reload();
+        return { default: () => null } as any;
+      }
+      sessionStorage.removeItem("chunk_reload");
+      throw new Error("Failed to load page after retry");
+    })
+  );
+}
+
+// All other pages are lazy-loaded with retry
+const AuthCallback = lazyWithRetry(() => import("./pages/AuthCallback"));
+const MetaAuthCallback = lazyWithRetry(() => import("./pages/MetaAuthCallback"));
+const ResetPassword = lazyWithRetry(() => import("./pages/ResetPassword"));
+const ChangePassword = lazyWithRetry(() => import("./pages/ChangePassword"));
+const Dashboard = lazyWithRetry(() => import("./pages/Dashboard"));
+const Conversations = lazyWithRetry(() => import("./pages/Conversations"));
+const Kanban = lazyWithRetry(() => import("./pages/Kanban"));
+const Settings = lazyWithRetry(() => import("./pages/Settings"));
+const Contacts = lazyWithRetry(() => import("./pages/Contacts"));
+const Connections = lazyWithRetry(() => import("./pages/Connections"));
+const AIAgents = lazyWithRetry(() => import("./pages/AIAgents"));
+const AIAgentEdit = lazyWithRetry(() => import("./pages/AIAgentEdit"));
+const Tasks = lazyWithRetry(() => import("./pages/Tasks"));
+const Onboarding = lazyWithRetry(() => import("./pages/Onboarding"));
+const NotFound = lazyWithRetry(() => import("./pages/NotFound"));
+const AgendaPro = lazyWithRetry(() => import("./pages/AgendaPro"));
+const KnowledgeBase = lazyWithRetry(() => import("./pages/KnowledgeBase"));
+const AIVoice = lazyWithRetry(() => import("./pages/AIVoice"));
+const Profile = lazyWithRetry(() => import("./pages/Profile"));
+const Register = lazyWithRetry(() => import("./pages/Register"));
+const PaymentSuccess = lazyWithRetry(() => import("./pages/PaymentSuccess"));
+const PrivacyPolicy = lazyWithRetry(() => import("./pages/PrivacyPolicy"));
+const TermsOfService = lazyWithRetry(() => import("./pages/TermsOfService"));
+const PublicBooking = lazyWithRetry(() => import("./pages/PublicBooking"));
+const ConfirmAppointment = lazyWithRetry(() => import("./pages/ConfirmAppointment"));
+const Support = lazyWithRetry(() => import("./pages/Support"));
+const Tutorials = lazyWithRetry(() => import("./pages/Tutorials"));
 
 // Global Admin pages
-const GlobalAdminAuth = React.lazy(() => import("./pages/global-admin/GlobalAdminAuth"));
-const GlobalAdminDashboard = React.lazy(() => import("./pages/global-admin/GlobalAdminDashboard"));
-const GlobalAdminCompanies = React.lazy(() => import("./pages/global-admin/GlobalAdminCompanies"));
-const GlobalAdminConnections = React.lazy(() => import("./pages/global-admin/GlobalAdminConnections"));
-const GlobalAdminPlans = React.lazy(() => import("./pages/global-admin/GlobalAdminPlans"));
-const GlobalAdminPayments = React.lazy(() => import("./pages/global-admin/GlobalAdminPayments"));
-const GlobalAdminUsers = React.lazy(() => import("./pages/global-admin/GlobalAdminUsers"));
-const GlobalAdminMonitoring = React.lazy(() => import("./pages/global-admin/GlobalAdminMonitoring"));
-const GlobalAdminSettings = React.lazy(() => import("./pages/global-admin/GlobalAdminSettings"));
-const GlobalAdminN8NSettings = React.lazy(() => import("./pages/global-admin/GlobalAdminN8NSettings"));
-const GlobalAdminAIAPIs = React.lazy(() => import("./pages/global-admin/GlobalAdminAIAPIs"));
-const GlobalAdminAuditLogs = React.lazy(() => import("./pages/global-admin/GlobalAdminAuditLogs"));
-const GlobalAdminProvisioningDashboard = React.lazy(() => import("./pages/global-admin/GlobalAdminProvisioningDashboard"));
-const GlobalAdminAlertHistory = React.lazy(() => import("./pages/global-admin/GlobalAdminAlertHistory"));
-const GlobalAdminTemplateBase = React.lazy(() => import("./pages/global-admin/GlobalAdminTemplateBase"));
-const GlobalAdminAgentTemplates = React.lazy(() => import("./pages/global-admin/GlobalAdminAgentTemplates"));
-const GlobalAdminTickets = React.lazy(() => import("./pages/global-admin/GlobalAdminTickets"));
-const GlobalAdminTutorials = React.lazy(() => import("./pages/global-admin/GlobalAdminTutorials"));
-const GlobalAdminOnboarding = React.lazy(() => import("./pages/global-admin/GlobalAdminOnboarding"));
+const GlobalAdminAuth = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminAuth"));
+const GlobalAdminDashboard = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminDashboard"));
+const GlobalAdminCompanies = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminCompanies"));
+const GlobalAdminConnections = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminConnections"));
+const GlobalAdminPlans = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminPlans"));
+const GlobalAdminPayments = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminPayments"));
+const GlobalAdminUsers = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminUsers"));
+const GlobalAdminMonitoring = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminMonitoring"));
+const GlobalAdminSettings = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminSettings"));
+const GlobalAdminN8NSettings = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminN8NSettings"));
+const GlobalAdminAIAPIs = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminAIAPIs"));
+const GlobalAdminAuditLogs = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminAuditLogs"));
+const GlobalAdminProvisioningDashboard = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminProvisioningDashboard"));
+const GlobalAdminAlertHistory = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminAlertHistory"));
+const GlobalAdminTemplateBase = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminTemplateBase"));
+const GlobalAdminAgentTemplates = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminAgentTemplates"));
+const GlobalAdminTickets = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminTickets"));
+const GlobalAdminTutorials = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminTutorials"));
+const GlobalAdminOnboarding = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminOnboarding"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
