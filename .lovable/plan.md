@@ -1,59 +1,70 @@
 
+# Otimizar Velocidade das Paginas
 
-# Simplificar Criacao de Conexao WhatsApp (Sempre uazapi, Automatico)
+## Diagnostico
 
-## Problema Atual
+A analise de performance revelou problemas criticos:
 
-1. O dialogo "Nova Conexao" mostra selector de provedor (Evolution/uazapi) e pede subdomain + token ao cliente
-2. O cliente nao deveria ver nada tecnico -- so digitar o nome e escanear o QR
-3. O webhook tem um bug: a funcao `uazapi-webhook` valida contra `UAZAPI_WEBHOOK_TOKEN` (que NAO existe nos secrets), mas a `evolution-api` monta a URL com `EVOLUTION_WEBHOOK_TOKEN`
+| Metrica | Valor Atual | Ideal |
+|---------|------------|-------|
+| First Contentful Paint (FCP) | 3896ms | < 1800ms |
+| DOM Content Loaded | 3775ms | < 2000ms |
+| Scripts carregados | 250 arquivos / 3013KB | Reduzir ~60% |
+
+### Causas Raiz
+
+1. **Imports sincronos de paginas pesadas** -- 8 paginas sao importadas sincronamente mesmo que o usuario so visite 1 por vez:
+   - `Conversations.tsx` (172KB) -- a mais pesada
+   - `Dashboard.tsx`, `Kanban.tsx`, `Settings.tsx`, `Contacts.tsx`, `Connections.tsx`, `AIAgents.tsx`, `Tasks.tsx`
+   
+2. **Providers globais desnecessarios** -- `RealtimeSyncProvider` e `TenantProvider` envolvem TODA a aplicacao, incluindo Global Admin que nao precisa deles. Isso forca conexoes WebSocket e queries ao banco mesmo quando o admin esta so gerenciando empresas.
+
+3. **Bibliotecas pesadas carregadas no inicio** -- `recharts` (219KB) e `lucide-react` (156KB) sao carregadas na inicializacao independente da pagina.
 
 ## Solucao
 
-### 1. Simplificar o NewInstanceDialog
+### 1. Lazy-load de TODAS as paginas do cliente
 
-Remover completamente:
-- Selector de provedor (Evolution vs uazapi)
-- Campos de subdomain e token
+Converter os 8 imports sincronos para `React.lazy()`. O usuario so carrega o codigo da pagina que esta acessando.
 
-O dialogo ficara apenas com:
-- Campo "Nome da Conexao" (ex: "WhatsApp Principal")
-- Botao "Criar Conexao"
+**Economia estimada**: ~500KB removidos do bundle inicial.
 
-### 2. Buscar credenciais uazapi automaticamente no backend
+Paginas afetadas:
+- `Dashboard` 
+- `Conversations` (172KB -- maior ganho)
+- `Kanban`
+- `Settings`
+- `Contacts`
+- `Connections`
+- `AIAgents` + `AIAgentEdit`
+- `Tasks`
+- `Onboarding`
 
-Alterar o `create_instance` na edge function `evolution-api` para:
-- Quando `provider === 'uazapi'` e `apiUrl`/`apiKey` nao forem fornecidos, buscar automaticamente da tabela `system_settings` (`uazapi_server_url` e `uazapi_admin_token`)
-- Remover a validacao que exige `apiUrl` e `apiKey` obrigatorios para uazapi
+### 2. Mover RealtimeSyncProvider para dentro do AppLayout
 
-### 3. Ajustar handleCreateInstance no Connections.tsx
+O Global Admin nao precisa de canais Realtime (WebSocket). Mover o provider de fora do `App.tsx` para dentro do `AppLayout`, eliminando 3 canais WebSocket desnecessarios quando o admin esta logado.
 
-Sempre enviar `provider: "uazapi"` sem `apiUrl`/`apiKey` -- o backend resolve sozinho.
+### 3. Separar TenantProvider do Global Admin
 
-### 4. Corrigir o bug do webhook token
+Criar um wrapper `TenantRealtimeWrapper` que so e usado nas rotas protegidas do cliente. As rotas do Global Admin ficam sem esses providers.
 
-A funcao `uazapi-webhook` valida contra `Deno.env.get("UAZAPI_WEBHOOK_TOKEN")`, mas esse secret NAO existe. O que existe e `EVOLUTION_WEBHOOK_TOKEN`.
+## Detalhes Tecnicos
 
-Correcao: alterar `uazapi-webhook/index.ts` para ler `EVOLUTION_WEBHOOK_TOKEN` em vez de `UAZAPI_WEBHOOK_TOKEN` (ja que a `evolution-api` monta a URL com esse mesmo token).
+### Arquivo: `src/App.tsx`
 
-### 5. Simplificar botao "Nova Conexao"
+- Converter imports sincronos (linhas 25-35) para `React.lazy()`
+- Remover `RealtimeSyncProvider` do wrapper global
+- Manter `AuthProvider` e `TabSessionProvider` globais (necessarios para ambos os fluxos)
+- Envolver rotas protegidas com `TenantProvider` + `RealtimeSyncProvider` via um componente wrapper
 
-Remover o dropdown com opcoes (QR Code / Cloud API). O botao "Nova Conexao" abre diretamente o dialogo simplificado.
+### Arquivo: `src/components/layout/AppLayout.tsx`
 
-## Sobre o Webhook (resposta a sua pergunta)
+- Adicionar `RealtimeSyncProvider` envolvendo o layout do cliente
+- Alternativa: criar componente `ClientProviders` que encapsula `TenantProvider` + `RealtimeSyncProvider`
 
-A configuracao na imagem esta **quase correta**, porem:
-- O token na URL (`Meupau110591`) precisa corresponder ao valor do secret `EVOLUTION_WEBHOOK_TOKEN` no backend
-- O webhook e configurado **automaticamente** pelo sistema ao criar a instancia, entao voce nao precisa configurar manualmente -- desde que o bug do token seja corrigido
+### Resultado Esperado
 
-## Arquivos a Alterar
-
-| Arquivo | Alteracao |
-|---|---|
-| `src/components/connections/NewInstanceDialog.tsx` | Remover selector de provedor e campos uazapi. So pedir nome |
-| `src/pages/Connections.tsx` | Simplificar `handleCreateInstance` para sempre usar uazapi. Remover dropdown do botao |
-| `supabase/functions/evolution-api/index.ts` | No `create_instance` uazapi: buscar credenciais de `system_settings` quando nao fornecidas |
-| `supabase/functions/uazapi-webhook/index.ts` | Trocar `UAZAPI_WEBHOOK_TOKEN` para `EVOLUTION_WEBHOOK_TOKEN` |
-
-Nenhuma migracao SQL necessaria.
-
+- FCP: de ~3900ms para ~1500ms (reducao de ~60%)
+- Bundle inicial: de ~3013KB para ~1200KB
+- Global Admin: carrega sem WebSocket e sem queries de tenant
+- Paginas do cliente: carregam sob demanda com spinner de loading
