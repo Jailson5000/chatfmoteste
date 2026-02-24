@@ -1,49 +1,35 @@
 
-# Corrigir timestamp do uazapi-webhook
+
+# Corrigir status da conversa no uazapi-webhook
 
 ## Problema
 
-Os logs mostram o erro:
+O webhook esta recebendo as mensagens corretamente do uazapi (evento detectado, instancia encontrada, mensagem parseada), porem falha ao criar a conversa no banco de dados:
+
 ```
-time zone displacement out of range: "+058119-04-30T10:50:00.000Z"
+invalid input value for enum case_status: "open"
 ```
 
-O uazapi envia `messageTimestamp` em **milissegundos** (ex: `1771901609000`), mas o codigo assume que e em **segundos** (como a Evolution API) e multiplica por 1000, gerando uma data no ano 58119.
+A coluna `status` da tabela `conversations` usa o enum `case_status` com valores: `novo_contato`, `triagem_ia`, `aguardando_documentos`, `em_analise`, `em_andamento`, `encerrado`.
+
+O `uazapi-webhook` tenta inserir `status: "open"`, que nao existe no enum. Todos os outros webhooks (evolution-webhook, meta-webhook, ai-chat, etc.) usam `"novo_contato"`.
 
 ## Solucao
 
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts` (linha 360-362)
+### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
 
-Detectar automaticamente se o timestamp esta em segundos ou milissegundos. Timestamps em segundos tem ~10 digitos; em milissegundos, ~13 digitos.
+Alterar a linha que cria a conversa, trocando `status: "open"` por `status: "novo_contato"`:
 
-**Antes:**
 ```typescript
-const timestamp = msg.messageTimestamp 
-  ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
-  : new Date().toISOString();
+// ANTES
+status: "open",
+
+// DEPOIS
+status: "novo_contato",
 ```
 
-**Depois:**
-```typescript
-const rawTs = Number(msg.messageTimestamp);
-let timestamp: string;
-if (!msg.messageTimestamp || isNaN(rawTs) || rawTs <= 0) {
-  timestamp = new Date().toISOString();
-} else if (rawTs > 1e12) {
-  // Already in milliseconds
-  timestamp = new Date(rawTs).toISOString();
-} else {
-  // In seconds, convert to ms
-  timestamp = new Date(rawTs * 1000).toISOString();
-}
-```
+## Impacto
 
-Isso cobre ambos os formatos de forma segura. Valores acima de `1e12` (1 trilhao) sao claramente milissegundos; abaixo disso, sao segundos.
+- Apenas 1 linha alterada em 1 arquivo
+- Apos o deploy, mensagens recebidas do uazapi criarao conversas corretamente e aparecerao na interface
 
-## Resultado
-
-As mensagens recebidas via uazapi terao timestamps validos, permitindo que conversas e mensagens sejam criadas corretamente no banco de dados.
-
-| Arquivo | Mudanca |
-|---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Corrigir parsing de timestamp para suportar ms e s |
