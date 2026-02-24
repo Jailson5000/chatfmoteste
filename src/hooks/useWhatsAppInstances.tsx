@@ -121,10 +121,19 @@ export function useWhatsAppInstances() {
 
   const createInstance = useMutation({
     mutationFn: async ({ instanceName, displayName, apiUrl, apiKey, provider }: CreateInstanceParams): Promise<EvolutionResponse> => {
-      // Check limit before creating
-      const limitCheck = await checkLimit('instances', 1, true);
-      if (!limitCheck.allowed) {
-        throw new Error(limitCheck.message || "Limite de conexões WhatsApp atingido. Considere fazer um upgrade do seu plano.");
+      // Check limit before creating (fail-open: if check returns error/empty, allow action)
+      try {
+        const limitCheck = await checkLimit('instances', 1, true);
+        if (limitCheck.allowed === false && !limitCheck.error) {
+          throw new Error(limitCheck.message || "Limite de conexões WhatsApp atingido. Considere fazer um upgrade do seu plano.");
+        }
+      } catch (limitErr: any) {
+        // If the error is our own limit message, re-throw it
+        if (limitErr.message?.includes("Limite de conexões")) {
+          throw limitErr;
+        }
+        // Otherwise fail-open: log and continue
+        console.warn("[useWhatsAppInstances] Limit check failed (fail-open), proceeding:", limitErr.message);
       }
 
       console.log("[useWhatsAppInstances] Creating instance:", instanceName, "Display:", displayName, "Provider:", provider || "evolution");
@@ -167,9 +176,18 @@ export function useWhatsAppInstances() {
     },
     onError: (error: Error) => {
       console.error("[useWhatsAppInstances] Create instance error:", error);
+      // Translate technical errors to user-friendly messages
+      let userMessage = error.message;
+      if (/failed \(401\)/i.test(userMessage) || /invalid token/i.test(userMessage)) {
+        userMessage = "Erro de autenticação com o servidor. Contate o suporte.";
+      } else if (/failed \(5\d{2}\)/i.test(userMessage)) {
+        userMessage = "Servidor temporariamente indisponível. Tente novamente em alguns minutos.";
+      } else if (/failed \(4\d{2}\)/i.test(userMessage)) {
+        userMessage = "Erro na comunicação com o servidor. Contate o suporte.";
+      }
       toast({
         title: "Erro ao criar instância",
-        description: error.message,
+        description: userMessage,
         variant: "destructive",
       });
     },
