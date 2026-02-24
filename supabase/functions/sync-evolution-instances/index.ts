@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -349,10 +349,11 @@ serve(async (req) => {
       );
     }
 
-    // Fetch all whatsapp_instances from our database
+    // Fetch only Evolution API instances from our database (skip uazapi instances)
     const { data: dbInstances, error: dbError } = await supabaseAdmin
       .from("whatsapp_instances")
-      .select("*");
+      .select("*")
+      .or("api_provider.eq.evolution,api_provider.is.null");
 
     if (dbError) {
       throw new Error(`Failed to fetch DB instances: ${dbError.message}`);

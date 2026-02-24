@@ -4118,21 +4118,67 @@ serve(async (req) => {
       }
 
       case "global_get_status": {
+        if (!body.instanceName && !body.instanceId) {
+          throw new Error("instanceName or instanceId is required");
+        }
+
+        // Resolve instance from DB to get provider info
+        let resolvedInstance: any = null;
+        if (body.instanceId) {
+          const { data } = await supabaseClient
+            .from("whatsapp_instances")
+            .select("instance_name, api_provider, api_url, api_key")
+            .eq("id", body.instanceId)
+            .single();
+          resolvedInstance = data;
+        } else if (body.instanceName) {
+          const { data } = await supabaseClient
+            .from("whatsapp_instances")
+            .select("instance_name, api_provider, api_url, api_key")
+            .eq("instance_name", body.instanceName)
+            .maybeSingle();
+          resolvedInstance = data;
+        }
+
+        const isUazapiGlobalStatus = resolvedInstance?.api_provider === "uazapi";
+
+        if (isUazapiGlobalStatus && resolvedInstance?.api_url && resolvedInstance?.api_key) {
+          // Uazapi: use instance-level credentials
+          const uazApiUrl = normalizeUrl(resolvedInstance.api_url);
+          console.log(`[Evolution API] GLOBAL Getting status (uazapi) for: ${resolvedInstance.instance_name}`);
+          const statusResponse = await fetchWithTimeout(`${uazApiUrl}/instance/status`, {
+            method: "GET",
+            headers: { token: resolvedInstance.api_key, "Content-Type": "application/json" },
+          });
+          if (!statusResponse.ok) {
+            return new Response(JSON.stringify({ success: true, status: "disconnected", evolutionState: "not_found" }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          const statusData = await statusResponse.json();
+          const state = statusData?.status || statusData?.state || "unknown";
+          let dbStatus = "disconnected";
+          if (state === "connected" || state === "open") dbStatus = "connected";
+          else if (state === "connecting" || state === "qr") dbStatus = "connecting";
+          return new Response(
+            JSON.stringify({ success: true, status: dbStatus, evolutionState: state }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // Evolution: use global credentials
         const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
         const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
         
         if (!globalApiUrl || !globalApiKey) {
           throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
         }
-        
-        if (!body.instanceName) {
-          throw new Error("instanceName is required");
-        }
 
+        const instanceNameForStatus = resolvedInstance?.instance_name || body.instanceName;
         const apiUrl = normalizeUrl(globalApiUrl);
-        console.log(`[Evolution API] GLOBAL Getting status for: ${body.instanceName}`);
+        console.log(`[Evolution API] GLOBAL Getting status for: ${instanceNameForStatus}`);
 
-        const statusResponse = await fetchWithTimeout(`${apiUrl}/instance/connectionState/${body.instanceName}`, {
+        const statusResponse = await fetchWithTimeout(`${apiUrl}/instance/connectionState/${instanceNameForStatus}`, {
           method: "GET",
           headers: {
             apikey: globalApiKey,
@@ -4141,7 +4187,6 @@ serve(async (req) => {
         });
 
         if (!statusResponse.ok) {
-          const errorText = await safeReadResponseText(statusResponse);
           return new Response(JSON.stringify({ success: true, status: "disconnected", evolutionState: "not_found" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
@@ -4164,29 +4209,69 @@ serve(async (req) => {
       }
 
       case "global_configure_webhook": {
-        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
-        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
-        
-        if (!globalApiUrl || !globalApiKey) {
-          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
-        }
-        
         // Support both instanceName (preferred) and instanceId (fallback)
         let resolvedInstanceName = body.instanceName;
-        if (!resolvedInstanceName && body.instanceId) {
-          console.log(`[Evolution API] Resolving instanceName from instanceId: ${body.instanceId}`);
+        let resolvedInstanceRow: any = null;
+
+        if (body.instanceId) {
+          console.log(`[Evolution API] Resolving instance from instanceId: ${body.instanceId}`);
           const { data: instanceRow, error: lookupError } = await supabaseClient
             .from("whatsapp_instances")
-            .select("instance_name")
+            .select("instance_name, api_provider, api_url, api_key")
             .eq("id", body.instanceId)
             .single();
           if (lookupError || !instanceRow) {
             throw new Error(`Instance not found for id: ${body.instanceId}`);
           }
           resolvedInstanceName = instanceRow.instance_name;
+          resolvedInstanceRow = instanceRow;
+        } else if (body.instanceName) {
+          const { data: instanceRow } = await supabaseClient
+            .from("whatsapp_instances")
+            .select("instance_name, api_provider, api_url, api_key")
+            .eq("instance_name", body.instanceName)
+            .maybeSingle();
+          resolvedInstanceRow = instanceRow;
         }
+
         if (!resolvedInstanceName) {
           throw new Error("instanceName is required");
+        }
+
+        const isUazapiWebhook = resolvedInstanceRow?.api_provider === "uazapi";
+
+        if (isUazapiWebhook && resolvedInstanceRow?.api_url && resolvedInstanceRow?.api_key) {
+          // Uazapi: configure webhook using instance-level credentials
+          const uazApiUrl = normalizeUrl(resolvedInstanceRow.api_url);
+          const UAZAPI_WEBHOOK_URL = EVOLUTION_WEBHOOK_TOKEN
+            ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/uazapi-webhook?token=${EVOLUTION_WEBHOOK_TOKEN}`
+            : `${Deno.env.get("SUPABASE_URL")}/functions/v1/uazapi-webhook`;
+
+          console.log(`[Evolution API] GLOBAL Configuring webhook (uazapi) for: ${resolvedInstanceName}`);
+          const webhookResponse = await fetchWithTimeout(`${uazApiUrl}/webhook`, {
+            method: "POST",
+            headers: { token: resolvedInstanceRow.api_key, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              url: UAZAPI_WEBHOOK_URL,
+              enabled: true,
+              excludeMessages: ["wasSentByApi"],
+            }),
+          });
+          if (!webhookResponse.ok) {
+            const errorText = await safeReadResponseText(webhookResponse);
+            throw new Error(`Falha ao configurar webhook uazapi (${webhookResponse.status}): ${errorText.slice(0, 300)}`);
+          }
+          return new Response(JSON.stringify({ success: true, message: "Webhook configured successfully (uazapi)", webhookUrl: UAZAPI_WEBHOOK_URL.slice(0, 80) }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // Evolution: use global credentials
+        const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
+        const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
+        
+        if (!globalApiUrl || !globalApiKey) {
+          throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
         }
 
         const apiUrl = normalizeUrl(globalApiUrl);
@@ -4294,45 +4379,64 @@ serve(async (req) => {
       }
 
       case "global_restart_instance": {
+        if (!body.instanceName && !body.instanceId) {
+          throw new Error("instanceName or instanceId is required");
+        }
+
+        // Resolve instance from DB
+        let restartInstanceRow: any = null;
+        if (body.instanceId) {
+          const { data } = await supabaseClient.from("whatsapp_instances").select("instance_name, api_provider, api_url, api_key").eq("id", body.instanceId).single();
+          restartInstanceRow = data;
+        } else if (body.instanceName) {
+          const { data } = await supabaseClient.from("whatsapp_instances").select("instance_name, api_provider, api_url, api_key").eq("instance_name", body.instanceName).maybeSingle();
+          restartInstanceRow = data;
+        }
+
+        const restartInstanceName = restartInstanceRow?.instance_name || body.instanceName;
+
+        if (restartInstanceRow?.api_provider === "uazapi" && restartInstanceRow?.api_url && restartInstanceRow?.api_key) {
+          // Uazapi: reconnect using instance token
+          const uazApiUrl = normalizeUrl(restartInstanceRow.api_url);
+          console.log(`[Evolution API] GLOBAL Restarting (uazapi): ${restartInstanceName}`);
+          const connectRes = await fetchWithTimeout(`${uazApiUrl}/instance/connect`, {
+            method: "POST",
+            headers: { token: restartInstanceRow.api_key, "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          }, 15000);
+          if (!connectRes.ok) {
+            const errorText = await safeReadResponseText(connectRes);
+            throw new Error(`Falha ao reconectar instância uazapi (${connectRes.status}): ${errorText.slice(0, 300)}`);
+          }
+          return new Response(JSON.stringify({ success: true, message: "Instance reconnected (uazapi)" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // Evolution: use global credentials
         const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
         const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
-        
         if (!globalApiUrl || !globalApiKey) {
           throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
         }
-        
-        if (!body.instanceName) {
-          throw new Error("instanceName is required");
-        }
-
         const apiUrl = normalizeUrl(globalApiUrl);
-        console.log(`[Evolution API] GLOBAL Restarting instance: ${body.instanceName}`);
+        console.log(`[Evolution API] GLOBAL Restarting instance: ${restartInstanceName}`);
 
-        const restartResponse = await fetchWithTimeout(`${apiUrl}/instance/restart/${body.instanceName}`, {
+        const restartResponse = await fetchWithTimeout(`${apiUrl}/instance/restart/${restartInstanceName}`, {
           method: "PUT",
-          headers: {
-            apikey: globalApiKey,
-            "Content-Type": "application/json",
-          },
+          headers: { apikey: globalApiKey, "Content-Type": "application/json" },
         });
 
         if (!restartResponse.ok) {
           const errorText = await safeReadResponseText(restartResponse);
           console.warn(`[Evolution API] GLOBAL restart failed (${restartResponse.status}), trying /instance/connect as fallback...`);
-          
-          // Fallback: try connect endpoint
-          const connectResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${body.instanceName}`, {
+          const connectResponse = await fetchWithTimeout(`${apiUrl}/instance/connect/${restartInstanceName}`, {
             method: "GET",
-            headers: {
-              apikey: globalApiKey,
-              "Content-Type": "application/json",
-            },
+            headers: { apikey: globalApiKey, "Content-Type": "application/json" },
           });
-          
           if (!connectResponse.ok) {
             throw new Error(simplifyEvolutionError(restartResponse.status, errorText));
           }
-          
           return new Response(JSON.stringify({ success: true, message: "Instance reconnected via connect fallback" }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
@@ -4344,21 +4448,50 @@ serve(async (req) => {
       }
 
       case "global_logout_instance": {
+        if (!body.instanceName && !body.instanceId) {
+          throw new Error("instanceName or instanceId is required");
+        }
+
+        // Resolve instance from DB
+        let logoutInstanceRow: any = null;
+        if (body.instanceId) {
+          const { data } = await supabaseClient.from("whatsapp_instances").select("instance_name, api_provider, api_url, api_key").eq("id", body.instanceId).single();
+          logoutInstanceRow = data;
+        } else if (body.instanceName) {
+          const { data } = await supabaseClient.from("whatsapp_instances").select("instance_name, api_provider, api_url, api_key").eq("instance_name", body.instanceName).maybeSingle();
+          logoutInstanceRow = data;
+        }
+
+        const logoutInstanceName = logoutInstanceRow?.instance_name || body.instanceName;
+
+        if (logoutInstanceRow?.api_provider === "uazapi" && logoutInstanceRow?.api_url && logoutInstanceRow?.api_key) {
+          // Uazapi: disconnect using instance token
+          const uazApiUrl = normalizeUrl(logoutInstanceRow.api_url);
+          console.log(`[Evolution API] GLOBAL Logging out (uazapi): ${logoutInstanceName}`);
+          await fetchWithTimeout(`${uazApiUrl}/instance/disconnect`, {
+            method: "POST",
+            headers: { token: logoutInstanceRow.api_key, "Content-Type": "application/json" },
+          }).catch(() => {});
+
+          if (body.instanceId) {
+            await supabaseClient.from("whatsapp_instances").update({ status: "disconnected", updated_at: new Date().toISOString() }).eq("id", body.instanceId);
+          }
+          return new Response(JSON.stringify({ success: true, message: "Instance logged out (uazapi)" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // Evolution: use global credentials
         const globalApiUrl = Deno.env.get("EVOLUTION_BASE_URL");
         const globalApiKey = Deno.env.get("EVOLUTION_GLOBAL_API_KEY");
-        
         if (!globalApiUrl || !globalApiKey) {
           throw new Error("EVOLUTION_BASE_URL and EVOLUTION_GLOBAL_API_KEY must be configured");
         }
-        
-        if (!body.instanceName) {
-          throw new Error("instanceName is required");
-        }
 
         const apiUrl = normalizeUrl(globalApiUrl);
-        console.log(`[Evolution API] GLOBAL Logging out instance: ${body.instanceName}`);
+        console.log(`[Evolution API] GLOBAL Logging out instance: ${logoutInstanceName}`);
 
-        const logoutResponse = await fetchWithTimeout(`${apiUrl}/instance/logout/${body.instanceName}`, {
+        const logoutResponse = await fetchWithTimeout(`${apiUrl}/instance/logout/${logoutInstanceName}`, {
           method: "DELETE",
           headers: {
             apikey: globalApiKey,

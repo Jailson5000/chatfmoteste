@@ -1044,5 +1044,19 @@ export async function sendContact(instance: InstanceRef, opts: SendContactOption
   if ('sendContact' in provider) {
     return (provider as any).sendContact(config, opts);
   }
-  throw new Error(`sendContact not supported for provider: ${config.provider}`);
+  console.warn(`[WhatsAppProvider] sendContact not supported for provider: ${config.provider}`);
+  return { success: false, whatsappMessageId: undefined };
+}
+
+export async function archiveChat(instance: InstanceRef, chatId: string, archive: boolean): Promise<void> {
+  const config = getProviderConfig(instance);
+  if (config.provider === 'uazapi') {
+    const apiUrl = normalizeUrl(config.apiUrl);
+    await fetchWithTimeout(`${apiUrl}/chat/archive`, {
+      method: "POST",
+      headers: { token: config.apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ chatId, archive }),
+    }).catch(() => { /* best effort */ });
+  }
+  // Evolution API doesn't have a direct archive endpoint
 }

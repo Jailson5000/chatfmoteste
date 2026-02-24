@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -18,6 +18,7 @@ interface InstanceToReconnect {
   status: string;
   api_url: string;
   api_key: string;
+  api_provider: string | null;
   law_firm_id: string;
   disconnected_since: string | null;
   reconnect_attempts_count: number;
@@ -450,6 +451,65 @@ async function checkConnectionState(instance: InstanceToReconnect): Promise<{
   return { isConnected: true, state: fetchInstancesState, ghostSession: false };
 }
 
+// ============================================================================
+// UAZAPI-SPECIFIC FUNCTIONS
+// ============================================================================
+
+async function checkConnectionStateUazapi(instance: InstanceToReconnect): Promise<{
+  isConnected: boolean;
+  state: string;
+  ghostSession: boolean;
+}> {
+  const apiUrl = normalizeUrl(instance.api_url);
+  try {
+    console.log(`[Auto-Reconnect] [uazapi] Checking status for ${instance.instance_name}...`);
+    const res = await fetchWithTimeout(`${apiUrl}/instance/status`, {
+      method: "GET",
+      headers: { token: instance.api_key, "Content-Type": "application/json" },
+    }, 10000);
+    if (!res.ok) {
+      console.log(`[Auto-Reconnect] [uazapi] Status check failed (${res.status}) for ${instance.instance_name}`);
+      return { isConnected: false, state: "error", ghostSession: false };
+    }
+    const data = await res.json().catch(() => ({}));
+    const state = data?.status || data?.state || "unknown";
+    const isConnected = state === "connected" || state === "open";
+    console.log(`[Auto-Reconnect] [uazapi] ${instance.instance_name}: state=${state}, connected=${isConnected}`);
+    return { isConnected, state, ghostSession: false };
+  } catch (e: any) {
+    console.warn(`[Auto-Reconnect] [uazapi] Status check error for ${instance.instance_name}: ${e?.message}`);
+    return { isConnected: false, state: "error", ghostSession: false };
+  }
+}
+
+async function attemptConnectUazapi(instance: InstanceToReconnect): Promise<ReconnectResult> {
+  const apiUrl = normalizeUrl(instance.api_url);
+  try {
+    console.log(`[Auto-Reconnect] [uazapi] Attempting connect for ${instance.instance_name}...`);
+    const res = await fetchWithTimeout(`${apiUrl}/instance/connect`, {
+      method: "POST",
+      headers: { token: instance.api_key, "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }, 15000);
+    if (!res.ok) {
+      return { instance_id: instance.id, instance_name: instance.instance_name, success: false, action: "connect", message: `Connect failed (${res.status})` };
+    }
+    const data = await res.json().catch(() => ({}));
+    const state = data?.status || data?.state || "unknown";
+    const qrcode = data?.qrcode || data?.base64 || data?.qr || data?.image || null;
+    if (state === "connected" || state === "open") {
+      return { instance_id: instance.id, instance_name: instance.instance_name, success: true, action: "connect", message: "Instance reconnected automatically" };
+    }
+    if (qrcode) {
+      console.log(`[Auto-Reconnect] [uazapi] Connect returned QR code for ${instance.instance_name}`);
+      return { instance_id: instance.id, instance_name: instance.instance_name, success: false, action: "connect", message: "Session expired - QR code scan required", qrcode, needs_qr: true };
+    }
+    return { instance_id: instance.id, instance_name: instance.instance_name, success: true, action: "connect", message: `Connection initiated (${state})` };
+  } catch (e: any) {
+    return { instance_id: instance.id, instance_name: instance.instance_name, success: false, action: "connect", message: e?.message || "unknown error" };
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -470,7 +530,7 @@ serve(async (req) => {
     // CHANGED: Also include "connected" instances to detect ghost sessions
     const { data: rawInstances, error: fetchError } = await supabaseClient
       .from("whatsapp_instances")
-      .select("id, instance_name, status, api_url, api_key, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at, manual_disconnect, awaiting_qr, last_webhook_event")
+      .select("id, instance_name, status, api_url, api_key, api_provider, law_firm_id, disconnected_since, reconnect_attempts_count, last_reconnect_attempt_at, manual_disconnect, awaiting_qr, last_webhook_event")
       .in("status", ["connecting", "disconnected", "connected", "awaiting_qr"])
       .not("api_url", "is", null)
       .not("api_key", "is", null);
@@ -492,12 +552,16 @@ serve(async (req) => {
       return true;
     });
 
-    // AUTO-SYNC: Check awaiting_qr instances against Evolution API
+    // AUTO-SYNC: Check awaiting_qr instances against their respective API
     if (awaitingQrInstances.length > 0) {
-      console.log(`[Auto-Reconnect] 🔄 AUTO-SYNC: Checking ${awaitingQrInstances.length} awaiting_qr instances against Evolution API...`);
+      console.log(`[Auto-Reconnect] 🔄 AUTO-SYNC: Checking ${awaitingQrInstances.length} awaiting_qr instances...`);
       for (const instance of awaitingQrInstances) {
         try {
-          const connectionCheck = await checkConnectionState(instance as InstanceToReconnect);
+          const inst = instance as InstanceToReconnect;
+          const isUazapi = inst.api_provider === "uazapi";
+          const connectionCheck = isUazapi
+            ? await checkConnectionStateUazapi(inst)
+            : await checkConnectionState(inst);
           if (connectionCheck.isConnected) {
             console.log(`[Auto-Reconnect] ✅ AUTO-SYNC: ${instance.instance_name} is actually connected! Updating DB...`);
             await supabaseClient
@@ -613,8 +677,11 @@ serve(async (req) => {
         }
       }
 
-      // STEP 1: Check real connection state (DUAL VERIFICATION)
-      const connectionCheck = await checkConnectionState(instance);
+      // STEP 1: Check real connection state (DUAL VERIFICATION or uazapi simple check)
+      const isUazapiInstance = instance.api_provider === "uazapi";
+      const connectionCheck = isUazapiInstance
+        ? await checkConnectionStateUazapi(instance)
+        : await checkConnectionState(instance);
 
       if (connectionCheck.isConnected) {
         // Truly connected - sync DB if needed
@@ -646,8 +713,8 @@ serve(async (req) => {
         continue;
       }
 
-      // STEP 2: Handle ghost sessions - logout first to clear stale cache
-      if (connectionCheck.ghostSession) {
+      // STEP 2: Handle ghost sessions - logout first to clear stale cache (Evolution only)
+      if (connectionCheck.ghostSession && !isUazapiInstance) {
         console.log(`[Auto-Reconnect] 👻 Handling ghost session for ${instance.instance_name}: forcing logout before reconnect`);
         await forceLogout(instance);
         // Small delay after logout to let Evolution clear the session
@@ -678,8 +745,10 @@ serve(async (req) => {
         })
         .eq("id", instance.id);
 
-      // Try connect
-      const result = await attemptConnect(instance);
+      // Try connect (use appropriate provider)
+      const result = isUazapiInstance
+        ? await attemptConnectUazapi(instance)
+        : await attemptConnect(instance);
       results.push(result);
 
       // Track instances that need QR code
