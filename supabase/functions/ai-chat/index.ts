@@ -2272,26 +2272,41 @@ async function executeTemplateTool(
       // Fetch WhatsApp instance details
       const { data: instance, error: instError } = await supabase
         .from("whatsapp_instances")
-        .select("api_url, api_key, instance_name, status")
+        .select("api_url, api_key, instance_name, status, api_provider")
         .eq("id", instanceId)
         .single();
       
       if (instance && instance.status === 'connected') {
         const apiUrl = (instance.api_url || '').replace(/\/+$/, '').replace(/\/manager$/i, '');
         const targetNumber = remoteJid.split("@")[0];
+        const isUazapi = instance.api_provider === 'uazapi';
+        
+        console.log(`[AI Chat] Template send provider: ${isUazapi ? 'uazapi' : 'evolution'}, instance: ${instance.instance_name}`);
         
         if (apiUrl && targetNumber) {
           try {
             // Send text first (if there's content)
             if (finalContent) {
               console.log(`[AI Chat] Sending template text to WhatsApp: ${finalContent.substring(0, 50)}...`);
-              const textResponse = await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+              
+              let textEndpoint: string;
+              let textHeaders: Record<string, string>;
+              let textBody: Record<string, unknown>;
+              
+              if (isUazapi) {
+                textEndpoint = `${apiUrl}/send/text`;
+                textHeaders = { 'Content-Type': 'application/json', 'token': instance.api_key || '' };
+                textBody = { number: targetNumber, text: finalContent };
+              } else {
+                textEndpoint = `${apiUrl}/message/sendText/${instance.instance_name}`;
+                textHeaders = { 'Content-Type': 'application/json', 'apikey': instance.api_key || '' };
+                textBody = { number: targetNumber, text: finalContent };
+              }
+              
+              const textResponse = await fetch(textEndpoint, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'apikey': instance.api_key || '',
-                },
-                body: JSON.stringify({ number: targetNumber, text: finalContent }),
+                headers: textHeaders,
+                body: JSON.stringify(textBody),
               });
               
               if (textResponse.ok) {
@@ -2314,57 +2329,41 @@ async function executeTemplateTool(
               
               console.log(`[AI Chat] Sending template media to WhatsApp: ${finalMediaType}, URL: ${finalMediaUrl}`);
               
-              let mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-              let mediaPayload: Record<string, unknown> = { number: targetNumber };
+              let mediaEndpoint: string;
+              let mediaHeaders: Record<string, string>;
+              let mediaPayload: Record<string, unknown>;
               
-              switch (finalMediaType) {
-                case 'image':
-                  mediaPayload = {
-                    ...mediaPayload,
-                    mediatype: 'image',
-                    mimetype: mediaMimeType || 'image/jpeg',
-                    caption: '', // No caption since text already sent
-                    media: finalMediaUrl,
-                  };
-                  break;
-                case 'video':
-                  mediaPayload = {
-                    ...mediaPayload,
-                    mediatype: 'video',
-                    mimetype: mediaMimeType || 'video/mp4',
-                    caption: '',
-                    media: finalMediaUrl,
-                  };
-                  break;
-                case 'document':
-                  const urlParts = finalMediaUrl.split('/');
-                  const fileName = urlParts[urlParts.length - 1].split('?')[0] || 'document.pdf';
-                  mediaPayload = {
-                    ...mediaPayload,
-                    mediatype: 'document',
-                    mimetype: mediaMimeType || 'application/pdf',
-                    caption: '',
-                    fileName: fileName,
-                    media: finalMediaUrl,
-                  };
-                  break;
-                default:
-                  // Default to image
-                  mediaPayload = {
-                    ...mediaPayload,
-                    mediatype: 'image',
-                    mimetype: 'image/jpeg',
-                    caption: '',
-                    media: finalMediaUrl,
-                  };
+              if (isUazapi) {
+                // uazapi: /send/media with token header and file field
+                mediaEndpoint = `${apiUrl}/send/media`;
+                mediaHeaders = { 'Content-Type': 'application/json', 'token': instance.api_key || '' };
+                mediaPayload = { number: targetNumber, file: finalMediaUrl };
+              } else {
+                // Evolution API
+                mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
+                mediaHeaders = { 'Content-Type': 'application/json', 'apikey': instance.api_key || '' };
+                mediaPayload = { number: targetNumber };
+                
+                switch (finalMediaType) {
+                  case 'image':
+                    mediaPayload = { ...mediaPayload, mediatype: 'image', mimetype: mediaMimeType || 'image/jpeg', caption: '', media: finalMediaUrl };
+                    break;
+                  case 'video':
+                    mediaPayload = { ...mediaPayload, mediatype: 'video', mimetype: mediaMimeType || 'video/mp4', caption: '', media: finalMediaUrl };
+                    break;
+                  case 'document':
+                    const urlParts = finalMediaUrl.split('/');
+                    const fileName = urlParts[urlParts.length - 1].split('?')[0] || 'document.pdf';
+                    mediaPayload = { ...mediaPayload, mediatype: 'document', mimetype: mediaMimeType || 'application/pdf', caption: '', fileName, media: finalMediaUrl };
+                    break;
+                  default:
+                    mediaPayload = { ...mediaPayload, mediatype: 'image', mimetype: 'image/jpeg', caption: '', media: finalMediaUrl };
+                }
               }
               
               const mediaResponse = await fetch(mediaEndpoint, {
                 method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'apikey': instance.api_key || '',
-                },
+                headers: mediaHeaders,
                 body: JSON.stringify(mediaPayload),
               });
               
