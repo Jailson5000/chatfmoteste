@@ -976,27 +976,62 @@ serve(async (req) => {
                 console.log("[UAZAPI_WEBHOOK] AI response received:", aiText?.substring(0, 80));
 
                 if (aiText && instance.api_url && instance.api_key) {
-                  // Send AI response to WhatsApp via uazapi
                   const apiUrl = instance.api_url.replace(/\/+$/, "");
                   const targetNumber = remoteJid.replace("@s.whatsapp.net", "");
+
+                  // Split long AI responses into multiple parts (max 5)
+                  const MAX_PARTS = 5;
+                  const splitRegex = /\n{2,}/; // Split on double newlines (paragraph breaks)
+                  let parts: string[] = [];
                   
-                  const sendRes = await fetch(`${apiUrl}/send/text`, {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      token: instance.api_key,
-                    },
-                    body: JSON.stringify({ number: targetNumber, text: aiText }),
-                  });
+                  if (aiText.length > 800) {
+                    const rawParts = aiText.split(splitRegex).filter((p: string) => p.trim());
+                    // Merge small parts together, keep max MAX_PARTS
+                    let current = "";
+                    for (const part of rawParts) {
+                      if (current && (current.length + part.length > 600 || parts.length >= MAX_PARTS - 1)) {
+                        parts.push(current.trim());
+                        current = part;
+                      } else {
+                        current = current ? `${current}\n\n${part}` : part;
+                      }
+                    }
+                    if (current.trim()) parts.push(current.trim());
+                    // If still too many, truncate
+                    if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS);
+                  } else {
+                    parts = [aiText];
+                  }
 
-                  const sendData = await sendRes.json().catch(() => ({}));
-                  const aiMsgId = sendData?.key?.id || sendData?.id || crypto.randomUUID();
-                  console.log("[UAZAPI_WEBHOOK] AI message sent to WhatsApp, id:", aiMsgId);
+                  const allMsgIds: string[] = [];
 
-                  // Save AI message to database
+                  for (let i = 0; i < parts.length; i++) {
+                    // Add delay between parts (not before first)
+                    if (i > 0) {
+                      const delay = 1000 + Math.random() * 2000; // 1-3s
+                      await new Promise(r => setTimeout(r, delay));
+                    }
+
+                    const sendRes = await fetch(`${apiUrl}/send/text`, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        token: instance.api_key,
+                      },
+                      body: JSON.stringify({ number: targetNumber, text: parts[i] }),
+                    });
+
+                    const sendData = await sendRes.json().catch(() => ({}));
+                    const msgId = sendData?.key?.id || sendData?.id || crypto.randomUUID();
+                    allMsgIds.push(msgId);
+                  }
+
+                  console.log(`[UAZAPI_WEBHOOK] AI response sent in ${parts.length} part(s), ids:`, allMsgIds);
+
+                  // Save full AI message to database (single record with complete text)
                   await supabaseClient.from("messages").insert({
                     conversation_id: conversationId,
-                    whatsapp_message_id: aiMsgId,
+                    whatsapp_message_id: allMsgIds[0],
                     content: aiText,
                     message_type: "text",
                     is_from_me: true,

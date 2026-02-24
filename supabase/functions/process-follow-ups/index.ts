@@ -297,20 +297,42 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        let sendEndpoint = `${apiUrl}/message/sendText/${instanceName}`;
-        let sendBody: any = {
-          number: conversation.remote_jid.replace("@s.whatsapp.net", ""),
-          text: messageContent,
-        };
+        // Detect provider: uazapi uses api_url containing "uazapi"
+        const isUazapi = apiUrl.toLowerCase().includes("uazapi");
+        
+        let sendEndpoint: string;
+        let sendBody: any;
+        let sendHeaders: Record<string, string>;
 
-        if (messageType !== "text" && mediaUrl) {
-          sendEndpoint = `${apiUrl}/message/sendMedia/${instanceName}`;
-          sendBody = {
-            number: conversation.remote_jid.replace("@s.whatsapp.net", ""),
-            mediatype: messageType,
-            media: mediaUrl,
-            caption: messageContent || undefined,
-          };
+        const targetNumber = conversation.remote_jid.replace("@s.whatsapp.net", "");
+
+        if (isUazapi) {
+          // Uazapi provider
+          sendHeaders = { "Content-Type": "application/json", token: apiKey };
+          if (messageType !== "text" && mediaUrl) {
+            const mediaTypeMap: Record<string, string> = { image: "image", video: "video", audio: "audio" };
+            const uazapiType = mediaTypeMap[messageType] || "document";
+            sendEndpoint = `${apiUrl}/send/${uazapiType}`;
+            sendBody = { number: targetNumber, url: mediaUrl, caption: messageContent || undefined };
+          } else {
+            sendEndpoint = `${apiUrl}/send/text`;
+            sendBody = { number: targetNumber, text: messageContent };
+          }
+        } else {
+          // Evolution API provider
+          sendHeaders = { "Content-Type": "application/json", apikey: apiKey };
+          if (messageType !== "text" && mediaUrl) {
+            sendEndpoint = `${apiUrl}/message/sendMedia/${instanceName}`;
+            sendBody = {
+              number: targetNumber,
+              mediatype: messageType,
+              media: mediaUrl,
+              caption: messageContent || undefined,
+            };
+          } else {
+            sendEndpoint = `${apiUrl}/message/sendText/${instanceName}`;
+            sendBody = { number: targetNumber, text: messageContent };
+          }
         }
 
         // Apply human-like jitter before sending (5-12s for follow-ups)
@@ -318,10 +340,7 @@ Deno.serve(async (req) => {
 
         const sendResponse = await fetch(sendEndpoint, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: apiKey,
-          },
+          headers: sendHeaders,
           body: JSON.stringify(sendBody),
         });
 

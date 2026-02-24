@@ -166,10 +166,10 @@ serve(async (req) => {
         } else {
           // Custom message without appointment - send directly via WhatsApp
           if (message.channel === "whatsapp" && clientPhone) {
-            // Get WhatsApp instance for this law firm
+            // Get WhatsApp instance for this law firm (with api_url and api_key)
             const { data: instance, error: instanceError } = await supabase
               .from("whatsapp_instances")
-              .select("id, instance_name, status")
+              .select("id, instance_name, status, api_url, api_key")
               .eq("law_firm_id", message.law_firm_id)
               .eq("status", "connected")
               .limit(1)
@@ -179,53 +179,54 @@ serve(async (req) => {
               throw new Error(`Database error: ${instanceError.message}`);
             }
 
-            if (instance) {
-              const evolutionApiUrl = Deno.env.get("EVOLUTION_API_URL");
-              const evolutionApiKey = Deno.env.get("EVOLUTION_API_KEY");
+            if (instance && instance.api_url && instance.api_key) {
+              const formattedPhone = clientPhone.replace(/\D/g, "");
+              const phoneWithCountry = formattedPhone.startsWith("55") ? formattedPhone : `55${formattedPhone}`;
+              const apiUrl = (instance.api_url as string).replace(/\/+$/, "");
+              const apiKey = instance.api_key as string;
+              const isUazapi = apiUrl.toLowerCase().includes("uazapi");
 
-              if (evolutionApiUrl && evolutionApiKey) {
-                const formattedPhone = clientPhone.replace(/\D/g, "");
-                const phoneWithCountry = formattedPhone.startsWith("55") ? formattedPhone : `55${formattedPhone}`;
+              console.log(`[process-scheduled-messages] Sending custom message to ${phoneWithCountry} via ${isUazapi ? 'uazapi' : 'evolution'} (attempt ${(message.retry_count || 0) + 1})`);
 
-                console.log(`[process-scheduled-messages] Sending custom message to ${phoneWithCountry} (attempt ${(message.retry_count || 0) + 1})`);
+              let sendEndpoint: string;
+              let sendHeaders: Record<string, string>;
 
-                const whatsappResponse = await fetch(
-                  `${evolutionApiUrl}/message/sendText/${instance.instance_name}`,
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "apikey": evolutionApiKey,
-                    },
-                    body: JSON.stringify({
-                      number: phoneWithCountry,
-                      text: message.message_content,
-                    }),
-                  }
-                );
-
-                if (whatsappResponse.ok) {
-                  await supabase
-                    .from("agenda_pro_scheduled_messages")
-                    .update({ 
-                      status: "sent", 
-                      sent_at: nowIso,
-                      last_attempt_at: nowIso,
-                      last_error: null
-                    })
-                    .eq("id", message.id);
-                  
-                  results.success++;
-                  console.log(`[process-scheduled-messages] ✅ Sent custom message ${message.id} to ${phoneWithCountry}`);
-                } else {
-                  const errorText = await whatsappResponse.text();
-                  throw new Error(`WhatsApp API error: ${errorText}`);
-                }
+              if (isUazapi) {
+                sendEndpoint = `${apiUrl}/send/text`;
+                sendHeaders = { "Content-Type": "application/json", token: apiKey };
               } else {
-                throw new Error("Evolution API not configured (missing EVOLUTION_API_URL or EVOLUTION_API_KEY)");
+                sendEndpoint = `${apiUrl}/message/sendText/${instance.instance_name}`;
+                sendHeaders = { "Content-Type": "application/json", apikey: apiKey };
+              }
+
+              const whatsappResponse = await fetch(sendEndpoint, {
+                method: "POST",
+                headers: sendHeaders,
+                body: JSON.stringify({
+                  number: phoneWithCountry,
+                  text: message.message_content,
+                }),
+              });
+
+              if (whatsappResponse.ok) {
+                await supabase
+                  .from("agenda_pro_scheduled_messages")
+                  .update({ 
+                    status: "sent", 
+                    sent_at: nowIso,
+                    last_attempt_at: nowIso,
+                    last_error: null
+                  })
+                  .eq("id", message.id);
+                
+                results.success++;
+                console.log(`[process-scheduled-messages] ✅ Sent custom message ${message.id} to ${phoneWithCountry}`);
+              } else {
+                const errorText = await whatsappResponse.text();
+                throw new Error(`WhatsApp API error: ${errorText}`);
               }
             } else {
-              throw new Error("No active WhatsApp instance found for this company");
+              throw new Error("No active WhatsApp instance with API credentials found for this company");
             }
           } else if (message.channel === "email" && clientEmail) {
             // Email channel - would be handled by a different service
