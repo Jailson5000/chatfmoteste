@@ -188,60 +188,63 @@ Deno.serve(async (req) => {
             }
 
             if (channel === "whatsapp" && profile.phone) {
-              // Get default WhatsApp instance for this law firm
+              // Get default WhatsApp instance for this law firm (with api_url)
               const { data: instance } = await supabase
                 .from("whatsapp_instances")
-                .select("id, instance_name, api_key")
+                .select("id, instance_name, api_key, api_url")
                 .eq("law_firm_id", settings.law_firm_id)
                 .eq("status", "connected")
                 .limit(1)
                 .maybeSingle();
 
-              if (instance) {
-                const { data: evolutionConnection } = await supabase
-                  .from("evolution_api_connections")
-                  .select("base_url, global_api_key")
-                  .eq("is_default", true)
-                  .maybeSingle();
+              if (instance && instance.api_url) {
+                try {
+                  const dueDate = new Date(task.due_date);
+                  const formattedDate = dueDate.toLocaleDateString("pt-BR");
 
-                if (evolutionConnection) {
-                  try {
-                    const dueDate = new Date(task.due_date);
-                    const formattedDate = dueDate.toLocaleDateString("pt-BR");
+                  const message = `⏰ *Alerta de Tarefa*\n\nOlá ${profile.full_name}!\n\nA tarefa *"${task.title}"* vence em breve!\n📅 Vencimento: ${formattedDate}\n\nAcesse o sistema para ver mais detalhes.`;
 
-                    const message = `⏰ *Alerta de Tarefa*\n\nOlá ${profile.full_name}!\n\nA tarefa *"${task.title}"* vence em breve!\n📅 Vencimento: ${formattedDate}\n\nAcesse o sistema para ver mais detalhes.`;
-
-                    // Format phone number
-                    let phone = profile.phone.replace(/\D/g, "");
-                    if (!phone.startsWith("55")) {
-                      phone = "55" + phone;
-                    }
-
-                    const response = await fetch(
-                      `${evolutionConnection.base_url}/message/sendText/${instance.instance_name}`,
-                      {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          apikey: instance.api_key || evolutionConnection.global_api_key,
-                        },
-                        body: JSON.stringify({
-                          number: phone,
-                          text: message,
-                        }),
-                      }
-                    );
-
-                    if (response.ok) {
-                      sent = true;
-                      console.log(`[process-task-due-alerts] WhatsApp sent to ${phone} for task ${task.id}`);
-                    } else {
-                      console.error(`WhatsApp send failed:`, await response.text());
-                    }
-                  } catch (whatsappError) {
-                    console.error(`Error sending WhatsApp:`, whatsappError);
+                  // Format phone number
+                  let phone = profile.phone.replace(/\D/g, "");
+                  if (!phone.startsWith("55")) {
+                    phone = "55" + phone;
                   }
+
+                  // Detect provider (UAZAPi vs Evolution API)
+                  const apiUrl = instance.api_url.replace(/\/+$/, "");
+                  const isUazapi = apiUrl.toLowerCase().includes("uazapi");
+
+                  const endpoint = isUazapi
+                    ? `${apiUrl}/send/text`
+                    : `${apiUrl}/message/sendText/${instance.instance_name}`;
+
+                  const headers: Record<string, string> = isUazapi
+                    ? { "Content-Type": "application/json", token: instance.api_key }
+                    : { "Content-Type": "application/json", apikey: instance.api_key };
+
+                  const body = isUazapi
+                    ? JSON.stringify({ number: phone, message })
+                    : JSON.stringify({ number: phone, text: message });
+
+                  console.log(`[process-task-due-alerts] Sending WhatsApp via ${isUazapi ? "UAZAPi" : "Evolution"} to ${phone}`);
+
+                  const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers,
+                    body,
+                  });
+
+                  if (response.ok) {
+                    sent = true;
+                    console.log(`[process-task-due-alerts] WhatsApp sent to ${phone} for task ${task.id}`);
+                  } else {
+                    console.error(`WhatsApp send failed:`, await response.text());
+                  }
+                } catch (whatsappError) {
+                  console.error(`Error sending WhatsApp:`, whatsappError);
                 }
+              } else {
+                console.log(`[process-task-due-alerts] No connected instance with api_url for law firm ${settings.law_firm_id}`);
               }
             }
 
