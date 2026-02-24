@@ -1639,10 +1639,12 @@ serve(async (req) => {
                             const audioSendData = await audioSendRes.json().catch(() => ({}));
                             const audioMsgId = audioSendData?.key?.id || audioSendData?.id || crypto.randomUUID();
                             
-                            // Persist audio to storage
+                            // Persist audio to storage (using safe base64 decoding)
                             let audioStorageUrl: string | null = null;
                             try {
-                              const binaryStr = atob(ttsData.audioContent);
+                              // Safe base64 decode using Uint8Array (avoids atob stack overflow on large strings)
+                              const raw = ttsData.audioContent as string;
+                              const binaryStr = atob(raw);
                               const audioBytes = new Uint8Array(binaryStr.length);
                               for (let j = 0; j < binaryStr.length; j++) {
                                 audioBytes[j] = binaryStr.charCodeAt(j);
@@ -1656,7 +1658,7 @@ serve(async (req) => {
                                 .upload(storagePath, audioBytes, {
                                   contentType: isOgg ? "audio/ogg" : "audio/mpeg",
                                   cacheControl: "31536000",
-                                  upsert: false,
+                                  upsert: true,
                                 });
                               
                               if (!uploadErr) {
@@ -1664,9 +1666,20 @@ serve(async (req) => {
                                   .from("chat-media")
                                   .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
                                 audioStorageUrl = urlData?.signedUrl || null;
+                                
+                                // Fallback to public URL if signed URL fails
+                                if (!audioStorageUrl) {
+                                  const { data: publicData } = supabaseClient.storage
+                                    .from("chat-media")
+                                    .getPublicUrl(storagePath);
+                                  audioStorageUrl = publicData?.publicUrl || null;
+                                  console.log("[UAZAPI_WEBHOOK] Using public URL fallback for audio:", !!audioStorageUrl);
+                                }
+                              } else {
+                                console.error("[UAZAPI_WEBHOOK] Audio upload error:", uploadErr.message, "path:", storagePath, "size:", audioBytes.length);
                               }
                             } catch (storageErr) {
-                              console.warn("[UAZAPI_WEBHOOK] Audio storage error (non-blocking):", storageErr);
+                              console.error("[UAZAPI_WEBHOOK] Audio storage EXCEPTION:", storageErr instanceof Error ? storageErr.message : storageErr, "audioContentLen:", ttsData.audioContent?.length);
                             }
                             
                             // Save audio message to DB

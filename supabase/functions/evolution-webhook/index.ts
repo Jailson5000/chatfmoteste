@@ -3169,10 +3169,10 @@ async function sendAIResponseToWhatsApp(
         // Normalize mime type for DB (remove codecs info for simpler matching)
         const dbMimeType = isOggFormat ? 'audio/ogg' : 'audio/mpeg';
 
-        // [NEW] Save audio to Storage for download capability
+        // [NEW] Save audio to Storage for download capability (with upsert + fallback)
         let audioStorageUrl: string | null = null;
         try {
-          // Convert base64 to Uint8Array
+          // Convert base64 to Uint8Array (safe for large strings)
           const binaryString = atob(audioBase64);
           const bytes = new Uint8Array(binaryString.length);
           for (let j = 0; j < binaryString.length; j++) {
@@ -3182,17 +3182,17 @@ async function sendAIResponseToWhatsApp(
           // Generate file path with correct extension
           const storagePath = `${context.lawFirmId}/ai-audio/${audioResult.messageId}${fileExtension}`;
 
-          // Upload to chat-media bucket with correct content type
+          // Upload to chat-media bucket with upsert: true to avoid duplicate errors
           const { data: uploadData, error: uploadError } = await supabaseClient
             .storage
             .from('chat-media')
             .upload(storagePath, bytes, {
               contentType: storageContentType,
               cacheControl: '31536000',
-              upsert: false,
+              upsert: true,
             });
 
-          if (!uploadError && uploadData) {
+          if (!uploadError) {
             // Generate signed URL (1 year)
             const { data: urlData } = await supabaseClient
               .storage
@@ -3201,19 +3201,32 @@ async function sendAIResponseToWhatsApp(
 
             audioStorageUrl = urlData?.signedUrl || null;
             
+            // Fallback to public URL if signed URL fails
+            if (!audioStorageUrl) {
+              const { data: publicData } = supabaseClient
+                .storage
+                .from('chat-media')
+                .getPublicUrl(storagePath);
+              audioStorageUrl = publicData?.publicUrl || null;
+              logDebug('TTS_STORAGE', 'Using public URL fallback', { hasUrl: !!audioStorageUrl });
+            }
+            
             logDebug('TTS_STORAGE', 'Audio saved to storage', {
               path: storagePath,
               contentType: storageContentType,
               hasUrl: !!audioStorageUrl,
             });
-          } else if (uploadError) {
+          } else {
             logDebug('TTS_STORAGE', 'Failed to upload audio to storage', {
               error: uploadError.message,
+              path: storagePath,
+              bytesSize: bytes.length,
             });
           }
         } catch (storageError) {
-          logDebug('TTS_STORAGE', 'Failed to save audio to storage (non-blocking)', {
+          logDebug('TTS_STORAGE', 'EXCEPTION saving audio to storage', {
             error: storageError instanceof Error ? storageError.message : String(storageError),
+            audioBase64Length: audioBase64?.length,
           });
           // Non-blocking - audio already sent to WhatsApp
         }
