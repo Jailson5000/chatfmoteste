@@ -1219,26 +1219,32 @@ serve(async (req) => {
                   const apiUrl = instance.api_url.replace(/\/+$/, "");
                   const targetNumber = remoteJid.replace("@s.whatsapp.net", "");
 
-                  // Split long AI responses into multiple parts (max 5)
+                  // Use responseParts from ai-chat if available (smarter split by paragraphs/sentences)
+                  // Fallback: split manually if text > 400 chars
                   const MAX_PARTS = 5;
-                  const splitRegex = /\n{2,}/; // Split on double newlines (paragraph breaks)
                   let parts: string[] = [];
                   
-                  if (aiText.length > 800) {
-                    const rawParts = aiText.split(splitRegex).filter((p: string) => p.trim());
-                    // Merge small parts together, keep max MAX_PARTS
-                    let current = "";
-                    for (const part of rawParts) {
-                      if (current && (current.length + part.length > 600 || parts.length >= MAX_PARTS - 1)) {
-                        parts.push(current.trim());
-                        current = part;
-                      } else {
-                        current = current ? `${current}\n\n${part}` : part;
+                  if (result.responseParts && Array.isArray(result.responseParts) && result.responseParts.length > 1) {
+                    // ai-chat already split intelligently (by \n\n, \n, or sentences >400 chars)
+                    parts = result.responseParts.filter((p: string) => p && p.trim()).slice(0, MAX_PARTS);
+                  } else if (aiText.length > 400) {
+                    const rawParts = aiText.split(/\n\n+/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+                    if (rawParts.length > 1) {
+                      // Merge small parts together, keep max MAX_PARTS
+                      let current = "";
+                      for (const part of rawParts) {
+                        if (current && (current.length + part.length > 500 || parts.length >= MAX_PARTS - 1)) {
+                          parts.push(current.trim());
+                          current = part;
+                        } else {
+                          current = current ? `${current}\n\n${part}` : part;
+                        }
                       }
+                      if (current.trim()) parts.push(current.trim());
+                      if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS);
+                    } else {
+                      parts = [aiText];
                     }
-                    if (current.trim()) parts.push(current.trim());
-                    // If still too many, truncate
-                    if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS);
                   } else {
                     parts = [aiText];
                   }
