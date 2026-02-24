@@ -3192,12 +3192,135 @@ serve(async (req) => {
         const targetLawFirmId = conversation.law_firm_id;
         const instance = await getInstanceById(supabaseClient, targetLawFirmId, conversation.whatsapp_instance_id, isGlobalAdmin);
 
-        // uazapi: media is already persisted by webhook, no need for this endpoint
+        // uazapi: use /message/download endpoint to get media
         if (isUazapi(instance)) {
-          return new Response(JSON.stringify({
-            success: false,
-            error: "Mídia não disponível para download via API neste provider. Verifique o Storage.",
-          }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          try {
+            const uazapiUrl = normalizeUrl(instance.api_url);
+            const isAudioMsg = body.mimeType?.startsWith("audio/") || false;
+            
+            const downloadRes = await fetchWithTimeout(
+              `${uazapiUrl}/message/download`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "token": instance.api_key || "",
+                },
+                body: JSON.stringify({
+                  id: body.whatsappMessageId,
+                  return_base64: true,
+                  return_link: false,
+                  generate_mp3: isAudioMsg,
+                }),
+              },
+              30000, // 30s timeout for media download
+            );
+            
+            if (!downloadRes.ok) {
+              const errText = await safeReadResponseText(downloadRes);
+              console.error("[Evolution API] uazapi /message/download failed:", downloadRes.status, errText.slice(0, 200));
+              return new Response(JSON.stringify({
+                success: false,
+                error: "Falha ao baixar mídia do uazapi: " + downloadRes.status,
+              }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+            }
+            
+            const dlData = await downloadRes.json();
+            const base64 = dlData.base64Data || dlData.base64 || null;
+            const dlMime = dlData.mimetype || dlData.mimeType || body.mimeType || "application/octet-stream";
+            
+            if (!base64) {
+              // Try fileURL fallback
+              const fileURL = dlData.fileURL || dlData.file_url || dlData.url;
+              if (fileURL) {
+                const fileRes = await fetch(fileURL);
+                if (fileRes.ok) {
+                  const arrayBuf = await fileRes.arrayBuffer();
+                  const bytes = new Uint8Array(arrayBuf);
+                  // Convert to base64
+                  let b64 = "";
+                  const chunk = 8192;
+                  for (let i = 0; i < bytes.length; i += chunk) {
+                    b64 += String.fromCharCode(...bytes.subarray(i, i + chunk));
+                  }
+                  const finalBase64 = btoa(b64);
+                  
+                  // Persist to storage
+                  const baseMime = dlMime.split(";")[0].trim().toLowerCase();
+                  const extMap: Record<string, string> = {
+                    'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png',
+                    'image/webp': '.webp', 'audio/ogg': '.ogg', 'audio/mpeg': '.mp3',
+                    'audio/mp4': '.m4a', 'video/mp4': '.mp4',
+                  };
+                  const ext = extMap[baseMime] || '.bin';
+                  const safeId = (body.whatsappMessageId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+                  const storagePath = `${targetLawFirmId}/${body.conversationId}/${safeId}${ext}`;
+                  
+                  await supabaseClient.storage.from('chat-media').upload(storagePath, bytes, {
+                    contentType: baseMime || 'application/octet-stream', upsert: true,
+                  });
+                  const { data: pubUrl } = supabaseClient.storage.from('chat-media').getPublicUrl(storagePath);
+                  if (pubUrl?.publicUrl) {
+                    await supabaseClient.from('messages')
+                      .update({ media_url: pubUrl.publicUrl })
+                      .eq('whatsapp_message_id', body.whatsappMessageId)
+                      .eq('conversation_id', body.conversationId);
+                  }
+                  
+                  return new Response(JSON.stringify({
+                    success: true, base64: finalBase64, mimetype: dlMime,
+                  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+                }
+              }
+              
+              return new Response(JSON.stringify({
+                success: false, error: "Mídia não disponível (sem base64 ou link)",
+              }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+            }
+            
+            // Persist to storage for future use
+            try {
+              const baseMime = dlMime.split(";")[0].trim().toLowerCase();
+              const extMap: Record<string, string> = {
+                'application/pdf': '.pdf', 'image/jpeg': '.jpg', 'image/png': '.png',
+                'image/webp': '.webp', 'audio/ogg': '.ogg', 'audio/mpeg': '.mp3',
+                'audio/mp4': '.m4a', 'video/mp4': '.mp4',
+              };
+              const ext = extMap[baseMime] || '.bin';
+              const safeId = (body.whatsappMessageId || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+              const storagePath = `${targetLawFirmId}/${body.conversationId}/${safeId}${ext}`;
+              
+              const binaryStr = atob(base64);
+              const bytes = new Uint8Array(binaryStr.length);
+              for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+              
+              const { error: upErr } = await supabaseClient.storage.from('chat-media').upload(storagePath, bytes, {
+                contentType: baseMime || 'application/octet-stream', upsert: true,
+              });
+              if (!upErr) {
+                const { data: pubUrl } = supabaseClient.storage.from('chat-media').getPublicUrl(storagePath);
+                if (pubUrl?.publicUrl) {
+                  await supabaseClient.from('messages')
+                    .update({ media_url: pubUrl.publicUrl })
+                    .eq('whatsapp_message_id', body.whatsappMessageId)
+                    .eq('conversation_id', body.conversationId);
+                  console.log(`[Evolution API] uazapi media persisted: ${storagePath}`);
+                }
+              }
+            } catch (persistErr) {
+              console.warn('[Evolution API] Failed to persist uazapi media:', persistErr);
+            }
+            
+            return new Response(JSON.stringify({
+              success: true, base64, mimetype: dlMime,
+            }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          } catch (uazErr: any) {
+            console.error("[Evolution API] uazapi get_media error:", uazErr);
+            return new Response(JSON.stringify({
+              success: false,
+              error: "Erro ao baixar mídia: " + (uazErr?.message || "timeout"),
+            }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
         }
 
         const apiUrl = normalizeUrl(instance.api_url);
