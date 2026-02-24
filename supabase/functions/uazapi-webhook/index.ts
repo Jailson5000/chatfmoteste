@@ -403,7 +403,7 @@ serve(async (req) => {
               contact_name: contactName,
               contact_phone: phoneNumber,
               whatsapp_instance_id: instance.id,
-              status: "open",
+              status: "novo_contato",
               current_handler: "ai",
               last_message_at: timestamp,
               origin: "WHATSAPP",
