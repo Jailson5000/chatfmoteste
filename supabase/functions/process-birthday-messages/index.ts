@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { humanDelay, DELAY_CONFIG } from "../_shared/human-delay.ts";
+import { sendText } from "../_shared/whatsapp-provider.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -130,7 +131,7 @@ serve(async (req) => {
         // Get WhatsApp instance
         const { data: instance } = await supabase
           .from("whatsapp_instances")
-          .select("id, instance_name, api_url, api_key")
+          .select("id, instance_name, api_url, api_key, api_provider")
           .eq("law_firm_id", setting.law_firm_id)
           .eq("is_default", true)
           .eq("status", "connected")
@@ -178,34 +179,24 @@ serve(async (req) => {
               message += `\n\n🎁 *Cupom especial de aniversário:* ${setting.coupon_discount_percent}% de desconto!`;
             }
 
-            // Send via Evolution API
+            // Send via WhatsApp provider abstraction (Evolution or uazapi)
             const phone = client.phone.replace(/\D/g, "");
             const remoteJid = phone.startsWith("55") ? `${phone}@s.whatsapp.net` : `55${phone}@s.whatsapp.net`;
-
-            const apiUrl = (instance.api_url as string).replace(/\/$/, "");
 
             // Apply human-like jitter before sending (10-20s for promotional messages)
             await humanDelay(DELAY_CONFIG.PROMOTIONAL.min, DELAY_CONFIG.PROMOTIONAL.max, '[BIRTHDAY]');
 
-            const response = await fetch(
-              `${apiUrl}/message/sendText/${instance.instance_name}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  apikey: instance.api_key as string,
-                },
-                body: JSON.stringify({
-                  number: remoteJid,
-                  text: message,
-                }),
+            try {
+              const result = await sendText(instance as any, { number: remoteJid, text: message });
+              if (!result.success) {
+                console.error(`[birthday-messages] Failed to send to ${client.id}`);
+                results.errors.push(`Client ${client.id}: sendText returned unsuccessful`);
+                continue;
               }
-            );
-
-            if (!response.ok) {
-              const errorData = await response.text();
-              console.error(`[birthday-messages] Failed to send to ${client.id}:`, errorData);
-              results.errors.push(`Client ${client.id}: ${errorData}`);
+            } catch (sendError) {
+              const errMsg = sendError instanceof Error ? sendError.message : "Unknown send error";
+              console.error(`[birthday-messages] Failed to send to ${client.id}:`, errMsg);
+              results.errors.push(`Client ${client.id}: ${errMsg}`);
               continue;
             }
 

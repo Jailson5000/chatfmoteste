@@ -197,22 +197,25 @@ serve(async (req) => {
       }
     }
 
-    // Get instances summary from database
+    // Get instances summary from database (separated by provider)
     const { data: instances } = await supabaseAdmin
       .from("whatsapp_instances")
-      .select("status");
+      .select("status, api_provider");
 
-    const instancesSummary = {
-      total: instances?.length || 0,
-      connected: instances?.filter((i: { status: string }) => i.status === "connected").length || 0,
-      disconnected:
-        instances?.filter((i: { status: string }) => i.status === "disconnected").length || 0,
-      connecting:
-        instances?.filter(
-          (i: { status: string }) => i.status === "connecting" || i.status === "awaiting_qr"
-        ).length || 0,
-      error: instances?.filter((i: { status: string }) => i.status === "error").length || 0,
-    };
+    type InstanceRow = { status: string; api_provider?: string | null };
+    const allInstances = (instances || []) as InstanceRow[];
+    const evoInstances = allInstances.filter(i => !i.api_provider || i.api_provider === 'evolution');
+    const uazInstances = allInstances.filter(i => i.api_provider === 'uazapi');
+
+    const buildSummary = (list: InstanceRow[]) => ({
+      total: list.length,
+      connected: list.filter(i => i.status === "connected").length,
+      disconnected: list.filter(i => i.status === "disconnected").length,
+      connecting: list.filter(i => i.status === "connecting" || i.status === "awaiting_qr").length,
+      error: list.filter(i => i.status === "error").length,
+    });
+
+    const instancesSummary = buildSummary(allInstances);
 
     const healthResult: EvolutionHealthResult = {
       status: healthStatus,
@@ -222,12 +225,19 @@ serve(async (req) => {
       instances_summary: instancesSummary,
     };
 
+    // Add per-provider breakdown
+    const perProviderSummary = {
+      evolution: buildSummary(evoInstances),
+      uazapi: buildSummary(uazInstances),
+    };
+
     console.log("[Evolution Health] Check result:", healthResult);
 
     return new Response(
       JSON.stringify({
         success: true,
         health: healthResult,
+        providers: perProviderSummary,
       }),
       { headers: { ...getCorsHeaders(origin), "Content-Type": "application/json" } }
     );
