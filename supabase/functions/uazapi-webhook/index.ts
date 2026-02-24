@@ -456,7 +456,21 @@ serve(async (req) => {
         
         // uazapi sends chat info at root level
         const chat = body.chat || {};
-        
+
+        // Auto-populate instance phone_number from chat.owner if missing
+        const chatOwner = (chat as any).owner || (chat as any).wa_owner || "";
+        if (chatOwner && !instance.phone_number) {
+          const ownerPhone = extractPhone(chatOwner);
+          if (ownerPhone && ownerPhone.length >= 10) {
+            console.log("[UAZAPI_WEBHOOK] Auto-populating phone from chat.owner:", ownerPhone);
+            await supabaseClient
+              .from("whatsapp_instances")
+              .update({ phone_number: ownerPhone, updated_at: new Date().toISOString() })
+              .eq("id", instance.id);
+            (instance as any).phone_number = ownerPhone;
+          }
+        }
+
         // Skip group messages
         const chatPhoneClean = chat.phone ? chat.phone.replace(/\D/g, "") : "";
         const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid 
