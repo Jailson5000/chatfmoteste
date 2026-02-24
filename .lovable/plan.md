@@ -1,92 +1,107 @@
 
 
-# Auditoria Completa: Fluxo de IA e Migração Evolution -> Uazapi
+# Correcoes: Foto, Nome da IA, Recusar Chamadas e Ignorar Grupos
 
-## Problemas Encontrados
+## 4 Problemas Identificados
 
-### 1. Duplicação de Mensagens da IA — SEM PROBLEMA
-O webhook uazapi recebe eventos duplicados (o log mostra o erro `23505 duplicate key`), mas isso é tratado corretamente: a segunda tentativa falha no insert e o processamento de IA roda apenas na primeira. Sem duplicação real.
+### 1. Foto de perfil nao puxa (automatico nem manual)
 
-### 2. Ferramentas de Agendamento (Scheduling Tools) — OK
-O `ai-chat` verifica `scheduling_enabled` na automação e `agenda_pro_settings.is_enabled` do tenant. Se ambos estão ativos, injeta as `SCHEDULING_TOOLS` (listar serviços, verificar disponibilidade, criar/reagendar/cancelar agendamentos). Isso é agnóstico de provedor — funciona igual para Evolution e uazapi.
+**Automatico (webhook):** A funcao `persistProfilePicture` depende de `chat.imagePreview` no payload do uazapi. Se o campo vier vazio ou nulo, nada acontece. Isso e normal — muitos contatos novos nao enviam `imagePreview` no primeiro contato.
 
-### 3. Resposta da IA sem Split Multi-parte — PROBLEMA MENOR
-O `evolution-webhook` usa `sendAIResponseToWhatsApp()` que divide respostas longas em partes (max 5), adiciona delays humanos entre elas, e suporta áudio TTS. O `uazapi-webhook` envia a resposta inteira como uma única mensagem. Para respostas curtas funciona, mas respostas longas chegam como um "textão".
+**Manual (botao refresh):** O botao chama `evolution-api` → `fetch_profile_picture` que usa o provider abstraction (`whatsapp-provider.ts`). Para uazapi, chama `POST /profile/image` com `{ jid }`. Se o endpoint retorna erro, a UI mostra "Foto nao disponivel". 
 
-### 4. `process-follow-ups` — PROBLEMA CRÍTICO
-Usa formato Evolution API hardcoded:
-```
-endpoint: /message/sendText/{instanceName}
-header: apikey: {key}
-```
-Para instâncias uazapi, deveria usar:
-```
-endpoint: /send/text
-header: token: {key}
-```
-Resultado: **follow-ups vão falhar** em instâncias uazapi.
+**Problema real:** O endpoint uazapi `/profile/image` pode requerer parametros diferentes (ex: `number` em vez de `jid`, ou `GET` em vez de `POST`). Preciso verificar e ajustar. Alem disso, o auto-persist so roda na criacao de novo cliente (`if (resolvedClientId && chat.imagePreview...)`) — se o cliente ja existia sem foto, nao tenta buscar via API.
 
-### 5. `process-scheduled-messages` — PROBLEMA CRÍTICO
-Usa `EVOLUTION_API_URL` e `EVOLUTION_API_KEY` como variáveis de ambiente globais para enviar mensagens agendadas customizadas (não via `agenda-pro-notification`). Para uazapi, precisa buscar `api_url`/`api_key` da instância e usar o formato correto.
+**Correcao:**
+- **`supabase/functions/_shared/whatsapp-provider.ts`**: Adicionar fallback — se `POST /profile/image` falhar, tentar `GET /profile/image?number={phone}` (formato alternativo do uazapi)
+- **`supabase/functions/uazapi-webhook/index.ts`**: Quando o cliente ja existe mas `avatar_url` esta null, chamar `persistProfilePicture` com `chat.imagePreview` OU fazer fetch via provider se `imagePreview` nao estiver disponivel
 
-### 6. `agenda-pro-notification` — PROBLEMA CRÍTICO
-Envia notificações WhatsApp (confirmações, lembretes, notificação ao profissional) usando o formato Evolution:
+### 2. Mostra "Assistente IA" em vez do nome do agente (Davi)
+
+**Causa raiz:** O `uazapi-webhook` salva a mensagem da IA no banco SEM `ai_agent_id` e `ai_agent_name`:
+
 ```typescript
-fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
-  headers: { apikey: instance.api_key }
-})
+// ATUAL (uazapi-webhook linhas 1032-1041)
+await supabaseClient.from("messages").insert({
+  conversation_id: conversationId,
+  whatsapp_message_id: allMsgIds[0],
+  content: aiText,
+  message_type: "text",
+  is_from_me: true,
+  sender_type: "ai",
+  ai_generated: true,
+  law_firm_id: lawFirmId,
+  // ← FALTA ai_agent_id e ai_agent_name!
+});
 ```
-Para uazapi, precisa usar:
+
+O `evolution-webhook` faz corretamente — salva com `ai_agent_id` e `ai_agent_name`. O `MessageBubble` usa `aiAgentName || "Assistente IA"` como fallback, entao sem o campo, mostra o generico.
+
+**Correcao:**
+- **`supabase/functions/uazapi-webhook/index.ts`**: Antes de chamar `ai-chat`, buscar o nome da automacao. Depois, incluir `ai_agent_id` e `ai_agent_name` no insert da mensagem:
+
 ```typescript
-fetch(`${apiUrl}/send/text`, {
-  headers: { token: instance.api_key }
-})
+// Buscar nome da automacao
+const { data: automation } = await supabaseClient
+  .from("automations")
+  .select("name")
+  .eq("id", conv.current_automation_id)
+  .single();
+
+// No insert:
+ai_agent_id: conv.current_automation_id,
+ai_agent_name: automation?.name || null,
 ```
 
-### 7. `uazapi-webhook` AI trigger — OK (já corrigido)
-O bloco de trigger da IA já envia `message`, `automationId`, `context` corretos e salva a resposta. Funcional.
+### 3. Recusar Chamadas — NAO funciona para uazapi
 
-## Solução
+**Situacao atual:** O toggle "Recusar Chamadas" no painel de detalhes chama:
+- `get_settings` → para uazapi retorna `{ rejectCall: false }` hardcoded (nao consulta nada real)
+- `set_settings` → para uazapi retorna `{ success: true }` sem fazer nada real
 
-Adaptar as 4 funções que ainda usam formato Evolution hardcoded para detectar o provedor e rotear corretamente. A detecção é simples: instâncias uazapi têm `api_provider = 'uazapi'` ou `api_url` contendo `uazapi.com`.
+O uazapi nao tem equivalente da Evolution API `/settings/set` com `rejectCall`. A rejeicao de chamadas no uazapi e feita de forma diferente — pode nao existir essa funcionalidade na API.
 
-### Arquivo 1: `supabase/functions/process-follow-ups/index.ts`
+**Correcao:**
+- **`supabase/functions/evolution-api/index.ts`**: Para `get_settings` de uazapi, ler o campo `reject_calls` da tabela `whatsapp_instances` (adicionar se nao existir). Para `set_settings` de uazapi, salvar no banco e tentar configurar via API se endpoint existir.
+- **Frontend**: Manter o toggle funcional salvando a preferencia no banco. O webhook do uazapi ja ignora chamadas se nao for mensagem de texto/media — mas precisamos verificar se o uazapi envia eventos de chamada e se podemos rejeitá-las.
+- **Alternativa pragmatica**: Se o uazapi nao suporta reject de chamadas via API, esconder o toggle para instancias uazapi e mostrar uma mensagem "Nao suportado neste provedor".
 
-**Mudança**: No bloco de envio (linhas 264-326), detectar o provedor pela `api_url` da instância e ajustar endpoint + headers:
+### 4. Ignorar Grupos — JA funciona mas precisa ser padrao
 
-- Se `apiUrl` contém `uazapi.com`: usar `/send/text` com header `token`
-- Senão (Evolution): manter `/message/sendText/{instanceName}` com header `apikey`
+**Situacao atual:** O uazapi-webhook ja tem `if (remoteJidRaw.includes("@g.us")) { skip }` na linha 479. Grupos sao ignorados por padrao no webhook.
 
-Também para media: uazapi usa `/send/image`, `/send/audio`, `/send/video`, `/send/document`.
+**Porem:** A configuracao `groupsIgnore: true` e enviada ao Evolution na criacao/conexao da instancia. Para uazapi, nao ha equivalente — o filtro e feito apenas no webhook. Isso funciona, mas se o uazapi enviar mensagens de grupo como eventos individuais (sem `@g.us` no JID), poderiam passar.
 
-### Arquivo 2: `supabase/functions/process-scheduled-messages/index.ts`
+**Correcao:**
+- **`supabase/functions/uazapi-webhook/index.ts`**: Adicionar verificacao extra alem de `@g.us`: checar se `chat.isGroup === true` ou se o JID tem mais de 20 digitos (padrao de grupos). Garantir que NENHUMA mensagem de grupo chegue ate o processamento de IA.
 
-**Mudança**: No bloco de envio de mensagens customizadas (linhas 167-226), buscar `api_url` e `api_key` da instância (já busca `instance_name`) e usar o mesmo padrão de detecção de provedor. Parar de depender de `EVOLUTION_API_URL`/`EVOLUTION_API_KEY` globais.
+```typescript
+// Adicionar verificacao robusta de grupo
+const isGroup = remoteJidRaw.includes("@g.us") 
+  || chat.isGroup === true 
+  || (chat as any).isGroup === true;
+if (isGroup) {
+  console.log("[UAZAPI_WEBHOOK] Skipping group message");
+  break;
+}
+```
 
-### Arquivo 3: `supabase/functions/agenda-pro-notification/index.ts`
+## Resumo de Mudancas
 
-**Mudança**: Nos dois pontos de envio WhatsApp (linhas 385-398 e 669-682), detectar provedor pela `api_url` da instância:
-
-- Se uazapi: `POST /send/text` com `{ number, text }` e header `token`
-- Se Evolution: manter formato atual
-
-### Arquivo 4: `supabase/functions/uazapi-webhook/index.ts`
-
-**Mudança menor**: Adicionar split de mensagens longas no bloco de resposta da IA (linhas 978-1006). Dividir `aiText` em partes (max 5) com delay de 1-2s entre elas, replicando o comportamento do evolution-webhook.
-
-## Resumo de Mudanças
-
-| Arquivo | Problema | Prioridade |
+| Arquivo | Mudanca | Prioridade |
 |---|---|---|
-| `process-follow-ups/index.ts` | Envia follow-ups com formato Evolution | CRÍTICO |
-| `process-scheduled-messages/index.ts` | Usa env vars Evolution globais | CRÍTICO |
-| `agenda-pro-notification/index.ts` | Notificações com formato Evolution | CRÍTICO |
-| `uazapi-webhook/index.ts` | IA responde em bloco único | MENOR |
+| `supabase/functions/uazapi-webhook/index.ts` | Adicionar `ai_agent_id` + `ai_agent_name` no insert da IA | CRITICO |
+| `supabase/functions/uazapi-webhook/index.ts` | Reforcar filtro de grupos (isGroup check) | ALTO |
+| `supabase/functions/uazapi-webhook/index.ts` | Melhorar auto-persist de foto (buscar via API quando imagePreview ausente) | MEDIO |
+| `supabase/functions/_shared/whatsapp-provider.ts` | Adicionar fallback no fetchProfilePicture para uazapi | MEDIO |
+| `supabase/functions/evolution-api/index.ts` | Salvar/ler `reject_calls` no banco para uazapi (ou esconder toggle) | MEDIO |
+| `src/components/connections/ConnectionDetailPanel.tsx` | Esconder toggle "Recusar Chamadas" para instancias uazapi se nao suportado | BAIXO |
 
 ## Resultado Esperado
 
-- Follow-ups serão enviados corretamente via uazapi
-- Mensagens agendadas do Agenda Pro funcionarão com instâncias uazapi
-- Notificações de agendamento (confirmação, lembrete) chegarão via WhatsApp
-- Respostas longas da IA serão divididas em partes com delay natural
+- Mensagens da IA mostram "Davi" em vez de "Assistente IA"
+- Foto de perfil busca automaticamente via API quando imagePreview nao disponivel
+- Botao manual de refresh funciona para uazapi
+- Grupos sao filtrados de forma robusta (multiplos checks)
+- Toggle de recusar chamadas e funcional ou escondido conforme suporte do provedor
 
