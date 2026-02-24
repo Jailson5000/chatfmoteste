@@ -1,97 +1,26 @@
 
 
-# Correção: Endpoint Errado no Envio de Áudio via UAZAPi
+# Atualizar Vozes: Remover Felipe, Adicionar Roberto
 
-## Problema Real (confirmado nos logs)
+## Mudanca
 
-Os logs mostram claramente o erro:
+No arquivo `src/lib/voiceConfig.ts`:
 
-```
-/send/audio response: { status: 405, ok: false }
-/send/audio data: {"code":405,"message":"Method Not Allowed.","data":{}}
-/send/audio retry response: { status: 405, ok: false }
-```
+- **Remover**: Felipe (`el_felipe`, externalId: `GxZ0UJKPezKah8TMxZZM`)
+- **Adicionar**: Roberto (`el_roberto`, externalId: `qtRuzSBBS6RO6Odr5QHI`) — voz masculina
 
-**O endpoint `/send/audio` NÃO EXISTE na UAZAPi.** Retorna 405 Method Not Allowed.
-
-## Documentação UAZAPi (endpoint correto)
-
-A documentação oficial (`/send/media`) especifica:
-
-- **Endpoint**: `POST /send/media`
-- **Parâmetros obrigatórios**:
-  - `number`: número do destinatário
-  - `type`: tipo de mídia — para áudio de voz deve ser `"ptt"` (Push-to-Talk)
-  - `file`: URL ou base64 do arquivo
-- **Parâmetro opcional**: `mimetype` (detectado automaticamente se omitido)
-
-Exemplo correto para enviar áudio de voz:
-```json
-{
-  "number": "5511999999999",
-  "type": "ptt",
-  "file": "data:audio/ogg;base64,AAAA..."
-}
-```
-
-## Correção
-
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
-
-Substituir TODAS as chamadas a `/send/audio` por `/send/media` com os parâmetros corretos:
+## Codigo
 
 ```typescript
-// ANTES (bugado - endpoint não existe):
-const audioSendRes = await fetch(`${apiUrl}/send/audio`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", token: instance.api_key },
-  body: JSON.stringify({
-    number: targetNumber,
-    audio: `data:${audioMime};base64,${ttsData.audioContent}`,
-    ptt: true,
-  }),
-});
-
-// DEPOIS (correto conforme docs UAZAPi):
-const audioSendRes = await fetch(`${apiUrl}/send/media`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", token: instance.api_key },
-  body: JSON.stringify({
-    number: targetNumber,
-    type: "ptt",
-    file: `data:${audioMime};base64,${ttsData.audioContent}`,
-    mimetype: audioMime,
-  }),
-});
+// Linha 16 - substituir Felipe por Roberto:
+{ id: "el_roberto", name: "Roberto", gender: "male", description: "Voz masculina profissional de alta qualidade", externalId: "qtRuzSBBS6RO6Odr5QHI" },
 ```
-
-O fallback (retry com base64 puro) também será atualizado para usar `/send/media`:
-
-```typescript
-// Fallback: enviar com type "audio" em vez de "ptt"
-const retryRes = await fetch(`${apiUrl}/send/media`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json", token: instance.api_key },
-  body: JSON.stringify({
-    number: targetNumber,
-    type: "audio",
-    file: `data:${audioMime};base64,${ttsData.audioContent}`,
-    mimetype: audioMime,
-  }),
-});
-```
-
-## Resumo
-
-| Problema | Causa | Correção |
-|---|---|---|
-| 405 Method Not Allowed | Endpoint `/send/audio` não existe na UAZAPi | Usar `/send/media` com `type: "ptt"` |
-| Parâmetros errados | `audio` e `ptt` como campos | Usar `file` e `type` conforme docs |
-| Fallback também falha | Mesmo endpoint errado | Fallback com `type: "audio"` via `/send/media` |
 
 ## Arquivo afetado
 
-| Arquivo | Mudança |
+| Arquivo | Mudanca |
 |---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Trocar `/send/audio` → `/send/media`; ajustar payload para `type`/`file`/`mimetype` |
+| `src/lib/voiceConfig.ts` | Trocar entrada do Felipe pela do Roberto |
+
+Nenhuma outra mudanca necessaria — todos os componentes (AIVoiceSettings, AIAgentEdit, AudioModeIndicator) ja consomem o array `AVAILABLE_VOICES` dinamicamente.
 
