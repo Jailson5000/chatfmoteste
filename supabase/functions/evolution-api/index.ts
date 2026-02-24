@@ -14,6 +14,7 @@ import {
   sendText as providerSendText,
   sendMedia as providerSendMedia,
   sendAudio as providerSendAudio,
+  sendContact as providerSendContact,
   fetchProfilePicture as providerFetchProfilePicture,
   deleteMessage as providerDeleteMessage,
   sendReaction as providerSendReaction,
@@ -73,6 +74,7 @@ type EvolutionAction =
   | "delete_message" // Delete message for everyone on WhatsApp
   | "send_reaction" // Send emoji reaction to a message
   | "fetch_profile_picture" // Fetch WhatsApp profile picture and update client avatar
+  | "send_contact" // Send contact card via WhatsApp
   // Tenant-level instance management
   | "logout_instance" // Disconnect without deleting
   | "restart_instance" // Restart connection
@@ -4810,6 +4812,37 @@ serve(async (req) => {
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
+      }
+
+      case "send_contact": {
+        if (!body.instanceId) {
+          throw new Error("instanceId is required for send_contact");
+        }
+        if (!body.remoteJid && !body.phoneNumber) {
+          throw new Error("remoteJid or phoneNumber is required for send_contact");
+        }
+        if (!body.fullName || !body.contactPhone) {
+          throw new Error("fullName and contactPhone are required for send_contact");
+        }
+
+        const scInstance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
+        const targetNumber = body.remoteJid 
+          ? body.remoteJid.replace("@s.whatsapp.net", "")
+          : body.phoneNumber;
+
+        const scResult = await providerSendContact(scInstance, {
+          number: targetNumber,
+          fullName: body.fullName,
+          phoneNumber: body.contactPhone,
+          organization: body.organization || "",
+          email: body.contactEmail || "",
+          url: body.contactUrl || "",
+        });
+
+        return new Response(
+          JSON.stringify({ success: true, whatsappMessageId: scResult.whatsappMessageId }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
 
       case "reapply_webhook": {

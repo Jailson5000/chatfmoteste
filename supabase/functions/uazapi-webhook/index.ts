@@ -8,11 +8,19 @@ import { createClient } from "npm:@supabase/supabase-js@2";
  * message format used by the system. This reuses the same database tables
  * and business logic as the Evolution webhook, just with different payload parsing.
  * 
- * uazapi events:
- * - messages       -> equivalent to Evolution MESSAGES_UPSERT
- * - connection     -> equivalent to Evolution CONNECTION_UPDATE
- * - messages_update -> equivalent to Evolution MESSAGES_UPDATE
- * - qrcode         -> equivalent to Evolution QRCODE_UPDATED
+ * uazapi payload structure (confirmed from production logs):
+ * body = {
+ *   EventType: "messages",
+ *   chat: { phone: "+55 63 ...", name: "...", imagePreview: "https://pps.whatsapp.net/..." },
+ *   message: {
+ *     type: "DocumentMessage" (PascalCase!),
+ *     content: { URL: "...", mimetype: "...", fileName: "...", text: "...", base64: "..." },
+ *     fromMe: false,
+ *     id: "3EB0...",
+ *     timestamp: 1771936645,
+ *     pushName: "..."
+ *   }
+ * }
  */
 
 const corsHeaders = {
@@ -39,10 +47,9 @@ function validateWebhookToken(req: Request, body?: any): Response | null {
 
   if (!providedToken || providedToken !== UAZAPI_WEBHOOK_TOKEN) {
     // Allow through if body has BaseUrl (uazapi sends duplicate calls, some without token)
-    // Instance will be identified by BaseUrl instead
     if (body?.BaseUrl) {
       console.log("[UAZAPI_WEBHOOK] Token missing but BaseUrl present, allowing through for BaseUrl matching");
-      return null; // Allow through
+      return null;
     }
     console.warn("[UAZAPI_WEBHOOK] ❌ Invalid or missing token");
     return new Response(
@@ -51,13 +58,11 @@ function validateWebhookToken(req: Request, body?: any): Response | null {
     );
   }
 
-  return null; // Valid
+  return null;
 }
 
 /**
  * Normalize uazapi phone number to remoteJid format.
- * uazapi sends: "5511999999999"
- * Internal format: "5511999999999@s.whatsapp.net"
  */
 function toRemoteJid(number: string): string {
   if (!number) return "";
@@ -66,9 +71,6 @@ function toRemoteJid(number: string): string {
   return `${clean}@s.whatsapp.net`;
 }
 
-/**
- * Extract phone number from remoteJid or raw number.
- */
 function extractPhone(value: string): string {
   if (!value) return "";
   return value.split("@")[0].replace(/\D/g, "");
@@ -76,60 +78,81 @@ function extractPhone(value: string): string {
 
 /**
  * Detect message type from uazapi payload.
+ * uazapi sends PascalCase types: "DocumentMessage", "ImageMessage", "StickerMessage", etc.
  */
 function detectMessageType(msg: any): string {
   const t = (msg.type || "").toLowerCase();
-  if (t === "image" || msg.imageMessage) return "image";
-  if (t === "video" || msg.videoMessage) return "video";
-  if (t === "audio" || t === "ptt" || t === "myaudio" || msg.audioMessage) return "audio";
-  if (t === "document" || msg.documentMessage) return "document";
-  if (t === "sticker" || msg.stickerMessage) return "sticker";
-  if (t === "location" || msg.locationMessage) return "location";
-  if (t === "contact" || msg.contactMessage || msg.contactsArrayMessage) return "contact";
+  if (t === "image" || t === "imagemessage" || msg.imageMessage) return "image";
+  if (t === "video" || t === "videomessage" || msg.videoMessage) return "video";
+  if (t === "audio" || t === "audiomessage" || t === "ptt" || t === "pttmessage" || t === "myaudio" || msg.audioMessage) return "audio";
+  if (t === "document" || t === "documentmessage" || msg.documentMessage) return "document";
+  if (t === "sticker" || t === "stickermessage" || msg.stickerMessage) return "sticker";
+  if (t === "location" || t === "locationmessage" || msg.locationMessage) return "location";
+  if (t === "contact" || t === "contactmessage" || t === "contactcardmessage" || msg.contactMessage || msg.contactsArrayMessage) return "contact";
+  // ExtendedTextMessage is still text
+  if (t === "extendedtextmessage") return "text";
   return "text";
 }
 
 /**
  * Extract text content from uazapi message.
+ * uazapi nests data inside msg.content (object).
  */
 function extractContent(msg: any): string {
-  // Direct text
+  // Direct text at msg level
   if (msg.text) return msg.text;
   if (msg.body) return msg.body;
   if (msg.conversation) return msg.conversation;
-  
-  // Extended text (forwarded, etc.)
+
+  // uazapi: content is an object with the actual data
+  const c = msg.content;
+  if (c && typeof c === "object") {
+    if (c.text) return c.text;
+    if (c.caption) return c.caption;
+    if (c.conversation) return c.conversation;
+    if (c.extendedTextMessage?.text) return c.extendedTextMessage.text;
+  }
+
+  // Fallback: content as string
+  if (typeof msg.content === "string") return msg.content;
+
+  // Extended text at msg level
   if (msg.extendedTextMessage?.text) return msg.extendedTextMessage.text;
-  
-  // Media captions
+
+  // Media captions at msg level (Evolution format)
   if (msg.imageMessage?.caption) return msg.imageMessage.caption;
   if (msg.videoMessage?.caption) return msg.videoMessage.caption;
   if (msg.documentMessage?.caption) return msg.documentMessage.caption;
-  
-  // Caption field on root
   if (msg.caption) return msg.caption;
-  
+
   return "";
 }
 
 /**
  * Extract media URL from uazapi message.
- * uazapi may provide base64 directly or a URL.
+ * uazapi puts URL inside msg.content.URL (uppercase).
  */
 function extractMediaUrl(msg: any): string | null {
+  // uazapi: media URL inside msg.content
+  const c = msg.content;
+  if (c && typeof c === "object") {
+    if (c.URL) return c.URL;
+    if (c.url) return c.url;
+    if (c.mediaUrl) return c.mediaUrl;
+  }
+
   // Direct URL fields
   if (msg.mediaUrl) return msg.mediaUrl;
   if (msg.url) return msg.url;
-  // uazapi sends file as URL or base64 — only use if it's a URL
   if (msg.file && typeof msg.file === "string" && msg.file.startsWith("http")) return msg.file;
-  
-  // Nested in type-specific messages
+
+  // Nested in type-specific messages (Evolution format)
   if (msg.imageMessage?.url) return msg.imageMessage.url;
   if (msg.videoMessage?.url) return msg.videoMessage.url;
   if (msg.audioMessage?.url) return msg.audioMessage.url;
   if (msg.documentMessage?.url) return msg.documentMessage.url;
   if (msg.stickerMessage?.url) return msg.stickerMessage.url;
-  
+
   return null;
 }
 
@@ -137,6 +160,10 @@ function extractMediaUrl(msg: any): string | null {
  * Extract MIME type from uazapi message.
  */
 function extractMimeType(msg: any): string | null {
+  // uazapi: nested in content
+  const c = msg.content;
+  if (c && typeof c === "object" && c.mimetype) return c.mimetype;
+
   if (msg.mimetype) return msg.mimetype;
   if (msg.imageMessage?.mimetype) return msg.imageMessage.mimetype;
   if (msg.videoMessage?.mimetype) return msg.videoMessage.mimetype;
@@ -150,9 +177,67 @@ function extractMimeType(msg: any): string | null {
  * Extract file name from uazapi message.
  */
 function extractFileName(msg: any): string | null {
+  const c = msg.content;
+  if (c && typeof c === "object" && c.fileName) return c.fileName;
+
   if (msg.fileName) return msg.fileName;
   if (msg.documentMessage?.fileName) return msg.documentMessage.fileName;
   return null;
+}
+
+/**
+ * Persist profile picture from chat.imagePreview to Storage.
+ * Runs as fire-and-forget (non-blocking).
+ */
+async function persistProfilePicture(
+  supabaseClient: any,
+  clientId: string,
+  lawFirmId: string,
+  imageUrl: string,
+): Promise<void> {
+  try {
+    // Check if client already has avatar
+    const { data: client } = await supabaseClient
+      .from("clients")
+      .select("avatar_url")
+      .eq("id", clientId)
+      .single();
+    if (client?.avatar_url) return;
+
+    // Download profile picture
+    const response = await fetch(imageUrl);
+    if (!response.ok) return;
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.length < 100) return; // Too small, probably not a valid image
+
+    const storagePath = `${lawFirmId}/avatars/${clientId}.jpg`;
+
+    const { error: uploadError } = await supabaseClient.storage
+      .from("chat-media")
+      .upload(storagePath, bytes, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+
+    if (uploadError) {
+      console.warn("[UAZAPI_WEBHOOK] Avatar upload failed:", uploadError.message);
+      return;
+    }
+
+    const { data: publicUrlData } = supabaseClient.storage
+      .from("chat-media")
+      .getPublicUrl(storagePath);
+
+    if (publicUrlData?.publicUrl) {
+      await supabaseClient
+        .from("clients")
+        .update({ avatar_url: publicUrlData.publicUrl })
+        .eq("id", clientId);
+      console.log(`[UAZAPI_WEBHOOK] Profile picture persisted for client ${clientId}`);
+    }
+  } catch (err) {
+    console.warn("[UAZAPI_WEBHOOK] Profile picture persistence error:", err);
+  }
 }
 
 serve(async (req) => {
@@ -168,7 +253,6 @@ serve(async (req) => {
     if (tokenError) return tokenError;
     
     // Detect event type from uazapi payload
-    // uazapi sends EventType (PascalCase), normalize to lowercase
     const rawEvent = body.event || body.type || body.EventType || "unknown";
     const event = rawEvent.toLowerCase();
     
@@ -180,11 +264,9 @@ serve(async (req) => {
     );
 
     // Find the instance by token or API URL
-    // uazapi webhooks include instance info in the payload
     const instanceToken = body.token || body.instanceToken || null;
     const instancePhone = body.instance?.phone || body.phone || null;
     
-    // Try to find the instance by matching api_key (token) or phone number
     let instance: any = null;
     
     if (instanceToken) {
@@ -210,7 +292,6 @@ serve(async (req) => {
       instance = data;
     }
 
-    // If instance not found, try to match by BaseUrl from uazapi payload
     if (!instance && body.BaseUrl) {
       try {
         const baseHostname = new URL(body.BaseUrl).hostname;
@@ -285,7 +366,6 @@ serve(async (req) => {
           updatePayload.reconnect_attempts_count = 0;
           updatePayload.manual_disconnect = false;
 
-          // Try to get phone number from payload
           const phone = body.phone || body.number || body.ownerJid?.split("@")[0] || null;
           if (phone) {
             updatePayload.phone_number = extractPhone(phone);
@@ -296,7 +376,6 @@ serve(async (req) => {
           }
         }
 
-        // Protection: don't downgrade from connected to connecting
         if (dbStatus === "connecting" && instance.status === "connected") {
           console.log("[UAZAPI_WEBHOOK] Skipping downgrade from connected to connecting");
           break;
@@ -325,13 +404,13 @@ serve(async (req) => {
       case "messages":
       case "message":
       case "MESSAGES_UPSERT": {
+        // uazapi uses body.msg or body.message — prioritize body.msg
         const msg = body.msg || body.data || body.message || body;
         
         // uazapi sends chat info at root level
         const chat = body.chat || {};
         
         // Skip group messages
-        // Prioritize chat.phone (uazapi reliable source) over chat.id (internal ID, NOT a phone number)
         const chatPhoneClean = chat.phone ? chat.phone.replace(/\D/g, "") : "";
         const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid 
           || (chatPhoneClean.length >= 10 ? chatPhoneClean : null)
@@ -341,15 +420,12 @@ serve(async (req) => {
           break;
         }
 
-        // Skip status broadcasts
         if (remoteJidRaw === "status@broadcast") {
           break;
         }
 
         const isFromMe = msg.fromMe === true || msg.key?.fromMe === true;
         
-        // uazapi with excludeMessages: ["wasSentByApi"] should filter these,
-        // but double-check as a safety measure
         if (isFromMe && (msg.wasSentByApi || body.wasSentByApi)) {
           console.log("[UAZAPI_WEBHOOK] Skipping message sent by API (anti-loop)");
           break;
@@ -362,11 +438,17 @@ serve(async (req) => {
         const mediaUrl = extractMediaUrl(msg);
         const mimeType = extractMimeType(msg);
         const fileName = extractFileName(msg);
-        const whatsappMessageId = msg.key?.id || msg.id || msg.messageId || crypto.randomUUID();
+        
+        // Extract message ID — uazapi puts id directly on msg
+        const whatsappMessageId = msg.id || msg.key?.id || msg.messageId || crypto.randomUUID();
+        
+        // Extract contact name
         const contactName = msg.pushName || msg.notifyName || msg.senderName || chat.name || chat.lead_name || phoneNumber;
-        const rawTs = Number(msg.messageTimestamp);
+        
+        // Extract timestamp — uazapi uses msg.timestamp (not msg.messageTimestamp)
+        const rawTs = Number(msg.timestamp || msg.messageTimestamp);
         let timestamp: string;
-        if (!msg.messageTimestamp || isNaN(rawTs) || rawTs <= 0) {
+        if (!rawTs || isNaN(rawTs) || rawTs <= 0) {
           timestamp = new Date().toISOString();
         } else if (rawTs > 1e12) {
           timestamp = new Date(rawTs).toISOString();
@@ -374,7 +456,7 @@ serve(async (req) => {
           timestamp = new Date(rawTs * 1000).toISOString();
         }
 
-        // Debug: log all phone-related fields from payload
+        // Debug phone resolution
         console.log(`[UAZAPI_WEBHOOK] Phone resolution:`, {
           "chat.phone": chat.phone,
           "chatPhoneClean": chatPhoneClean,
@@ -383,16 +465,25 @@ serve(async (req) => {
           "remoteJid": remoteJid,
         });
 
+        // Extract base64 — check msg.content.base64 first (uazapi), then direct fields
+        const msgContent = msg.content;
+        const contentBase64 = (msgContent && typeof msgContent === "object") ? msgContent.base64 : null;
+        const hasAnyBase64 = !!(contentBase64 || msg.base64 || body.base64 
+          || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http"))
+          || msg.imageMessage?.base64 || msg.videoMessage?.base64 
+          || msg.audioMessage?.base64 || msg.documentMessage?.base64 
+          || msg.stickerMessage?.base64);
+
         console.log(`[UAZAPI_WEBHOOK] Message: ${messageType} from ${phoneNumber} (fromMe: ${isFromMe})`, {
           contentPreview: content?.slice(0, 50),
           hasMedia: !!mediaUrl,
-          hasBase64: !!(msg.base64 || body.base64 || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http"))),
+          hasBase64: hasAnyBase64,
           mimeType: mimeType || null,
           fileName: fileName || null,
+          msgType: msg.type || null,
         });
 
         // Skip empty messages
-        const hasAnyBase64 = !!(msg.base64 || body.base64 || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http")));
         if (!content && !mediaUrl && !hasAnyBase64 && messageType === "text") {
           console.log("[UAZAPI_WEBHOOK] Skipping empty text message");
           break;
@@ -401,7 +492,6 @@ serve(async (req) => {
         // ---- FIND OR CREATE CONVERSATION ----
         let conversationId: string | null = null;
 
-        // Look for existing conversation
         const { data: existingConv } = await supabaseClient
           .from("conversations")
           .select("id")
@@ -414,7 +504,6 @@ serve(async (req) => {
         if (existingConv) {
           conversationId = existingConv.id;
         } else {
-          // Create new conversation
           const { data: newConv, error: convError } = await supabaseClient
             .from("conversations")
             .insert({
@@ -427,7 +516,6 @@ serve(async (req) => {
               current_handler: "ai",
               last_message_at: timestamp,
               origin: "WHATSAPP",
-              // Apply instance defaults
               department_id: instance.default_department_id || null,
               assigned_to: instance.default_assigned_to || null,
               current_automation_id: instance.default_automation_id || null,
@@ -436,7 +524,6 @@ serve(async (req) => {
             .single();
 
           if (convError) {
-            // If unique constraint violation, find existing
             if (convError.code === "23505") {
               const { data: existingConv2 } = await supabaseClient
                 .from("conversations")
@@ -462,11 +549,12 @@ serve(async (req) => {
         }
 
         // ---- FIND OR CREATE CLIENT ----
+        let resolvedClientId: string | null = null;
         if (!isFromMe) {
           const normalizedPhone = phoneNumber.replace(/\D/g, "");
           const { data: existingClient } = await supabaseClient
             .from("clients")
-            .select("id")
+            .select("id, avatar_url")
             .eq("law_firm_id", lawFirmId)
             .or(`phone.eq.${normalizedPhone},phone.eq.+${normalizedPhone}`)
             .limit(1)
@@ -485,18 +573,25 @@ serve(async (req) => {
               .maybeSingle();
 
             if (newClient) {
+              resolvedClientId = newClient.id;
               await supabaseClient
                 .from("conversations")
                 .update({ client_id: newClient.id })
                 .eq("id", conversationId);
             }
           } else {
+            resolvedClientId = existingClient.id;
             // Ensure conversation has client linked
             await supabaseClient
               .from("conversations")
               .update({ client_id: existingClient.id })
               .eq("id", conversationId)
               .is("client_id", null);
+          }
+
+          // ---- PERSIST PROFILE PICTURE ----
+          if (resolvedClientId && chat.imagePreview && typeof chat.imagePreview === "string" && chat.imagePreview.startsWith("http")) {
+            persistProfilePicture(supabaseClient, resolvedClientId, lawFirmId, chat.imagePreview).catch(() => {});
           }
         }
 
@@ -515,7 +610,6 @@ serve(async (req) => {
         }
 
         // ---- SAVE MESSAGE ----
-        // For media messages without text, show file name or type as content
         let finalContent = content;
         if (!finalContent && messageType !== "text") {
           if (fileName) finalContent = `[${fileName}]`;
@@ -536,14 +630,15 @@ serve(async (req) => {
           law_firm_id: lawFirmId,
         };
 
-        // Handle base64 media from uazapi (check msg.base64, body.base64, msg.file as base64, and type-specific fields)
-        const rawBase64 = msg.base64 || body.base64 
+        // Handle base64 media — prioritize msg.content.base64 (uazapi), then fallbacks
+        const rawBase64 = contentBase64
+          || msg.base64 || body.base64 
           || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http") ? msg.file : null)
           || msg.imageMessage?.base64 || msg.videoMessage?.base64 
           || msg.audioMessage?.base64 || msg.documentMessage?.base64 
           || msg.stickerMessage?.base64 || null;
+
         if (rawBase64 && !mediaUrl) {
-          // Store base64 media to Supabase Storage
           try {
             const base64Data = rawBase64;
             const binaryStr = atob(base64Data);
@@ -555,10 +650,13 @@ serve(async (req) => {
             const extMap: Record<string, string> = {
               "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
               "image/webp": ".webp", "audio/ogg": ".ogg", "audio/mpeg": ".mp3",
-              "audio/mp4": ".m4a", "video/mp4": ".mp4", "application/pdf": ".pdf",
+              "audio/mp4": ".m4a", "audio/ogg;codecs=opus": ".ogg",
+              "video/mp4": ".mp4", "application/pdf": ".pdf",
+              "application/msword": ".doc",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
             };
             const baseMime = (mimeType || "").split(";")[0].trim().toLowerCase();
-            const ext = extMap[baseMime] || ".bin";
+            const ext = extMap[baseMime] || extMap[mimeType || ""] || ".bin";
             const storagePath = `${lawFirmId}/${conversationId}/${whatsappMessageId}${ext}`;
 
             const { error: uploadError } = await supabaseClient.storage
@@ -610,7 +708,6 @@ serve(async (req) => {
         console.log(`[UAZAPI_WEBHOOK] Message saved: ${whatsappMessageId} -> conversation ${conversationId}`);
 
         // ---- TRIGGER AI PROCESSING ----
-        // If message is from client and conversation is handled by AI, trigger AI response
         if (!isFromMe) {
           const { data: conv } = await supabaseClient
             .from("conversations")
@@ -621,7 +718,6 @@ serve(async (req) => {
           if (conv?.current_handler === "ai" && conv?.current_automation_id) {
             console.log("[UAZAPI_WEBHOOK] Triggering AI processing for conversation:", conversationId);
             
-            // Invoke ai-chat edge function in background
             try {
               const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
               const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -651,12 +747,11 @@ serve(async (req) => {
       }
 
       // ============================================================
-      // MESSAGE STATUS UPDATE (delivered, read, etc.)
+      // MESSAGE STATUS UPDATE
       // ============================================================
       case "messages_update":
       case "message_update":
       case "MESSAGES_UPDATE": {
-        // Currently not processing status updates (same as Evolution optimization)
         console.log("[UAZAPI_WEBHOOK] Message update event (ignored for optimization)");
         break;
       }

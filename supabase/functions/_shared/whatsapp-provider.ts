@@ -42,6 +42,15 @@ export interface SendAudioOptions {
   mimeType?: string;
 }
 
+export interface SendContactOptions {
+  number: string;
+  fullName: string;
+  phoneNumber: string;
+  organization?: string;
+  email?: string;
+  url?: string;
+}
+
 export interface FetchProfilePictureResult {
   profilePicUrl: string | null;
   raw?: unknown;
@@ -881,15 +890,18 @@ const UazapiProvider = {
 
   async fetchProfilePicture(config: ProviderConfig, phoneNumber: string): Promise<FetchProfilePictureResult> {
     const apiUrl = normalizeUrl(config.apiUrl);
+    
+    // uazapi: POST /profile/image with jid parameter
+    const jid = phoneNumber.includes("@") ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
     const res = await fetchWithTimeout(
-      `${apiUrl}/contacts/profile-picture`,
+      `${apiUrl}/profile/image`,
       {
         method: "POST",
         headers: {
           token: config.apiKey,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ number: phoneNumber }),
+        body: JSON.stringify({ jid }),
       },
     );
 
@@ -898,8 +910,41 @@ const UazapiProvider = {
     }
 
     const data = await res.json().catch(() => ({}));
-    const url = data?.profilePictureUrl || data?.picture || data?.url || data?.imgUrl || null;
+    const url = data?.profilePictureUrl || data?.picture || data?.url || data?.imgUrl || data?.image || null;
     return { profilePicUrl: typeof url === "string" && url.startsWith("http") ? url : null, raw: data };
+  },
+
+  async sendContact(config: ProviderConfig, opts: SendContactOptions): Promise<SendTextResult> {
+    const apiUrl = normalizeUrl(config.apiUrl);
+    const payload = {
+      number: opts.number,
+      fullName: opts.fullName,
+      phoneNumber: opts.phoneNumber,
+      organization: opts.organization || "",
+      email: opts.email || "",
+      url: opts.url || "",
+    };
+
+    const res = await fetchWithTimeout(
+      `${apiUrl}/send/contact`,
+      {
+        method: "POST",
+        headers: {
+          token: config.apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      },
+      SEND_TIMEOUT_MS,
+    );
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Falha ao enviar contato (${res.status}): ${text.slice(0, 300)}`);
+    }
+
+    const data = await res.json().catch(() => ({}));
+    return { success: true, whatsappMessageId: data?.key?.id || data?.id || null, raw: data };
   },
 };
 
@@ -991,4 +1036,13 @@ export async function deleteMessage(instance: InstanceRef, remoteJid: string, me
 export async function sendReaction(instance: InstanceRef, remoteJid: string, messageId: string, reaction: string, isFromMe: boolean): Promise<void> {
   const config = getProviderConfig(instance);
   return getProvider(config).sendReaction(config, remoteJid, messageId, reaction, isFromMe);
+}
+
+export async function sendContact(instance: InstanceRef, opts: SendContactOptions): Promise<SendTextResult> {
+  const config = getProviderConfig(instance);
+  const provider = getProvider(config);
+  if ('sendContact' in provider) {
+    return (provider as any).sendContact(config, opts);
+  }
+  throw new Error(`sendContact not supported for provider: ${config.provider}`);
 }
