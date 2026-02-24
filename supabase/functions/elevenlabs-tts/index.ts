@@ -246,7 +246,7 @@ serve(async (req) => {
       JSON.stringify({
         success: true,
         audioContent: base64Audio,
-        mimeType: "audio/mpeg",
+        mimeType: "audio/ogg; codecs=opus",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
