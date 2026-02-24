@@ -934,7 +934,7 @@ serve(async (req) => {
         console.log(`[UAZAPI_WEBHOOK] Message saved: ${whatsappMessageId} -> conversation ${conversationId}`);
 
         // ---- TRIGGER AI PROCESSING ----
-        if (!isFromMe) {
+        if (!isFromMe && content) {
           const { data: conv } = await supabaseClient
             .from("conversations")
             .select("current_handler, current_automation_id")
@@ -942,13 +942,13 @@ serve(async (req) => {
             .single();
 
           if (conv?.current_handler === "ai" && conv?.current_automation_id) {
-            console.log("[UAZAPI_WEBHOOK] Triggering AI processing for conversation:", conversationId);
+            console.log("[UAZAPI_WEBHOOK] Triggering AI processing for conversation:", conversationId, "message:", content?.substring(0, 50));
             
             try {
               const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
               const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
               
-              fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
+              const aiResponse = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
@@ -956,15 +956,67 @@ serve(async (req) => {
                 },
                 body: JSON.stringify({
                   conversationId,
-                  lawFirmId,
-                  messageId: whatsappMessageId,
-                  source: "uazapi_webhook",
+                  message: content,
+                  automationId: conv.current_automation_id,
+                  source: "whatsapp",
+                  context: {
+                    clientName: contactName,
+                    clientPhone: phoneNumber,
+                    lawFirmId,
+                    clientId: resolvedClientId,
+                    skipSaveUserMessage: true,
+                    skipSaveAIResponse: true,
+                  },
                 }),
-              }).catch(err => {
-                console.warn("[UAZAPI_WEBHOOK] AI trigger failed (non-blocking):", err);
               });
+
+              if (aiResponse.ok) {
+                const result = await aiResponse.json();
+                const aiText = result.response;
+                console.log("[UAZAPI_WEBHOOK] AI response received:", aiText?.substring(0, 80));
+
+                if (aiText && instance.api_url && instance.api_key) {
+                  // Send AI response to WhatsApp via uazapi
+                  const apiUrl = instance.api_url.replace(/\/+$/, "");
+                  const targetNumber = remoteJid.replace("@s.whatsapp.net", "");
+                  
+                  const sendRes = await fetch(`${apiUrl}/send/text`, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      token: instance.api_key,
+                    },
+                    body: JSON.stringify({ number: targetNumber, text: aiText }),
+                  });
+
+                  const sendData = await sendRes.json().catch(() => ({}));
+                  const aiMsgId = sendData?.key?.id || sendData?.id || crypto.randomUUID();
+                  console.log("[UAZAPI_WEBHOOK] AI message sent to WhatsApp, id:", aiMsgId);
+
+                  // Save AI message to database
+                  await supabaseClient.from("messages").insert({
+                    conversation_id: conversationId,
+                    whatsapp_message_id: aiMsgId,
+                    content: aiText,
+                    message_type: "text",
+                    is_from_me: true,
+                    sender_type: "ai",
+                    ai_generated: true,
+                    law_firm_id: lawFirmId,
+                  });
+
+                  // Update conversation timestamp
+                  await supabaseClient
+                    .from("conversations")
+                    .update({ last_message_at: new Date().toISOString() })
+                    .eq("id", conversationId);
+                }
+              } else {
+                const errText = await aiResponse.text().catch(() => "");
+                console.warn("[UAZAPI_WEBHOOK] AI chat returned error:", aiResponse.status, errText?.substring(0, 200));
+              }
             } catch (aiErr) {
-              console.warn("[UAZAPI_WEBHOOK] AI trigger error:", aiErr);
+              console.warn("[UAZAPI_WEBHOOK] AI processing error:", aiErr);
             }
           }
         }
