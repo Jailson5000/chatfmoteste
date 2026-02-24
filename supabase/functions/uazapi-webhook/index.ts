@@ -358,7 +358,7 @@ serve(async (req) => {
     if (tokenError) return tokenError;
     
     // Detect event type from uazapi payload
-    const rawEvent = body.event || body.type || body.EventType || "unknown";
+    const rawEvent = body.EventType || body.type || (typeof body.event === "string" ? body.event : null) || "unknown";
     const event = String(rawEvent).toLowerCase();
     
     console.log(`[UAZAPI_WEBHOOK] Event: ${event}`, JSON.stringify(body).slice(0, 2000));
