@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useRef, useCallback, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -27,122 +27,142 @@ interface AdminAuthContextType {
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
 
+const SAFETY_TIMEOUT_MS = 15000;
+const RETRY_DELAY_MS = 2000;
+
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [adminProfile, setAdminProfile] = useState<AdminProfile | null>(null);
   const [adminRole, setAdminRole] = useState<AdminRole | null>(null);
   const [loading, setLoading] = useState(true);
+  const fetchingRef = useRef(false);
+  const loadingFinishedRef = useRef(false);
+  const safetyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchAdminData = async (userId: string) => {
+  const finishLoading = useCallback(() => {
+    if (!loadingFinishedRef.current) {
+      loadingFinishedRef.current = true;
+      setLoading(false);
+      if (safetyTimeoutRef.current) {
+        clearTimeout(safetyTimeoutRef.current);
+        safetyTimeoutRef.current = null;
+      }
+    }
+  }, []);
+
+  const fetchAdminData = useCallback(async (userId: string) => {
+    if (fetchingRef.current) {
+      console.log("[useAdminAuth] fetchAdminData já em andamento, ignorando chamada duplicada");
+      return;
+    }
+    fetchingRef.current = true;
     console.log("[useAdminAuth] fetchAdminData para userId:", userId);
+
     try {
-      // Fetch admin profile
-      const { data: profile, error: profileError } = await supabase
+      // Fetch admin profile (silently ignore errors)
+      const { data: profile } = await supabase
         .from("admin_profiles")
         .select("*")
         .eq("user_id", userId)
         .maybeSingle();
 
-      if (profileError) {
-        console.error("[useAdminAuth] Erro ao buscar admin_profiles:", profileError.message);
-      }
-
       if (profile) {
         console.log("[useAdminAuth] Admin profile encontrado:", profile.email);
         setAdminProfile(profile);
       } else {
-        console.log("[useAdminAuth] Admin profile não encontrado");
         setAdminProfile(null);
       }
 
-      // Fetch admin role using RPC to avoid RLS issues
-      console.log("[useAdminAuth] Buscando role via RPC...");
-      const { data: roleData, error: roleError } = await supabase.rpc("get_admin_role", {
-        _user_id: userId,
-      });
-
-      if (roleError) {
-        console.error("[useAdminAuth] Erro ao buscar role:", roleError.message);
+      // Fetch admin role via RPC with 1 retry
+      let roleData: string | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { data, error } = await supabase.rpc("get_admin_role", { _user_id: userId });
+        if (!error && data) {
+          roleData = data;
+          break;
+        }
+        console.warn(`[useAdminAuth] Tentativa ${attempt + 1} de buscar role falhou:`, error?.message);
+        if (attempt === 0) {
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        }
       }
 
       if (roleData) {
         console.log("[useAdminAuth] Role encontrada:", roleData);
         setAdminRole(roleData as AdminRole);
       } else {
-        console.log("[useAdminAuth] Role não encontrada");
+        console.log("[useAdminAuth] Role não encontrada após retries");
         setAdminRole(null);
       }
     } catch (error: any) {
       console.error("[useAdminAuth] Exceção em fetchAdminData:", error?.message || error);
       setAdminProfile(null);
       setAdminRole(null);
+    } finally {
+      fetchingRef.current = false;
+      finishLoading();
     }
-  };
+  }, [finishLoading]);
 
   useEffect(() => {
     console.log("[useAdminAuth] Inicializando listener de auth...");
-    
-    // Set up auth state listener FIRST
+
+    // Safety net timeout
+    safetyTimeoutRef.current = setTimeout(() => {
+      console.warn("[useAdminAuth] Safety timeout atingido (15s), liberando loading");
+      finishLoading();
+    }, SAFETY_TIMEOUT_MS);
+
+    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        console.log("[useAdminAuth] onAuthStateChange:", event, "| Sessão:", session ? "presente" : "ausente");
+        console.log("[useAdminAuth] onAuthStateChange:", event);
         setSession(session);
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          // Defer Supabase calls with setTimeout
           setTimeout(() => {
             fetchAdminData(session.user.id);
           }, 0);
         } else {
           setAdminProfile(null);
           setAdminRole(null);
-        }
-
-        if (event === "SIGNED_OUT") {
-          setLoading(false);
+          if (event === "SIGNED_OUT") {
+            finishLoading();
+          }
         }
       }
     );
 
-    // THEN check for existing session
-    console.log("[useAdminAuth] Verificando sessão existente...");
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error) {
-        console.error("[useAdminAuth] Erro getSession:", error.message);
-      }
-      console.log("[useAdminAuth] getSession:", session ? "sessão encontrada" : "sem sessão");
+    // Check existing session
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        fetchAdminData(session.user.id).finally(() => {
-          setLoading(false);
-        });
+        fetchAdminData(session.user.id);
       } else {
-        setLoading(false);
+        finishLoading();
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      if (safetyTimeoutRef.current) {
+        clearTimeout(safetyTimeoutRef.current);
+      }
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
     try {
-      const loginPromise = supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const loginPromise = supabase.auth.signInWithPassword({ email, password });
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('TIMEOUT')), 15000)
       );
       const { data, error } = await Promise.race([loginPromise, timeoutPromise]);
-
-      if (error) {
-        return { error };
-      }
-
+      if (error) return { error };
       return { error: null };
     } catch (error: any) {
       return { error: error as Error };
