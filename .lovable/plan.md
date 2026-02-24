@@ -1,81 +1,115 @@
 
 
-# Puxar numero do WhatsApp automaticamente e exibir ultimos 4 digitos no card
+# Continuidade de conversas entre instancias -- Diagnostico e Plano
 
-## Diagnostico
+## Situacao atual
 
-A instancia "Miauz" (uazapi) esta com `phone_number: null` no banco, mesmo estando conectada. Isso acontece porque:
+### Como funciona hoje
 
-1. O webhook de conexao do uazapi (`case "connection"`) tenta extrair o telefone de `body.phone`, `body.number` ou `body.ownerJid`, mas o uazapi nao envia esses campos no evento de conexao -- envia apenas `state: "connected"`.
-2. O `fetch_phone` (que chama `GET /instance/status` no uazapi e retorna o numero correto) so e disparado manualmente pelo botao de refresh.
-3. Sem `phone_number`, o card de conversa mostra "Miauz" (fallback do nome da instancia) em vez de `•••0484`.
+Cada conversa no banco tem um campo `whatsapp_instance_id` que vincula ela a uma instancia especifica. Quando a instancia desconecta, as conversas ficam "orfas" -- continuam no banco mas sem instancia ativa.
 
-## Solucao
+### O que acontece quando voce conecta uma NOVA instancia Uazapi
 
-### 1. Auto-fetch do numero apos conexao no webhook
+1. **Voce envia mensagem para o cliente**: O sistema cria uma **conversa nova** porque o webhook busca conversas filtrando por `whatsapp_instance_id = nova_instancia`. Como a conversa antiga pertence a instancia antiga, ele nao encontra e cria outra. **Historico perdido**.
 
-**Arquivo:** `supabase/functions/uazapi-webhook/index.ts` (linhas 379-388)
+2. **Cliente envia mensagem**: Mesmo problema. O webhook do uazapi busca `remote_jid + whatsapp_instance_id` e nao encontra a conversa antiga. **Cria conversa duplicada**.
 
-Quando `dbStatus === "connected"` e nao houver `phone` no payload E a instancia ainda nao tiver `phone_number`, chamar o endpoint `/instance/status` do uazapi para buscar o numero automaticamente:
+### O que o Evolution ja faz (e o Uazapi nao)
+
+O evolution-webhook chama `reassociate_orphan_records` automaticamente quando uma instancia conecta. Essa funcao SQL ja existe no banco e faz exatamente o que voce precisa:
+
+- Busca conversas onde `last_whatsapp_instance_id = instancia_reconectada` E `whatsapp_instance_id = NULL`
+- Reasigna essas conversas de volta para a instancia
+- Faz o mesmo com os clientes
+
+**Porem**, isso so funciona quando a instancia e a MESMA (reconecta). Se voce cria uma instancia NOVA com ID diferente, essa funcao nao ajuda.
+
+---
+
+## Plano de correcao
+
+### 1. Uazapi webhook: chamar `reassociate_orphan_records` ao conectar
+
+**Arquivo:** `supabase/functions/uazapi-webhook/index.ts`
+
+Quando `dbStatus === "connected"`, adicionar a chamada que o evolution-webhook ja faz:
 
 ```typescript
-if (dbStatus === "connected") {
-  updatePayload.disconnected_since = null;
-  updatePayload.awaiting_qr = false;
-  updatePayload.reconnect_attempts_count = 0;
-  updatePayload.manual_disconnect = false;
+// Após atualizar status para connected
+const { data: reassocResult } = await supabaseClient
+  .rpc('reassociate_orphan_records', { _instance_id: instance.id });
+```
 
-  let phone = body.phone || body.number || body.ownerJid?.split("@")[0] || null;
-  
-  // Se nao veio no payload e instancia nao tem numero, buscar via API
-  if (!phone && !instance.phone_number) {
-    try {
-      const statusRes = await fetch(`${normalizeUrl(instance.api_url)}/instance/status`, {
-        method: "GET",
-        headers: { token: instance.api_key, "Content-Type": "application/json" },
-      });
-      if (statusRes.ok) {
-        const statusData = await statusRes.json();
-        phone = statusData?.phone || statusData?.number || statusData?.ownerJid?.split("@")[0] || null;
-        console.log("[UAZAPI_WEBHOOK] Auto-fetched phone from status:", phone);
-      }
-    } catch (e) {
-      console.warn("[UAZAPI_WEBHOOK] Failed to auto-fetch phone:", e);
-    }
-  }
-  
-  if (phone) {
-    updatePayload.phone_number = extractPhone(phone);
+Isso resolve o caso de **reconexao da mesma instancia**.
+
+### 2. Uazapi webhook: buscar conversa sem filtrar por instancia (fallback)
+
+**Arquivo:** `supabase/functions/uazapi-webhook/index.ts`
+
+Na logica de "FIND OR CREATE CONVERSATION" (linha 530), adicionar um fallback: se nao encontrar conversa pela instancia atual, buscar pelo `remote_jid` + `law_firm_id` sem filtro de instancia (pegar a mais recente). Se encontrar, **reatribuir** para a instancia atual:
+
+```typescript
+// 1. Buscar pela instancia atual (como hoje)
+const { data: existingConv } = await supabaseClient
+  .from("conversations")
+  .select("id")
+  .eq("law_firm_id", lawFirmId)
+  .eq("remote_jid", remoteJid)
+  .eq("whatsapp_instance_id", instance.id)
+  .limit(1)
+  .maybeSingle();
+
+if (existingConv) {
+  conversationId = existingConv.id;
+} else {
+  // 2. FALLBACK: Buscar conversa orfa do mesmo contato (qualquer instancia)
+  const { data: orphanConv } = await supabaseClient
+    .from("conversations")
+    .select("id, whatsapp_instance_id")
+    .eq("law_firm_id", lawFirmId)
+    .eq("remote_jid", remoteJid)
+    .order("last_message_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (orphanConv) {
+    // Reatribuir conversa orfa para a nova instancia
+    conversationId = orphanConv.id;
+    await supabaseClient
+      .from("conversations")
+      .update({ 
+        whatsapp_instance_id: instance.id,
+        last_whatsapp_instance_id: orphanConv.whatsapp_instance_id 
+      })
+      .eq("id", orphanConv.id);
+    
+    // Reatribuir cliente tambem
+    // (buscar pelo client_id da conversa e atualizar)
+  } else {
+    // 3. Criar conversa nova (como hoje)
+    // ...
   }
 }
 ```
 
-**Impacto:** Baixo. E uma chamada HTTP extra apenas quando a instancia conecta pela primeira vez (quando `phone_number` ainda e null). Nao afeta performance do webhook normal de mensagens.
+### 3. Reatribuir cliente junto com a conversa
 
-### 2. Card de conversas -- ja funciona
-
-O `ConversationSidebarCard` ja tem a logica correta em `getConnectionInfo()` (linhas 109-118):
-- Se `whatsappPhone` tem 4+ digitos → mostra `•••XXXX`
-- Se nao → mostra nome da instancia como fallback
-
-O problema e exclusivamente que `phone_number` esta null no banco. Corrigindo o item 1, os cards voltam a exibir os 4 ultimos digitos automaticamente.
-
-### 3. Foto de perfil da instancia
-
-Sobre a foto do WhatsApp da instancia: o uazapi nao fornece endpoint para buscar a foto de perfil do proprio numero conectado. A foto que aparece no painel do uazapi e a foto do dono da conta no site deles, nao a foto do WhatsApp. Portanto, **nao e possivel puxar a foto da instancia via API** -- isso nao tem impacto funcional pois o sistema ja usa Avatar com iniciais como fallback.
+Quando a conversa orfa for encontrada e reatribuida, tambem atualizar o `whatsapp_instance_id` do cliente vinculado para manter consistencia.
 
 ---
 
-## Resumo
+## Resumo do comportamento apos correcao
 
-| Mudanca | Arquivo | Impacto |
+| Cenario | Hoje | Depois |
 |---|---|---|
-| Auto-fetch do telefone ao conectar | `uazapi-webhook/index.ts` | Corrige `phone_number: null` para instancias uazapi |
-| Nenhuma mudanca necessaria | `ConversationSidebarCard.tsx` | Ja exibe `•••XXXX` quando `phone_number` existe |
+| Reconecta MESMA instancia | Cria conversa nova | Continua a mesma conversa |
+| Cria instancia NOVA, mesmo numero | Cria conversa nova | Encontra conversa orfa e reatribui |
+| Cliente envia msg para nova instancia | Cria duplicata | Encontra conversa existente e continua |
+| Historico de mensagens | Perdido na conversa nova | Mantido integralmente |
 
-## Resultado esperado
+## Impacto
 
-- Instancia "Miauz" tera `phone_number` preenchido automaticamente na proxima reconexao (ou ao receber proximo evento de conexao)
-- Cards de conversa voltam a mostrar `•••0484` em vez de "Miauz"
-- Na pagina de Conexoes, o badge `••0484` tambem aparecera
+- **Risco baixo**: a logica de fallback so ativa quando nao encontra conversa na instancia atual
+- **Sem perda de dados**: apenas reatribui `whatsapp_instance_id`, nunca deleta
+- **Compativel com Evolution**: nao altera o fluxo do evolution-webhook
 
