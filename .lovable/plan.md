@@ -1,87 +1,105 @@
 
 
-# Correcao: Templates/Midias da IA Nao Chegam ao Cliente (uazapi)
+# Correcoes: Envio de Imagens por Template + Visual Global Admin Conexoes
 
-## Diagnostico
+## Problema 1: IA nao envia imagens como template para o WhatsApp
 
-A funcao `executeTemplateTool` dentro de `ai-chat/index.ts` e responsavel por enviar templates (texto, imagens, documentos, links) diretamente ao WhatsApp quando a IA decide usar a tool `send_template`.
+### Diagnostico confirmado pelos logs
 
-**Problema confirmado:** Essa funcao usa EXCLUSIVAMENTE endpoints da Evolution API:
-- Texto: `POST {apiUrl}/message/sendText/{instance_name}` com header `apikey`
-- Media: `POST {apiUrl}/message/sendMedia/{instance_name}` com header `apikey`
+```
+ERROR [AI Chat] Failed to send template media to WhatsApp: {"error":"missing text for text message"}
+```
 
-A instancia FMOANTIGO usa **uazapi**, que tem endpoints completamente diferentes:
-- Texto: `POST {apiUrl}/send/text` com header `token`
-- Media: `POST {apiUrl}/send/media` com header `token`
+O endpoint `/send/media` do uazapi requer o campo `type` para identificar o tipo de midia. O payload atual envia apenas `{ number, file }` mas falta `type: "image"`. Comparando com o `whatsapp-provider.ts` (que funciona corretamente), o payload correto e:
 
-**Resultado:** O `fetch` para `/message/sendText/...` retorna 404 ou erro na API uazapi. A mensagem e salva no banco (aparece no chat da plataforma) mas NUNCA chega ao WhatsApp do cliente. Os logs mostrariam "Failed to send template text to WhatsApp" mas o sistema continua sem falha visivel.
+```
+{ number, type: "image", file: mediaUrl }
+```
 
-Alem disso, a query de instancia (linha 2275) NAO busca `api_provider`, entao a funcao nem sabe qual provedor usar.
+O `whatsapp-provider.ts` na linha 567 mostra: `type: opts.mediaType` — o campo `type` e obrigatorio no uazapi.
 
-## Correcao Proposta
+### Correcao
 
-### Arquivo: `supabase/functions/ai-chat/index.ts`
+**Arquivo: `supabase/functions/ai-chat/index.ts`** (linhas 2336-2340)
 
-**Mudanca A — Buscar `api_provider` da instancia (CRITICO):**
+Adicionar o campo `type` ao payload de midia uazapi, mapeando `finalMediaType` para o tipo correto:
 
-Na linha 2275, adicionar `api_provider` ao SELECT:
 ```typescript
-.select("api_url, api_key, instance_name, status, api_provider")
+// ANTES:
+mediaPayload = { number: targetNumber, file: finalMediaUrl };
+
+// DEPOIS:
+mediaPayload = { 
+  number: targetNumber, 
+  file: finalMediaUrl, 
+  type: finalMediaType || 'image'  // 'image', 'video', 'document'
+};
 ```
 
-**Mudanca B — Roteamento de envio de texto por provedor (CRITICO):**
+---
 
-Na linha 2286-2305, substituir o envio de texto para suportar ambos os provedores:
+## Problema 2: Global Admin Conexoes — Visual desatualizado
+
+### Diagnostico
+
+A pagina `GlobalAdminConnections.tsx` tem varios problemas:
+
+1. **Header diz "Evolution API"** — mas o provedor principal e uazapi
+2. **Card de status global** mostra "Evolution API" com status hardcoded "offline/pausada"
+3. **Metricas (cards)** referenciam `evolutionHealth?.instances_summary` que esta sempre null (query desabilitada)
+4. **"Empresas por Conexao"** agrupa por `evolution_api_connections` — instancias uazapi nao tem match e caem em "unknown"
+5. **Titulo da tabela** diz "Instancias do Evolution"
+6. **EvolutionApiConnectionsCard** mostra "Provedores Evolution API" — irrelevante para uazapi
+7. **Nao mostra o provedor** de cada instancia (evolution vs uazapi)
+8. **InstanceHealthSummary** busca direto de `whatsapp_instances` (funciona, mas nao filtra por provedor)
+
+### Correcao
+
+**Arquivo: `src/pages/global-admin/GlobalAdminConnections.tsx`**
+
+Mudancas visuais e funcionais:
+
+1. **Header**: Mudar "Conexoes WhatsApp" (ja esta) — OK, manter
+2. **Remover card "Evolution API"** (status global hardcoded offline) — substituir por card resumo que mostra contagem por provedor (uazapi vs evolution)
+3. **Cards de metricas**: Usar dados locais (`instances.filter(...)`) em vez de `evolutionHealth?.instances_summary` — ja faz fallback, mas remover referencia ao evolution
+4. **Adicionar coluna "Provedor"** na tabela — mostrar badge "uazapi" ou "evolution" por instancia (requer buscar `api_provider` do `whatsapp_instances_safe`)
+5. **Titulo da tabela**: Mudar "Instancias do Evolution" para "Todas as Instancias"
+6. **Agrupamento**: Em vez de agrupar por `evolution_api_connections`, agrupar por provedor (`api_provider`) — instancias uazapi num grupo, evolution noutro
+7. **Remover EvolutionApiConnectionsCard** da exibicao principal (mover para aba secundaria ou esconder) — esta irrelevante para uazapi
+
+**Arquivo: `src/hooks/useGlobalAdminInstances.tsx`**
+
+- Incluir `api_provider` no tipo `InstanceWithCompany`
+- O campo `api_provider` ja esta na view `whatsapp_instances_safe` (confirmado na migracao)
+
+### Resumo visual esperado
 
 ```text
-const isUazapi = instance.api_provider === 'uazapi';
++------------------------------------------+
+| Conexoes WhatsApp                        |
+| Monitore todas as instancias             |
++------------------------------------------+
 
-// TEXTO
-if (isUazapi) {
-  // uazapi: POST /send/text com header token
-  fetch(`${apiUrl}/send/text`, {
-    headers: { "Content-Type": "application/json", token: instance.api_key },
-    body: JSON.stringify({ number: targetNumber, text: finalContent })
-  })
-} else {
-  // Evolution: POST /message/sendText/{name} com header apikey
-  fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
-    headers: { "Content-Type": "application/json", apikey: instance.api_key },
-    body: JSON.stringify({ number: targetNumber, text: finalContent })
-  })
-}
++--------+  +-----------+  +----------+  +----------+  +------+
+| Total  |  | Conectadas|  | Conectando|  |Desconect.|  | Erro |
+|   4    |  |    3      |  |    0      |  |    1     |  |  0   |
++--------+  +-----------+  +----------+  +----------+  +------+
+
++------------------------------------------+
+| Todas as Instancias (4)                  |
++------------------------------------------+
+| Empresa  | Instancia | Provedor | Num... |
+|----------|-----------|----------|--------|
+| FMO      | FMOANT..  | uazapi   | +55... |
+| Teste    | Teste1    | uazapi   | +55... |
++------------------------------------------+
 ```
 
-**Mudanca C — Roteamento de envio de midia por provedor (CRITICO):**
-
-Na linha 2308-2380, substituir o envio de midia:
-
-```text
-if (isUazapi) {
-  // uazapi: POST /send/media com header token e campo "file"
-  fetch(`${apiUrl}/send/media`, {
-    headers: { "Content-Type": "application/json", token: instance.api_key },
-    body: JSON.stringify({ number: targetNumber, file: finalMediaUrl })
-  })
-} else {
-  // Evolution: POST /message/sendMedia/{name} com header apikey (logica atual mantida)
-  // ... mediaPayload com mediatype, mimetype, media ...
-}
-```
-
-Para uazapi, o endpoint `/send/media` aceita `{ number, file }` onde `file` pode ser URL, simplificando muito o envio.
-
-## Resumo
+## Resumo de mudancas
 
 | Arquivo | Mudanca | Prioridade |
 |---|---|---|
-| `ai-chat/index.ts` | Buscar `api_provider` no SELECT da instancia | CRITICO |
-| `ai-chat/index.ts` | Roteamento de texto: uazapi (`/send/text` + `token`) vs Evolution (`/message/sendText` + `apikey`) | CRITICO |
-| `ai-chat/index.ts` | Roteamento de midia: uazapi (`/send/media` + `file`) vs Evolution (`/message/sendMedia` + `media`) | CRITICO |
-
-## Resultado Esperado
-
-- Templates com texto, imagens, links e documentos chegam ao cliente no WhatsApp via uazapi
-- Compatibilidade mantida com Evolution API para instancias que a usem
-- Mensagens continuam salvas no banco para exibicao na plataforma
+| `ai-chat/index.ts` | Adicionar campo `type` ao payload de midia uazapi | CRITICO |
+| `useGlobalAdminInstances.tsx` | Adicionar `api_provider` ao tipo e ao mapeamento | MEDIO |
+| `GlobalAdminConnections.tsx` | Remover card Evolution, renomear titulos, adicionar coluna provedor, agrupar por provedor | MEDIO |
 
