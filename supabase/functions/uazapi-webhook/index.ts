@@ -421,6 +421,18 @@ serve(async (req) => {
           .update(updatePayload)
           .eq("id", instance.id);
 
+        // Reassociate orphan conversations/clients when instance connects
+        // (same logic as evolution-webhook)
+        if (dbStatus === "connected") {
+          try {
+            const { data: reassocResult } = await supabaseClient
+              .rpc('reassociate_orphan_records', { _instance_id: instance.id });
+            console.log("[UAZAPI_WEBHOOK] Reassociate orphan records result:", JSON.stringify(reassocResult));
+          } catch (reassocErr) {
+            console.warn("[UAZAPI_WEBHOOK] Failed to reassociate orphan records:", reassocErr);
+          }
+        }
+
         break;
       }
 
@@ -539,42 +551,80 @@ serve(async (req) => {
         if (existingConv) {
           conversationId = existingConv.id;
         } else {
-          const { data: newConv, error: convError } = await supabaseClient
+          // FALLBACK: Search for orphan conversation from same contact (any instance)
+          const { data: orphanConv } = await supabaseClient
             .from("conversations")
-            .insert({
-              law_firm_id: lawFirmId,
-              remote_jid: remoteJid,
-              contact_name: contactName,
-              contact_phone: phoneNumber,
-              whatsapp_instance_id: instance.id,
-              status: "novo_contato",
-              current_handler: "ai",
-              last_message_at: timestamp,
-              origin: "WHATSAPP",
-              department_id: instance.default_department_id || null,
-              assigned_to: instance.default_assigned_to || null,
-              current_automation_id: instance.default_automation_id || null,
-            })
-            .select("id")
-            .single();
+            .select("id, whatsapp_instance_id, client_id")
+            .eq("law_firm_id", lawFirmId)
+            .eq("remote_jid", remoteJid)
+            .order("last_message_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
 
-          if (convError) {
-            if (convError.code === "23505") {
-              const { data: existingConv2 } = await supabaseClient
-                .from("conversations")
-                .select("id")
-                .eq("law_firm_id", lawFirmId)
-                .eq("remote_jid", remoteJid)
-                .eq("whatsapp_instance_id", instance.id)
-                .limit(1)
-                .maybeSingle();
-              conversationId = existingConv2?.id || null;
-            } else {
-              console.error("[UAZAPI_WEBHOOK] Failed to create conversation:", convError);
-              break;
+          if (orphanConv) {
+            // Reassign orphan conversation to current instance
+            conversationId = orphanConv.id;
+            console.log(`[UAZAPI_WEBHOOK] Found orphan conversation ${orphanConv.id}, reassigning from instance ${orphanConv.whatsapp_instance_id} to ${instance.id}`);
+            
+            await supabaseClient
+              .from("conversations")
+              .update({
+                whatsapp_instance_id: instance.id,
+                last_whatsapp_instance_id: orphanConv.whatsapp_instance_id,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", orphanConv.id);
+
+            // Reassign client to current instance as well
+            if (orphanConv.client_id) {
+              await supabaseClient
+                .from("clients")
+                .update({
+                  whatsapp_instance_id: instance.id,
+                  last_whatsapp_instance_id: orphanConv.whatsapp_instance_id,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", orphanConv.client_id);
             }
           } else {
-            conversationId = newConv?.id || null;
+            // No existing conversation found — create new one
+            const { data: newConv, error: convError } = await supabaseClient
+              .from("conversations")
+              .insert({
+                law_firm_id: lawFirmId,
+                remote_jid: remoteJid,
+                contact_name: contactName,
+                contact_phone: phoneNumber,
+                whatsapp_instance_id: instance.id,
+                status: "novo_contato",
+                current_handler: "ai",
+                last_message_at: timestamp,
+                origin: "WHATSAPP",
+                department_id: instance.default_department_id || null,
+                assigned_to: instance.default_assigned_to || null,
+                current_automation_id: instance.default_automation_id || null,
+              })
+              .select("id")
+              .single();
+
+            if (convError) {
+              if (convError.code === "23505") {
+                const { data: existingConv2 } = await supabaseClient
+                  .from("conversations")
+                  .select("id")
+                  .eq("law_firm_id", lawFirmId)
+                  .eq("remote_jid", remoteJid)
+                  .eq("whatsapp_instance_id", instance.id)
+                  .limit(1)
+                  .maybeSingle();
+                conversationId = existingConv2?.id || null;
+              } else {
+                console.error("[UAZAPI_WEBHOOK] Failed to create conversation:", convError);
+                break;
+              }
+            } else {
+              conversationId = newConv?.id || null;
+            }
           }
         }
 
