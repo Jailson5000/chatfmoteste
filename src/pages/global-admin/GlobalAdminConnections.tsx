@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,9 +57,7 @@ import {
   History,
   Bell,
   Settings2,
-  QrCode,
 } from "lucide-react";
-import { QRCodeDialog } from "@/components/connections/QRCodeDialog";
 import { useGlobalAdminInstances, InstanceWithCompany, EvolutionConnection } from "@/hooks/useGlobalAdminInstances";
 import { InstanceUptimeChart } from "@/components/connections/InstanceUptimeChart";
 import { InstanceHealthSummary } from "@/components/connections/InstanceHealthSummary";
@@ -201,40 +199,6 @@ export default function GlobalAdminConnections() {
   const [selectedInstance, setSelectedInstance] = useState<InstanceWithCompany | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  // QR Code dialog state
-  const [qrDialogOpen, setQrDialogOpen] = useState(false);
-  const [qrCode, setQrCode] = useState<string | null>(null);
-  const [qrLoading, setQrLoading] = useState(false);
-  const [qrError, setQrError] = useState<string | null>(null);
-
-  const handleGenerateQR = useCallback(async (instanceId: string) => {
-    setQrCode(null);
-    setQrError(null);
-    setQrLoading(true);
-    setQrDialogOpen(true);
-
-    try {
-      const result = await restartInstance.mutateAsync(instanceId);
-      
-      if (result?.qrCode) {
-        setQrCode(result.qrCode);
-        setQrLoading(false);
-      } else if (result?.status === "open" || result?.status === "connected") {
-        setQrLoading(false);
-        setQrDialogOpen(false);
-        toast({
-          title: "Já conectado",
-          description: "Esta instância já está conectada ao WhatsApp.",
-        });
-      } else {
-        setQrLoading(false);
-        setQrError(result?.message || "Não foi possível gerar o QR Code. Tente novamente.");
-      }
-    } catch (err: any) {
-      setQrLoading(false);
-      setQrError(err?.message || "Erro ao gerar QR Code");
-    }
-  }, [restartInstance, toast]);
 
   // Manual alert trigger mutation
   const triggerAlertCheck = useMutation({
@@ -815,15 +779,6 @@ export default function GlobalAdminConnections() {
                                           <RefreshCw className="h-4 w-4 mr-2" />
                                           Atualizar Status
                                         </DropdownMenuItem>
-                                        {instance.status !== "connected" && (
-                                          <DropdownMenuItem
-                                            onClick={() => handleGenerateQR(instance.id)}
-                                            disabled={qrLoading}
-                                          >
-                                            <QrCode className="h-4 w-4 mr-2" />
-                                            Gerar QR Code
-                                          </DropdownMenuItem>
-                                        )}
                                       </DropdownMenuContent>
                                     </DropdownMenu>
                                   </TableCell>
@@ -1135,15 +1090,6 @@ export default function GlobalAdminConnections() {
                                 <Power className="h-4 w-4 mr-2" />
                                 Reiniciar Conexão
                               </DropdownMenuItem>
-                              {instance.status !== "connected" && (
-                                <DropdownMenuItem
-                                  onClick={() => handleGenerateQR(instance.id)}
-                                  disabled={qrLoading}
-                                >
-                                  <QrCode className="h-4 w-4 mr-2" />
-                                  Gerar QR Code
-                                </DropdownMenuItem>
-                              )}
                               <DropdownMenuSeparator />
                               {instance.status === "suspended" ? (
                                 <DropdownMenuItem
@@ -1325,26 +1271,6 @@ export default function GlobalAdminConnections() {
           </DialogContent>
         </Dialog>
 
-        {/* QR Code Dialog */}
-        <QRCodeDialog
-          open={qrDialogOpen}
-          onClose={() => {
-            setQrDialogOpen(false);
-            setQrCode(null);
-            setQrError(null);
-            setQrLoading(false);
-          }}
-          onRetry={() => {
-            // No instance ID stored, just close and let user click again
-            setQrDialogOpen(false);
-          }}
-          qrCode={qrCode}
-          isLoading={qrLoading}
-          error={qrError}
-          connectionStatus={qrCode ? null : qrLoading ? "Gerando QR Code..." : null}
-          pollCount={0}
-          maxPolls={1}
-        />
       </div>
     </TooltipProvider>
   );
