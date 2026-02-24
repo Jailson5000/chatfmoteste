@@ -78,13 +78,14 @@ function extractPhone(value: string): string {
  * Detect message type from uazapi payload.
  */
 function detectMessageType(msg: any): string {
-  if (msg.type === "image" || msg.imageMessage) return "image";
-  if (msg.type === "video" || msg.videoMessage) return "video";
-  if (msg.type === "audio" || msg.audioMessage) return "audio";
-  if (msg.type === "document" || msg.documentMessage) return "document";
-  if (msg.type === "sticker" || msg.stickerMessage) return "sticker";
-  if (msg.type === "location" || msg.locationMessage) return "location";
-  if (msg.type === "contact" || msg.contactMessage || msg.contactsArrayMessage) return "contact";
+  const t = (msg.type || "").toLowerCase();
+  if (t === "image" || msg.imageMessage) return "image";
+  if (t === "video" || msg.videoMessage) return "video";
+  if (t === "audio" || t === "ptt" || t === "myaudio" || msg.audioMessage) return "audio";
+  if (t === "document" || msg.documentMessage) return "document";
+  if (t === "sticker" || msg.stickerMessage) return "sticker";
+  if (t === "location" || msg.locationMessage) return "location";
+  if (t === "contact" || msg.contactMessage || msg.contactsArrayMessage) return "contact";
   return "text";
 }
 
@@ -119,6 +120,8 @@ function extractMediaUrl(msg: any): string | null {
   // Direct URL fields
   if (msg.mediaUrl) return msg.mediaUrl;
   if (msg.url) return msg.url;
+  // uazapi sends file as URL or base64 — only use if it's a URL
+  if (msg.file && typeof msg.file === "string" && msg.file.startsWith("http")) return msg.file;
   
   // Nested in type-specific messages
   if (msg.imageMessage?.url) return msg.imageMessage.url;
@@ -169,7 +172,7 @@ serve(async (req) => {
     const rawEvent = body.event || body.type || body.EventType || "unknown";
     const event = rawEvent.toLowerCase();
     
-    console.log(`[UAZAPI_WEBHOOK] Event: ${event}`, JSON.stringify(body).slice(0, 500));
+    console.log(`[UAZAPI_WEBHOOK] Event: ${event}`, JSON.stringify(body).slice(0, 2000));
 
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
@@ -322,7 +325,7 @@ serve(async (req) => {
       case "messages":
       case "message":
       case "MESSAGES_UPSERT": {
-        const msg = body.data || body.message || body;
+        const msg = body.msg || body.data || body.message || body;
         
         // uazapi sends chat info at root level
         const chat = body.chat || {};
@@ -383,13 +386,14 @@ serve(async (req) => {
         console.log(`[UAZAPI_WEBHOOK] Message: ${messageType} from ${phoneNumber} (fromMe: ${isFromMe})`, {
           contentPreview: content?.slice(0, 50),
           hasMedia: !!mediaUrl,
-          hasBase64: !!(msg.base64 || body.base64),
+          hasBase64: !!(msg.base64 || body.base64 || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http"))),
           mimeType: mimeType || null,
           fileName: fileName || null,
         });
 
         // Skip empty messages
-        if (!content && !mediaUrl && !msg.base64 && !body.base64 && messageType === "text") {
+        const hasAnyBase64 = !!(msg.base64 || body.base64 || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http")));
+        if (!content && !mediaUrl && !hasAnyBase64 && messageType === "text") {
           console.log("[UAZAPI_WEBHOOK] Skipping empty text message");
           break;
         }
@@ -511,10 +515,17 @@ serve(async (req) => {
         }
 
         // ---- SAVE MESSAGE ----
+        // For media messages without text, show file name or type as content
+        let finalContent = content;
+        if (!finalContent && messageType !== "text") {
+          if (fileName) finalContent = `[${fileName}]`;
+          else finalContent = `[${messageType}]`;
+        }
+
         const messagePayload: Record<string, unknown> = {
           conversation_id: conversationId,
           whatsapp_message_id: whatsappMessageId,
-          content: content || null,
+          content: finalContent || null,
           message_type: messageType,
           is_from_me: isFromMe,
           sender_type: isFromMe ? "human" : "client",
@@ -525,8 +536,9 @@ serve(async (req) => {
           law_firm_id: lawFirmId,
         };
 
-        // Handle base64 media from uazapi (check msg.base64, body.base64, and type-specific fields)
+        // Handle base64 media from uazapi (check msg.base64, body.base64, msg.file as base64, and type-specific fields)
         const rawBase64 = msg.base64 || body.base64 
+          || (msg.file && typeof msg.file === "string" && !msg.file.startsWith("http") ? msg.file : null)
           || msg.imageMessage?.base64 || msg.videoMessage?.base64 
           || msg.audioMessage?.base64 || msg.documentMessage?.base64 
           || msg.stickerMessage?.base64 || null;
