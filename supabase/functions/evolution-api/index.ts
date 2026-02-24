@@ -3470,15 +3470,63 @@ serve(async (req) => {
               extractedMimeType = raw?.message?.imageMessage?.mimetype || raw?.message?.videoMessage?.mimetype || raw?.message?.documentMessage?.mimetype || body.mimeType;
             }
 
-            console.log(`[Evolution API] Background: Media sent successfully, id=${whatsappMessageId}`);
+            console.log(`[Evolution API] Background: Media sent successfully, id=${whatsappMessageId}, extractedMediaUrl=${extractedMediaUrl ? 'yes' : 'no'}`);
+
+            // Persist media to Storage if no URL was returned (uazapi case)
+            if (!extractedMediaUrl && body.mediaBase64 && conversationId) {
+              try {
+                const mimeClean = (body.mimeType || "application/octet-stream").split(";")[0].trim();
+                const extMap: Record<string, string> = {
+                  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif",
+                  "audio/ogg": "ogg", "audio/webm": "webm", "audio/mpeg": "mp3", "audio/mp4": "m4a",
+                  "video/mp4": "mp4", "application/pdf": "pdf",
+                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+                };
+                const ext = extMap[mimeClean] || "bin";
+                const storagePath = `${conversationId}/${tempMessageId}.${ext}`;
+
+                // Decode base64 to Uint8Array
+                const binaryStr = atob(body.mediaBase64);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+                const { error: uploadError } = await supabaseClient.storage
+                  .from("chat-media")
+                  .upload(storagePath, bytes, {
+                    contentType: mimeClean,
+                    upsert: true,
+                  });
+
+                if (!uploadError) {
+                  const { data: urlData } = supabaseClient.storage
+                    .from("chat-media")
+                    .getPublicUrl(storagePath);
+                  extractedMediaUrl = urlData?.publicUrl || null;
+                  console.log(`[Evolution API] Media persisted to storage: ${storagePath}`);
+                } else {
+                  console.warn(`[Evolution API] Storage upload error:`, uploadError.message);
+                }
+              } catch (storageErr) {
+                console.warn("[Evolution API] Failed to persist media to storage:", storageErr);
+              }
+            }
 
             if (conversationId && whatsappMessageId) {
-              await supabaseClient.from("messages").update({ 
+              // For documents, show the real filename instead of UUID
+              const displayContent = body.mediaType === "document" && body.fileName
+                ? `[${body.fileName}]`
+                : undefined;
+
+              const updatePayload: Record<string, any> = { 
                 whatsapp_message_id: whatsappMessageId,
                 media_url: extractedMediaUrl || body.mediaUrl,
                 media_mime_type: extractedMimeType,
                 status: "sent",
-              }).eq("id", tempMessageId);
+              };
+              if (displayContent) updatePayload.content = displayContent;
+
+              await supabaseClient.from("messages").update(updatePayload).eq("id", tempMessageId);
             }
           } catch (error) {
             console.error("[Evolution API] Background media send error:", error);
