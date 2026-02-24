@@ -1,107 +1,110 @@
 
 
-# Correcoes: Foto, Nome da IA, Recusar Chamadas e Ignorar Grupos
+# Correcoes: Botoes de Acao, Pagina Branca e Numero
 
-## 4 Problemas Identificados
+## 3 Problemas Identificados
 
-### 1. Foto de perfil nao puxa (automatico nem manual)
+### 1. Botoes "Desconectar" e "Reiniciar" nao funcionais para Uazapi
 
-**Automatico (webhook):** A funcao `persistProfilePicture` depende de `chat.imagePreview` no payload do uazapi. Se o campo vier vazio ou nulo, nada acontece. Isso e normal — muitos contatos novos nao enviam `imagePreview` no primeiro contato.
+**Desconectar:** O codigo backend (`evolution-api/index.ts` linhas 2387-2404) JA suporta uazapi — chama `provider.disconnect(config)` que faz `POST /instance/disconnect`. O frontend passa `onLogout={() => logoutInstance.mutate(selectedInstance.id)}`. Isso deveria funcionar. 
 
-**Manual (botao refresh):** O botao chama `evolution-api` → `fetch_profile_picture` que usa o provider abstraction (`whatsapp-provider.ts`). Para uazapi, chama `POST /profile/image` com `{ jid }`. Se o endpoint retorna erro, a UI mostra "Foto nao disponivel". 
+**Reiniciar:** O hook `restartInstance` usa `action: "get_qrcode"` (linha 484), nao `restart_instance`. Para uazapi, `get_qrcode` chama `provider.connect()` que faz `POST /instance/connect`. Isso funciona como reconexao, nao como restart. Porem o backend `restart_instance` (linha 2462-2473) chama `provider.disconnect()` e marca como `disconnected` + `manual_disconnect: true` — isso e errado para restart, pois deveria reconectar automaticamente.
 
-**Problema real:** O endpoint uazapi `/profile/image` pode requerer parametros diferentes (ex: `number` em vez de `jid`, ou `GET` em vez de `POST`). Preciso verificar e ajustar. Alem disso, o auto-persist so roda na criacao de novo cliente (`if (resolvedClientId && chat.imagePreview...)`) — se o cliente ja existia sem foto, nao tenta buscar via API.
+**Correcao no backend:**
+- `restart_instance` para uazapi: chamar disconnect, aguardar 2s, chamar connect novamente, e atualizar status conforme resultado (sem marcar `manual_disconnect`)
+- O frontend ja chama corretamente
 
-**Correcao:**
-- **`supabase/functions/_shared/whatsapp-provider.ts`**: Adicionar fallback — se `POST /profile/image` falhar, tentar `GET /profile/image?number={phone}` (formato alternativo do uazapi)
-- **`supabase/functions/uazapi-webhook/index.ts`**: Quando o cliente ja existe mas `avatar_url` esta null, chamar `persistProfilePicture` com `chat.imagePreview` OU fazer fetch via provider se `imagePreview` nao estiver disponivel
+### 2. Pagina branca ao acessar /connections (stale chunk cache)
 
-### 2. Mostra "Assistente IA" em vez do nome do agente (Davi)
+**Causa raiz:** O console mostra `Failed to fetch dynamically imported module: Connections-d2jCs7xN.js` (404). Apos cada deploy, os nomes dos chunks mudam (hash). Se o usuario tem a aba aberta ou cache antigo, o `React.lazy()` tenta carregar o chunk antigo que nao existe mais — falha silenciosamente e mostra pagina branca.
 
-**Causa raiz:** O `uazapi-webhook` salva a mensagem da IA no banco SEM `ai_agent_id` e `ai_agent_name`:
+**Correcao:** Adicionar retry com reload automatico nos `React.lazy()` imports. Padrao comum: se o import falha, recarregar a pagina uma vez (usando sessionStorage flag para evitar loop infinito).
 
-```typescript
-// ATUAL (uazapi-webhook linhas 1032-1041)
-await supabaseClient.from("messages").insert({
-  conversation_id: conversationId,
-  whatsapp_message_id: allMsgIds[0],
-  content: aiText,
-  message_type: "text",
-  is_from_me: true,
-  sender_type: "ai",
-  ai_generated: true,
-  law_firm_id: lawFirmId,
-  // ← FALTA ai_agent_id e ai_agent_name!
-});
-```
+**Arquivo:** `src/App.tsx` — criar helper `lazyWithRetry` que wrapa `React.lazy()` com catch + `window.location.reload()`.
 
-O `evolution-webhook` faz corretamente — salva com `ai_agent_id` e `ai_agent_name`. O `MessageBubble` usa `aiAgentName || "Assistente IA"` como fallback, entao sem o campo, mostra o generico.
+### 3. Numero nao encontrado e refresh nao funciona
+
+**Analise:** O `refresh_phone` para uazapi (linhas 2231-2258) chama `provider.getStatus()` que faz `GET /instance/status` e extrai `data?.phone || data?.number || data?.ownerJid?.split("@")[0]`. Se a API do uazapi nao retorna o telefone no endpoint de status, o numero fica null.
+
+**Problema:** A API do uazapi pode retornar o numero em um campo diferente (ex: `data?.user`, `data?.me?.user`, `data?.jid`) ou em endpoint diferente (ex: `/me`, `/profile`).
 
 **Correcao:**
-- **`supabase/functions/uazapi-webhook/index.ts`**: Antes de chamar `ai-chat`, buscar o nome da automacao. Depois, incluir `ai_agent_id` e `ai_agent_name` no insert da mensagem:
-
-```typescript
-// Buscar nome da automacao
-const { data: automation } = await supabaseClient
-  .from("automations")
-  .select("name")
-  .eq("id", conv.current_automation_id)
-  .single();
-
-// No insert:
-ai_agent_id: conv.current_automation_id,
-ai_agent_name: automation?.name || null,
-```
-
-### 3. Recusar Chamadas — NAO funciona para uazapi
-
-**Situacao atual:** O toggle "Recusar Chamadas" no painel de detalhes chama:
-- `get_settings` → para uazapi retorna `{ rejectCall: false }` hardcoded (nao consulta nada real)
-- `set_settings` → para uazapi retorna `{ success: true }` sem fazer nada real
-
-O uazapi nao tem equivalente da Evolution API `/settings/set` com `rejectCall`. A rejeicao de chamadas no uazapi e feita de forma diferente — pode nao existir essa funcionalidade na API.
-
-**Correcao:**
-- **`supabase/functions/evolution-api/index.ts`**: Para `get_settings` de uazapi, ler o campo `reject_calls` da tabela `whatsapp_instances` (adicionar se nao existir). Para `set_settings` de uazapi, salvar no banco e tentar configurar via API se endpoint existir.
-- **Frontend**: Manter o toggle funcional salvando a preferencia no banco. O webhook do uazapi ja ignora chamadas se nao for mensagem de texto/media — mas precisamos verificar se o uazapi envia eventos de chamada e se podemos rejeitá-las.
-- **Alternativa pragmatica**: Se o uazapi nao suporta reject de chamadas via API, esconder o toggle para instancias uazapi e mostrar uma mensagem "Nao suportado neste provedor".
-
-### 4. Ignorar Grupos — JA funciona mas precisa ser padrao
-
-**Situacao atual:** O uazapi-webhook ja tem `if (remoteJidRaw.includes("@g.us")) { skip }` na linha 479. Grupos sao ignorados por padrao no webhook.
-
-**Porem:** A configuracao `groupsIgnore: true` e enviada ao Evolution na criacao/conexao da instancia. Para uazapi, nao ha equivalente — o filtro e feito apenas no webhook. Isso funciona, mas se o uazapi enviar mensagens de grupo como eventos individuais (sem `@g.us` no JID), poderiam passar.
-
-**Correcao:**
-- **`supabase/functions/uazapi-webhook/index.ts`**: Adicionar verificacao extra alem de `@g.us`: checar se `chat.isGroup === true` ou se o JID tem mais de 20 digitos (padrao de grupos). Garantir que NENHUMA mensagem de grupo chegue ate o processamento de IA.
-
-```typescript
-// Adicionar verificacao robusta de grupo
-const isGroup = remoteJidRaw.includes("@g.us") 
-  || chat.isGroup === true 
-  || (chat as any).isGroup === true;
-if (isGroup) {
-  console.log("[UAZAPI_WEBHOOK] Skipping group message");
-  break;
-}
-```
+- No `whatsapp-provider.ts`, adicionar fallback no `getStatus` do uazapi: alem dos campos atuais, verificar `data?.user`, `data?.me?.user`, `data?.me?.id`, `data?.jid`
+- Adicionar um endpoint alternativo: se `getStatus` nao retorna phone, tentar `GET /me` ou `GET /instance/me` com header `token`
+- Apos conexao bem-sucedida, a pagina ja chama `refreshPhone.mutate(currentInstanceId)` — entao se o endpoint retorna o numero, vai funcionar
 
 ## Resumo de Mudancas
 
 | Arquivo | Mudanca | Prioridade |
 |---|---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Adicionar `ai_agent_id` + `ai_agent_name` no insert da IA | CRITICO |
-| `supabase/functions/uazapi-webhook/index.ts` | Reforcar filtro de grupos (isGroup check) | ALTO |
-| `supabase/functions/uazapi-webhook/index.ts` | Melhorar auto-persist de foto (buscar via API quando imagePreview ausente) | MEDIO |
-| `supabase/functions/_shared/whatsapp-provider.ts` | Adicionar fallback no fetchProfilePicture para uazapi | MEDIO |
-| `supabase/functions/evolution-api/index.ts` | Salvar/ler `reject_calls` no banco para uazapi (ou esconder toggle) | MEDIO |
-| `src/components/connections/ConnectionDetailPanel.tsx` | Esconder toggle "Recusar Chamadas" para instancias uazapi se nao suportado | BAIXO |
+| `src/App.tsx` | Criar `lazyWithRetry()` para evitar pagina branca apos deploys | CRITICO |
+| `supabase/functions/evolution-api/index.ts` | Corrigir `restart_instance` para uazapi: disconnect + delay + reconnect (sem `manual_disconnect`) | ALTO |
+| `supabase/functions/_shared/whatsapp-provider.ts` | Ampliar campos de extracao de telefone no `getStatus` do uazapi + adicionar fallback via endpoint `/me` | ALTO |
+
+## Detalhes Tecnicos
+
+### lazyWithRetry (App.tsx)
+```typescript
+function lazyWithRetry(importFn: () => Promise<any>) {
+  return React.lazy(() =>
+    importFn().catch(() => {
+      const hasReloaded = sessionStorage.getItem("chunk_reload");
+      if (!hasReloaded) {
+        sessionStorage.setItem("chunk_reload", "1");
+        window.location.reload();
+        return { default: () => null }; // never renders
+      }
+      sessionStorage.removeItem("chunk_reload");
+      throw new Error("Failed to load page");
+    })
+  );
+}
+```
+Substituir todos os `React.lazy(() => import(...))` por `lazyWithRetry(() => import(...))`.
+
+### restart_instance para uazapi
+```typescript
+if (isUazapi(instance)) {
+  const config = getProviderConfig(instance);
+  const provider = getProvider(config);
+  // Disconnect
+  await provider.disconnect(config).catch(() => {});
+  // Wait 2s
+  await new Promise(r => setTimeout(r, 2000));
+  // Reconnect
+  const connectResult = await provider.connect(config);
+  
+  const newStatus = connectResult.status === "connected" ? "connected" : "connecting";
+  await supabaseClient.from("whatsapp_instances")
+    .update({ status: newStatus, manual_disconnect: false, updated_at: new Date().toISOString() })
+    .eq("id", body.instanceId);
+    
+  return Response({ success: true, message: "Instance restarted", qrCode: connectResult.qrCode });
+}
+```
+
+### getStatus uazapi — extracao ampliada de telefone
+Adicionar ao provider uazapi:
+```typescript
+const phoneNumber = data?.phone || data?.number || data?.user ||
+  data?.me?.user || data?.me?.id?.split("@")[0] ||
+  data?.ownerJid?.split("@")[0] || data?.jid?.split("@")[0] || null;
+```
+E se `phoneNumber` ainda for null e status for "connected", tentar `GET /me`:
+```typescript
+if (!phoneNumber && status === "connected") {
+  const meRes = await fetchWithTimeout(`${apiUrl}/me`, { headers: { token: config.apiKey } });
+  if (meRes.ok) {
+    const meData = await meRes.json().catch(() => ({}));
+    phoneNumber = meData?.phone || meData?.number || meData?.user || meData?.jid?.split("@")[0] || null;
+  }
+}
+```
 
 ## Resultado Esperado
 
-- Mensagens da IA mostram "Davi" em vez de "Assistente IA"
-- Foto de perfil busca automaticamente via API quando imagePreview nao disponivel
-- Botao manual de refresh funciona para uazapi
-- Grupos sao filtrados de forma robusta (multiplos checks)
-- Toggle de recusar chamadas e funcional ou escondido conforme suporte do provedor
+- Pagina de conexoes nunca mais fica branca apos deploy (auto-reload)
+- Botao "Desconectar" funciona (ja funcionava no backend, verificar se ha erro no frontend)
+- Botao "Reiniciar" faz disconnect + reconnect real em vez de so desconectar
+- Numero do telefone e buscado corretamente via campos expandidos + endpoint `/me`
 
