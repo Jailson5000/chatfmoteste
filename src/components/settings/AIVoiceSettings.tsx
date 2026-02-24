@@ -158,6 +158,7 @@ export function AIVoiceSettings() {
           body: JSON.stringify({ 
             text: testText,
             voiceId: voiceIdToSend,
+            skipUsageTracking: true,
           }),
         }
       );

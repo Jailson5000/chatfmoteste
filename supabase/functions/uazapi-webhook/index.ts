@@ -1160,16 +1160,113 @@ serve(async (req) => {
 
         console.log(`[UAZAPI_WEBHOOK] Message saved: ${whatsappMessageId} -> conversation ${conversationId}`);
 
+        // ---- TRANSCRIBE AUDIO MESSAGES ----
+        // If the incoming message is audio, transcribe it before AI processing
+        let contentForAI = finalContent || "";
+        if (messageType === "audio" && !isFromMe) {
+          try {
+            // Get the persisted media URL
+            const persistedMediaUrl = messagePayload.media_url as string | null;
+            if (persistedMediaUrl && (persistedMediaUrl.includes("supabase") || persistedMediaUrl.includes("/storage/v1/"))) {
+              console.log("[UAZAPI_WEBHOOK] 🎤 Transcribing audio message...");
+              
+              // Download audio from our storage to get base64
+              const audioResponse = await fetch(persistedMediaUrl);
+              if (audioResponse.ok) {
+                const audioBytes = new Uint8Array(await audioResponse.arrayBuffer());
+                // Convert to base64
+                let binary = "";
+                for (let i = 0; i < audioBytes.byteLength; i++) {
+                  binary += String.fromCharCode(audioBytes[i]);
+                }
+                const audioBase64 = btoa(binary);
+                
+                const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+                const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+                
+                const transcribeResponse = await fetch(`${supabaseUrl}/functions/v1/transcribe-audio`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${serviceKey}`,
+                  },
+                  body: JSON.stringify({
+                    audioBase64: audioBase64,
+                    mimeType: (messagePayload.media_mime_type as string) || "audio/ogg",
+                  }),
+                });
+                
+                if (transcribeResponse.ok) {
+                  const transcribeResult = await transcribeResponse.json();
+                  if (transcribeResult.transcription) {
+                    contentForAI = `[Áudio transcrito]: ${transcribeResult.transcription}`;
+                    console.log(`[UAZAPI_WEBHOOK] ✅ Audio transcribed: ${transcribeResult.transcription.length} chars`);
+                    
+                    // Update the message content in DB with the transcription
+                    await supabaseClient
+                      .from("messages")
+                      .update({ content: contentForAI })
+                      .eq("whatsapp_message_id", whatsappMessageId)
+                      .eq("conversation_id", conversationId);
+                  }
+                } else {
+                  console.warn("[UAZAPI_WEBHOOK] Transcription failed:", transcribeResponse.status);
+                }
+              }
+            } else if (!persistedMediaUrl) {
+              // Try downloading audio via uazapi /message/download to get base64
+              console.log("[UAZAPI_WEBHOOK] 🎤 No persisted URL, trying /message/download for transcription...");
+              const apiUrl = (instance.api_url || "").replace(/\/+$/, "");
+              const apiKey = instance.api_key || "";
+              if (apiUrl && apiKey) {
+                const dlRes = await fetch(`${apiUrl}/message/download`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", token: apiKey },
+                  body: JSON.stringify({ id: whatsappMessageId, return_base64: true }),
+                });
+                if (dlRes.ok) {
+                  const dlData = await dlRes.json();
+                  const dlBase64 = dlData.base64Data || dlData.base64;
+                  if (dlBase64) {
+                    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+                    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+                    const transcribeRes = await fetch(`${supabaseUrl}/functions/v1/transcribe-audio`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${serviceKey}` },
+                      body: JSON.stringify({ audioBase64: dlBase64, mimeType: mimeType || "audio/ogg" }),
+                    });
+                    if (transcribeRes.ok) {
+                      const tResult = await transcribeRes.json();
+                      if (tResult.transcription) {
+                        contentForAI = `[Áudio transcrito]: ${tResult.transcription}`;
+                        console.log(`[UAZAPI_WEBHOOK] ✅ Audio transcribed (fallback): ${tResult.transcription.length} chars`);
+                        await supabaseClient
+                          .from("messages")
+                          .update({ content: contentForAI })
+                          .eq("whatsapp_message_id", whatsappMessageId)
+                          .eq("conversation_id", conversationId);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          } catch (transcribeErr) {
+            console.warn("[UAZAPI_WEBHOOK] Audio transcription error (non-blocking):", transcribeErr);
+          }
+        }
+
         // ---- TRIGGER AI PROCESSING ----
-        if (!isFromMe && content) {
+        // Use contentForAI (which has transcription for audio) instead of raw content
+        if (!isFromMe && (contentForAI || (messageType === "audio"))) {
           const { data: conv } = await supabaseClient
             .from("conversations")
-            .select("current_handler, current_automation_id")
+            .select("current_handler, current_automation_id, ai_audio_enabled")
             .eq("id", conversationId)
             .single();
 
           if (conv?.current_handler === "ai" && conv?.current_automation_id) {
-            console.log("[UAZAPI_WEBHOOK] Triggering AI processing for conversation:", conversationId, "message:", content?.substring(0, 50));
+            console.log("[UAZAPI_WEBHOOK] Triggering AI processing for conversation:", conversationId, "message:", contentForAI?.substring(0, 50));
             
             // Fetch automation name for ai_agent_name
             let automationName: string | null = null;
@@ -1196,7 +1293,7 @@ serve(async (req) => {
                 },
                 body: JSON.stringify({
                   conversationId,
-                  message: content,
+                  message: contentForAI,
                   automationId: conv.current_automation_id,
                   source: "whatsapp",
                   context: {
@@ -1219,74 +1316,261 @@ serve(async (req) => {
                   const apiUrl = instance.api_url.replace(/\/+$/, "");
                   const targetNumber = remoteJid.replace("@s.whatsapp.net", "");
 
-                  // Use responseParts from ai-chat if available (smarter split by paragraphs/sentences)
-                  // Fallback: split manually if text > 400 chars
-                  const MAX_PARTS = 5;
-                  let parts: string[] = [];
-                  
-                  if (result.responseParts && Array.isArray(result.responseParts) && result.responseParts.length > 1) {
-                    // ai-chat already split intelligently (by \n\n, \n, or sentences >400 chars)
-                    parts = result.responseParts.filter((p: string) => p && p.trim()).slice(0, MAX_PARTS);
-                  } else if (aiText.length > 400) {
-                    const rawParts = aiText.split(/\n\n+/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
-                    if (rawParts.length > 1) {
-                      // Merge small parts together, keep max MAX_PARTS
-                      let current = "";
-                      for (const part of rawParts) {
-                        if (current && (current.length + part.length > 500 || parts.length >= MAX_PARTS - 1)) {
-                          parts.push(current.trim());
-                          current = part;
-                        } else {
-                          current = current ? `${current}\n\n${part}` : part;
+                  // ---- CHECK IF AUDIO RESPONSE IS ENABLED ----
+                  const audioEnabled = conv?.ai_audio_enabled === true;
+                  let sentAsAudio = false;
+
+                  if (audioEnabled) {
+                    try {
+                      console.log("[UAZAPI_WEBHOOK] 🔊 Audio mode enabled, generating TTS...");
+                      
+                      // Resolve voice config: agent → company → default
+                      let voiceId = "el_laura"; // default
+                      let voiceSource = "default";
+                      
+                      // Check agent-level voice config
+                      const { data: automation } = await supabaseClient
+                        .from("automations")
+                        .select("ai_voice_id")
+                        .eq("id", conv.current_automation_id)
+                        .single();
+                      
+                      if (automation?.ai_voice_id) {
+                        voiceId = automation.ai_voice_id;
+                        voiceSource = "agent";
+                      } else {
+                        // Check company-level voice config
+                        const { data: settings } = await supabaseClient
+                          .from("law_firm_settings")
+                          .select("ai_voice_id, ai_voice_enabled")
+                          .eq("law_firm_id", lawFirmId)
+                          .maybeSingle();
+                        
+                        if (settings?.ai_voice_id) {
+                          voiceId = settings.ai_voice_id;
+                          voiceSource = "company";
                         }
                       }
-                      if (current.trim()) parts.push(current.trim());
-                      if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS);
+                      
+                      // Generate TTS audio via ai-text-to-speech
+                      const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+                      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+                      
+                      // Split text into chunks for TTS (max 3500 chars)
+                      const ttsChunks: string[] = [];
+                      const fullText = aiText.trim();
+                      if (fullText.length <= 3500) {
+                        ttsChunks.push(fullText);
+                      } else {
+                        // Split by paragraphs, merge into chunks ≤3500
+                        const paragraphs = fullText.split(/\n\n+/).filter((p: string) => p.trim());
+                        let current = "";
+                        for (const p of paragraphs) {
+                          if (current && current.length + p.length > 3500) {
+                            ttsChunks.push(current.trim());
+                            current = p;
+                          } else {
+                            current = current ? `${current}\n\n${p}` : p;
+                          }
+                        }
+                        if (current.trim()) ttsChunks.push(current.trim());
+                      }
+                      
+                      const CHARS_PER_SECOND = 12.5;
+                      const billingPeriod = (() => {
+                        const now = new Date();
+                        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                      })();
+                      
+                      for (let ci = 0; ci < ttsChunks.length; ci++) {
+                        const chunkText = ttsChunks[ci];
+                        
+                        // Delay between chunks
+                        if (ci > 0) {
+                          await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
+                        }
+                        
+                        const ttsResponse = await fetch(`${supabaseUrl}/functions/v1/ai-text-to-speech`, {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${serviceKey}`,
+                          },
+                          body: JSON.stringify({
+                            text: chunkText.substring(0, 3900),
+                            voiceId: voiceId,
+                            lawFirmId: lawFirmId,
+                            skipUsageTracking: true,
+                          }),
+                        });
+                        
+                        if (ttsResponse.ok) {
+                          const ttsData = await ttsResponse.json();
+                          if (ttsData.success && ttsData.audioContent) {
+                            // Send audio via uazapi /send/audio (PTT)
+                            const audioSendRes = await fetch(`${apiUrl}/send/audio`, {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                                token: instance.api_key,
+                              },
+                              body: JSON.stringify({
+                                number: targetNumber,
+                                audio: `data:audio/mpeg;base64,${ttsData.audioContent}`,
+                                ptt: true,
+                              }),
+                            });
+                            
+                            const audioSendData = await audioSendRes.json().catch(() => ({}));
+                            const audioMsgId = audioSendData?.key?.id || audioSendData?.id || crypto.randomUUID();
+                            
+                            // Persist audio to storage
+                            let audioStorageUrl: string | null = null;
+                            try {
+                              const binaryStr = atob(ttsData.audioContent);
+                              const audioBytes = new Uint8Array(binaryStr.length);
+                              for (let j = 0; j < binaryStr.length; j++) {
+                                audioBytes[j] = binaryStr.charCodeAt(j);
+                              }
+                              const isOgg = (ttsData.mimeType || "").includes("ogg");
+                              const ext = isOgg ? ".ogg" : ".mp3";
+                              const storagePath = `${lawFirmId}/ai-audio/${audioMsgId}${ext}`;
+                              
+                              const { error: uploadErr } = await supabaseClient.storage
+                                .from("chat-media")
+                                .upload(storagePath, audioBytes, {
+                                  contentType: isOgg ? "audio/ogg" : "audio/mpeg",
+                                  cacheControl: "31536000",
+                                  upsert: false,
+                                });
+                              
+                              if (!uploadErr) {
+                                const { data: urlData } = await supabaseClient.storage
+                                  .from("chat-media")
+                                  .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
+                                audioStorageUrl = urlData?.signedUrl || null;
+                              }
+                            } catch (storageErr) {
+                              console.warn("[UAZAPI_WEBHOOK] Audio storage error (non-blocking):", storageErr);
+                            }
+                            
+                            // Save audio message to DB
+                            const isOgg = (ttsData.mimeType || "").includes("ogg");
+                            await supabaseClient.from("messages").insert({
+                              conversation_id: conversationId,
+                              whatsapp_message_id: audioMsgId,
+                              content: chunkText,
+                              message_type: "audio",
+                              is_from_me: true,
+                              sender_type: "system",
+                              ai_generated: true,
+                              media_mime_type: isOgg ? "audio/ogg" : "audio/mpeg",
+                              media_url: audioStorageUrl,
+                              law_firm_id: lawFirmId,
+                              ai_agent_id: conv.current_automation_id,
+                              ai_agent_name: automationName,
+                            });
+                            
+                            // Record TTS usage for billing
+                            const durationSeconds = Math.ceil(chunkText.length / CHARS_PER_SECOND);
+                            await supabaseClient.from("usage_records").insert({
+                              law_firm_id: lawFirmId,
+                              usage_type: "tts_audio",
+                              count: 1,
+                              duration_seconds: durationSeconds,
+                              billing_period: billingPeriod,
+                              metadata: {
+                                conversation_id: conversationId,
+                                text_length: chunkText.length,
+                                voice_id: voiceId,
+                                voice_source: voiceSource,
+                                provider: "uazapi",
+                                generated_at: new Date().toISOString(),
+                              },
+                            });
+                            
+                            sentAsAudio = true;
+                            console.log(`[UAZAPI_WEBHOOK] 🔊 Audio chunk ${ci + 1}/${ttsChunks.length} sent, id: ${audioMsgId}`);
+                          } else {
+                            console.warn("[UAZAPI_WEBHOOK] TTS generation failed, falling back to text");
+                          }
+                        } else {
+                          console.warn("[UAZAPI_WEBHOOK] TTS endpoint error:", ttsResponse.status);
+                        }
+                      }
+                    } catch (ttsErr) {
+                      console.warn("[UAZAPI_WEBHOOK] TTS processing error (falling back to text):", ttsErr);
+                    }
+                  }
+
+                  // ---- SEND AS TEXT (default or fallback) ----
+                  if (!sentAsAudio) {
+                    // Use responseParts from ai-chat if available (smarter split by paragraphs/sentences)
+                    // Fallback: split manually if text > 400 chars
+                    const MAX_PARTS = 5;
+                    let parts: string[] = [];
+                    
+                    if (result.responseParts && Array.isArray(result.responseParts) && result.responseParts.length > 1) {
+                      parts = result.responseParts.filter((p: string) => p && p.trim()).slice(0, MAX_PARTS);
+                    } else if (aiText.length > 400) {
+                      const rawParts = aiText.split(/\n\n+/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+                      if (rawParts.length > 1) {
+                        let current = "";
+                        for (const part of rawParts) {
+                          if (current && (current.length + part.length > 500 || parts.length >= MAX_PARTS - 1)) {
+                            parts.push(current.trim());
+                            current = part;
+                          } else {
+                            current = current ? `${current}\n\n${part}` : part;
+                          }
+                        }
+                        if (current.trim()) parts.push(current.trim());
+                        if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS);
+                      } else {
+                        parts = [aiText];
+                      }
                     } else {
                       parts = [aiText];
                     }
-                  } else {
-                    parts = [aiText];
-                  }
 
-                  const allMsgIds: string[] = [];
+                    const allMsgIds: string[] = [];
 
-                  for (let i = 0; i < parts.length; i++) {
-                    // Add delay between parts (not before first)
-                    if (i > 0) {
-                      const delay = 1000 + Math.random() * 2000; // 1-3s
-                      await new Promise(r => setTimeout(r, delay));
+                    for (let i = 0; i < parts.length; i++) {
+                      if (i > 0) {
+                        const delay = 1000 + Math.random() * 2000;
+                        await new Promise(r => setTimeout(r, delay));
+                      }
+
+                      const sendRes = await fetch(`${apiUrl}/send/text`, {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          token: instance.api_key,
+                        },
+                        body: JSON.stringify({ number: targetNumber, text: parts[i] }),
+                      });
+
+                      const sendData = await sendRes.json().catch(() => ({}));
+                      const msgId = sendData?.key?.id || sendData?.id || crypto.randomUUID();
+                      allMsgIds.push(msgId);
                     }
 
-                    const sendRes = await fetch(`${apiUrl}/send/text`, {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        token: instance.api_key,
-                      },
-                      body: JSON.stringify({ number: targetNumber, text: parts[i] }),
+                    console.log(`[UAZAPI_WEBHOOK] AI response sent in ${parts.length} part(s), ids:`, allMsgIds);
+
+                    // Save full AI message to database
+                    await supabaseClient.from("messages").insert({
+                      conversation_id: conversationId,
+                      whatsapp_message_id: allMsgIds[0],
+                      content: aiText,
+                      message_type: "text",
+                      is_from_me: true,
+                      sender_type: "ai",
+                      ai_generated: true,
+                      law_firm_id: lawFirmId,
+                      ai_agent_id: conv.current_automation_id,
+                      ai_agent_name: automationName,
                     });
-
-                    const sendData = await sendRes.json().catch(() => ({}));
-                    const msgId = sendData?.key?.id || sendData?.id || crypto.randomUUID();
-                    allMsgIds.push(msgId);
                   }
-
-                  console.log(`[UAZAPI_WEBHOOK] AI response sent in ${parts.length} part(s), ids:`, allMsgIds);
-
-                  // Save full AI message to database (single record with complete text)
-                  await supabaseClient.from("messages").insert({
-                    conversation_id: conversationId,
-                    whatsapp_message_id: allMsgIds[0],
-                    content: aiText,
-                    message_type: "text",
-                    is_from_me: true,
-                    sender_type: "ai",
-                    ai_generated: true,
-                    law_firm_id: lawFirmId,
-                    ai_agent_id: conv.current_automation_id,
-                    ai_agent_name: automationName,
-                  });
 
                   // Update conversation timestamp
                   await supabaseClient
