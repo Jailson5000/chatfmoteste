@@ -1,70 +1,42 @@
 
-# Otimizar Velocidade das Paginas
+# Corrigir Conexao WhatsApp: Token, Limite e UI
 
-## Diagnostico
+## Problemas Identificados
 
-A analise de performance revelou problemas criticos:
+### 1. Erro 401 - Token uazapi invalido
+O token salvo em `system_settings` (`uazapi_admin_token`) esta sendo rejeitado pelo servidor uazapi (`https://miauchat.uazapi.com`). 
 
-| Metrica | Valor Atual | Ideal |
-|---------|------------|-------|
-| First Contentful Paint (FCP) | 3896ms | < 1800ms |
-| DOM Content Loaded | 3775ms | < 2000ms |
-| Scripts carregados | 250 arquivos / 3013KB | Reduzir ~60% |
+**Acao necessaria:** Voce precisa atualizar o token no painel de administracao global (Configuracoes > uazapi). Verifique no painel do uazapi qual e o token correto da instancia/servidor.
 
-### Causas Raiz
+### 2. Erro "Maximo de conexao" - View company_usage_summary vazia
+A view `company_usage_summary` retorna vazio para o tenant "Escritorio de Suporte MiauChat". Isso faz o `check_company_limit` falhar e bloquear a criacao mesmo com apenas 1 instancia de 4 permitidas.
 
-1. **Imports sincronos de paginas pesadas** -- 8 paginas sao importadas sincronamente mesmo que o usuario so visite 1 por vez:
-   - `Conversations.tsx` (172KB) -- a mais pesada
-   - `Dashboard.tsx`, `Kanban.tsx`, `Settings.tsx`, `Contacts.tsx`, `Connections.tsx`, `AIAgents.tsx`, `Tasks.tsx`
-   
-2. **Providers globais desnecessarios** -- `RealtimeSyncProvider` e `TenantProvider` envolvem TODA a aplicacao, incluindo Global Admin que nao precisa deles. Isso forca conexoes WebSocket e queries ao banco mesmo quando o admin esta so gerenciando empresas.
+**Correcao no codigo:** Tornar o `checkLimit` mais resiliente -- se a view retornar erro ou vazio, permitir a acao (fail-open) em vez de bloquear.
 
-3. **Bibliotecas pesadas carregadas no inicio** -- `recharts` (219KB) e `lucide-react` (156KB) sao carregadas na inicializacao independente da pagina.
+### 3. Badge "UAZAPI"/"EVO" visivel ao cliente
+Os badges tecnicos de provedor aparecem na lista de conexoes. O cliente nao precisa saber qual provedor esta sendo usado.
 
-## Solucao
+**Correcao no codigo:** Remover os badges de provedor de ambos os componentes que exibem a lista.
 
-### 1. Lazy-load de TODAS as paginas do cliente
+### 4. Mensagem de erro tecnica
+O erro "uazapi connect failed (401): {...}" e exibido diretamente ao cliente. Deve ser traduzido para algo amigavel.
 
-Converter os 8 imports sincronos para `React.lazy()`. O usuario so carrega o codigo da pagina que esta acessando.
+## Alteracoes no Codigo
 
-**Economia estimada**: ~500KB removidos do bundle inicial.
+### Arquivo: `src/hooks/useWhatsAppInstances.tsx`
+- No `createInstance.mutationFn`: Se o `checkLimit` retornar erro (sem dados), permitir a criacao em vez de bloquear
+- No `createInstance.onError`: Traduzir mensagens de erro tecnicas (ex: "uazapi connect failed (401)") para mensagens amigaveis como "Erro de autenticacao com o servidor. Contate o suporte."
 
-Paginas afetadas:
-- `Dashboard` 
-- `Conversations` (172KB -- maior ganho)
-- `Kanban`
-- `Settings`
-- `Contacts`
-- `Connections`
-- `AIAgents` + `AIAgentEdit`
-- `Tasks`
-- `Onboarding`
+### Arquivo: `src/pages/Connections.tsx`
+- Remover qualquer referencia visual ao provedor (nao ha badges neste componente atualmente, confirmar)
 
-### 2. Mover RealtimeSyncProvider para dentro do AppLayout
+### Arquivo: `src/components/connections/WhatsAppInstanceList.tsx`
+- Linhas 142-146: Remover os badges "UAZAPI" e "EVO" da coluna Nome
 
-O Global Admin nao precisa de canais Realtime (WebSocket). Mover o provider de fora do `App.tsx` para dentro do `AppLayout`, eliminando 3 canais WebSocket desnecessarios quando o admin esta logado.
+### Arquivo: `src/components/connections/ConnectionDetailPanel.tsx`
+- Verificar e remover qualquer mencao ao provedor visivel ao cliente
 
-### 3. Separar TenantProvider do Global Admin
-
-Criar um wrapper `TenantRealtimeWrapper` que so e usado nas rotas protegidas do cliente. As rotas do Global Admin ficam sem esses providers.
-
-## Detalhes Tecnicos
-
-### Arquivo: `src/App.tsx`
-
-- Converter imports sincronos (linhas 25-35) para `React.lazy()`
-- Remover `RealtimeSyncProvider` do wrapper global
-- Manter `AuthProvider` e `TabSessionProvider` globais (necessarios para ambos os fluxos)
-- Envolver rotas protegidas com `TenantProvider` + `RealtimeSyncProvider` via um componente wrapper
-
-### Arquivo: `src/components/layout/AppLayout.tsx`
-
-- Adicionar `RealtimeSyncProvider` envolvendo o layout do cliente
-- Alternativa: criar componente `ClientProviders` que encapsula `TenantProvider` + `RealtimeSyncProvider`
-
-### Resultado Esperado
-
-- FCP: de ~3900ms para ~1500ms (reducao de ~60%)
-- Bundle inicial: de ~3013KB para ~1200KB
-- Global Admin: carrega sem WebSocket e sem queries de tenant
-- Paginas do cliente: carregam sob demanda com spinner de loading
+## Acao Manual Necessaria (por voce)
+Apos a implementacao, atualize o token uazapi em:
+- Painel Admin Global > Configuracoes > campo "Token Admin uazapi"
+- Verifique no painel do uazapi (`https://miauchat.uazapi.com`) qual e o token correto
