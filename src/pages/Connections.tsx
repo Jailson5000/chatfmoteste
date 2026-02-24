@@ -775,7 +775,8 @@ export default function Connections() {
                             <DropdownMenuItem onClick={() => setSelectedInstance(instance)}>
                               Ver detalhes
                             </DropdownMenuItem>
-                            {instance.status !== "connected" && (
+                            {/* Conectar: only for uazapi instances that are disconnected */}
+                            {instance.api_provider === "uazapi" && instance.status !== "connected" && (
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -785,14 +786,17 @@ export default function Connections() {
                                 Conectar
                               </DropdownMenuItem>
                             )}
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                refreshStatus.mutate(instance.id);
-                              }}
-                            >
-                              Atualizar status
-                            </DropdownMenuItem>
+                            {/* Atualizar número: only for connected uazapi instances */}
+                            {instance.api_provider === "uazapi" && instance.status === "connected" && (
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  refreshPhone.mutate(instance.id);
+                                }}
+                              >
+                                Atualizar número
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               className="text-destructive"
                               onClick={(e) => {
