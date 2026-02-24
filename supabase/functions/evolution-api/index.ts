@@ -880,6 +880,8 @@ serve(async (req) => {
           const provider = getProvider(config);
           const result = await provider.connect(config);
 
+          console.log("[Evolution API] uazapi get_qrcode result:", JSON.stringify(result).slice(0, 500));
+
           const uazapiStatus = result.status === 'connected' ? 'connected' : (result.qrCode ? 'awaiting_qr' : 'disconnected');
           await supabaseClient.from("whatsapp_instances")
             .update({ status: uazapiStatus, awaiting_qr: uazapiStatus === 'awaiting_qr', updated_at: new Date().toISOString() })
