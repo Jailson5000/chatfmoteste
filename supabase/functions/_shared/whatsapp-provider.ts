@@ -542,7 +542,7 @@ const UazapiProvider = {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`uazapi sendText failed (${res.status}): ${text.slice(0, 300)}`);
+      throw new Error(`Falha ao enviar mensagem (${res.status}): ${text.slice(0, 300)}`);
     }
 
     const data = await res.json().catch(() => ({}));
@@ -585,7 +585,7 @@ const UazapiProvider = {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`uazapi sendMedia failed (${res.status}): ${text.slice(0, 300)}`);
+      throw new Error(`Falha ao enviar mídia (${res.status}): ${text.slice(0, 300)}`);
     }
 
     const data = await res.json().catch(() => ({}));
@@ -611,7 +611,7 @@ const UazapiProvider = {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`uazapi connect failed (${res.status}): ${text.slice(0, 300)}`);
+      throw new Error(`Falha ao conectar instância (${res.status}): ${text.slice(0, 300)}`);
     }
 
     const data = await res.json().catch(() => ({}));
@@ -681,7 +681,7 @@ const UazapiProvider = {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`uazapi configureWebhook failed (${res.status}): ${text.slice(0, 300)}`);
+      throw new Error(`Falha ao configurar webhook (${res.status}): ${text.slice(0, 300)}`);
     }
   },
 
@@ -713,10 +713,78 @@ const UazapiProvider = {
     ).catch(() => { /* best effort */ });
   },
 
-  async createInstance(_config: ProviderConfig, _webhookUrl: string): Promise<ConnectResult> {
-    // uazapi: instances are pre-provisioned via admin panel
-    // "Creating" an instance means connecting to an existing uazapi instance
-    return UazapiProvider.connect(_config);
+  /**
+   * Create a new uazapi instance using the 2-step flow:
+   * 1. POST /instance/init with admintoken header → returns instance token
+   * 2. POST /instance/connect with instance token → returns QR code
+   *
+   * The config.apiKey here is the ADMIN token.
+   * The returned ConnectResult.raw will contain { instanceToken } for the caller to persist.
+   */
+  async createInstance(config: ProviderConfig, _webhookUrl: string): Promise<ConnectResult> {
+    const apiUrl = normalizeUrl(config.apiUrl);
+
+    // Step 1: Initialize instance with admin token
+    console.log(`[UazapiProvider] Step 1: POST /instance/init with admintoken for "${config.instanceName}"`);
+    const initRes = await fetchWithTimeout(
+      `${apiUrl}/instance/init`,
+      {
+        method: "POST",
+        headers: {
+          admintoken: config.apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: config.instanceName }),
+      },
+      30000,
+    );
+
+    if (!initRes.ok) {
+      const text = await initRes.text().catch(() => "");
+      throw new Error(`Falha ao criar instância (${initRes.status}): ${text.slice(0, 300)}`);
+    }
+
+    const initData = await initRes.json().catch(() => ({}));
+    const instanceToken = initData?.token || initData?.data?.token || null;
+    console.log(`[UazapiProvider] Step 1 result: token=${instanceToken ? "obtained" : "MISSING"}`);
+
+    if (!instanceToken) {
+      throw new Error(`Falha ao criar instância: token não retornado pela API. Resposta: ${JSON.stringify(initData).slice(0, 300)}`);
+    }
+
+    // Step 2: Connect using the INSTANCE token (not admin token)
+    console.log(`[UazapiProvider] Step 2: POST /instance/connect with instance token`);
+    const connectRes = await fetchWithTimeout(
+      `${apiUrl}/instance/connect`,
+      {
+        method: "POST",
+        headers: {
+          token: instanceToken,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      },
+      30000,
+    );
+
+    if (!connectRes.ok) {
+      const text = await connectRes.text().catch(() => "");
+      throw new Error(`Falha ao conectar instância (${connectRes.status}): ${text.slice(0, 300)}`);
+    }
+
+    const connectData = await connectRes.json().catch(() => ({}));
+    const qrCode = connectData?.qrcode || connectData?.base64 || connectData?.qr || null;
+    const state = connectData?.status || connectData?.state || "unknown";
+
+    let status = "awaiting_qr";
+    if (state === "connected" || state === "open") status = "connected";
+    else if (state === "connecting") status = "connecting";
+
+    return {
+      qrCode,
+      status,
+      raw: { ...connectData, instanceToken },
+    };
   },
 
   async deleteMessage(config: ProviderConfig, _remoteJid: string, messageId: string, _isFromMe: boolean): Promise<void> {

@@ -616,13 +616,17 @@ serve(async (req) => {
           const uazapiConfig: ProviderConfig = {
             provider: 'uazapi',
             apiUrl: uazapiUrl,
-            apiKey: uazapiKey,
+            apiKey: uazapiKey, // This is the ADMIN token for init
             instanceName: body.instanceName,
           };
 
-          // Connect to uazapi (instances are pre-provisioned)
+          // Create instance using 2-step flow: init (admintoken) → connect (instance token)
           const uazapiProvider = getProvider(uazapiConfig);
-          const connectResult = await uazapiProvider.connect(uazapiConfig);
+          const connectResult = await uazapiProvider.createInstance(uazapiConfig, "");
+
+          // Extract instance token from the result (saved by createInstance in raw)
+          const instanceToken = (connectResult.raw as any)?.instanceToken || uazapiKey;
+          console.log(`[Evolution API] uazapi instance token obtained: ${instanceToken ? "yes" : "no"}`);
 
           // Build uazapi webhook URL
           const UAZAPI_WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN") || "";
@@ -630,15 +634,19 @@ serve(async (req) => {
             ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/uazapi-webhook?token=${UAZAPI_WEBHOOK_TOKEN}`
             : `${Deno.env.get("SUPABASE_URL")}/functions/v1/uazapi-webhook`;
 
-          // Configure webhook
+          // Configure webhook using the INSTANCE token
+          const webhookConfig: ProviderConfig = {
+            ...uazapiConfig,
+            apiKey: instanceToken, // Use instance token, not admin token
+          };
           try {
-            await uazapiProvider.configureWebhook(uazapiConfig, { webhookUrl: uazapiWebhookUrl });
+            await uazapiProvider.configureWebhook(webhookConfig, { webhookUrl: uazapiWebhookUrl });
             console.log(`[Evolution API] uazapi webhook configured`);
           } catch (webhookErr) {
             console.warn(`[Evolution API] uazapi webhook config failed (non-fatal):`, webhookErr);
           }
 
-          // Save instance to database with api_provider = 'uazapi'
+          // Save instance to database - use INSTANCE token as api_key (not admin token)
           const { data: instance, error: insertError } = await supabaseClient
             .from("whatsapp_instances")
             .insert({
@@ -647,7 +655,7 @@ serve(async (req) => {
               display_name: body.displayName || body.instanceName,
               instance_id: body.instanceName,
               api_url: uazapiUrl,
-              api_key: uazapiKey,
+              api_key: instanceToken,
               api_provider: 'uazapi',
               status: connectResult.status === 'connected' ? 'connected' : (connectResult.qrCode ? 'awaiting_qr' : 'disconnected'),
             })
