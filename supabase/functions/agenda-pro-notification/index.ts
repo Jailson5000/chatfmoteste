@@ -368,14 +368,37 @@ serve(async (req) => {
     // Send WhatsApp notification to client
     if (clientPhone && settings?.send_whatsapp_confirmation !== false) {
       try {
-        // Get connected WhatsApp instance for this law firm
-        const { data: instance } = await supabase
-          .from("whatsapp_instances")
-          .select("id, instance_name, api_url, api_key, status, default_automation_id, default_assigned_to, default_department_id")
+        // Get configured WhatsApp instance from agenda_pro_settings, with fallback
+        const { data: agendaSettings } = await supabase
+          .from("agenda_pro_settings")
+          .select("whatsapp_instance_id")
           .eq("law_firm_id", appointment.law_firm_id)
-          .eq("status", "connected")
-          .limit(1)
           .maybeSingle();
+
+        let instance: any = null;
+
+        // Try configured instance first
+        if (agendaSettings?.whatsapp_instance_id) {
+          const { data: configuredInstance } = await supabase
+            .from("whatsapp_instances")
+            .select("id, instance_name, api_url, api_key, status, default_automation_id, default_assigned_to, default_department_id")
+            .eq("id", agendaSettings.whatsapp_instance_id)
+            .eq("status", "connected")
+            .maybeSingle();
+          instance = configuredInstance;
+        }
+
+        // Fallback to first connected instance
+        if (!instance) {
+          const { data: fallbackInstance } = await supabase
+            .from("whatsapp_instances")
+            .select("id, instance_name, api_url, api_key, status, default_automation_id, default_assigned_to, default_department_id")
+            .eq("law_firm_id", appointment.law_firm_id)
+            .eq("status", "connected")
+            .limit(1)
+            .maybeSingle();
+          instance = fallbackInstance;
+        }
 
         if (instance) {
           const phone = clientPhone.replace(/\D/g, "");

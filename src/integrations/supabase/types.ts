@@ -1032,6 +1032,7 @@ export type Database = {
           sunday_start_time: string | null
           timezone: string | null
           updated_at: string
+          whatsapp_instance_id: string | null
         }
         Insert: {
           birthday_coupon_service_id?: string | null
@@ -1079,6 +1080,7 @@ export type Database = {
           sunday_start_time?: string | null
           timezone?: string | null
           updated_at?: string
+          whatsapp_instance_id?: string | null
         }
         Update: {
           birthday_coupon_service_id?: string | null
@@ -1126,6 +1128,7 @@ export type Database = {
           sunday_start_time?: string | null
           timezone?: string | null
           updated_at?: string
+          whatsapp_instance_id?: string | null
         }
         Relationships: [
           {
@@ -1140,6 +1143,20 @@ export type Database = {
             columns: ["law_firm_id"]
             isOneToOne: true
             referencedRelation: "law_firms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_settings_whatsapp_instance_id_fkey"
+            columns: ["whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agenda_pro_settings_whatsapp_instance_id_fkey"
+            columns: ["whatsapp_instance_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_instances_safe"
             referencedColumns: ["id"]
           },
         ]

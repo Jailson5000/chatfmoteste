@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Loader2, Bell, Clock } from "lucide-react";
+import { Save, Loader2, Bell, Clock, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,10 +10,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAgendaPro, AgendaProSettings as SettingsType } from "@/hooks/useAgendaPro";
 import { useToast } from "@/hooks/use-toast";
 import { AgendaProBirthdaySettings } from "./AgendaProBirthdaySettings";
+import { useWhatsAppInstances } from "@/hooks/useWhatsAppInstances";
 
 export function AgendaProSettings() {
   const { settings, updateSettings, isLoading } = useAgendaPro();
   const { toast } = useToast();
+  const { instances } = useWhatsAppInstances();
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     business_name: "",
@@ -52,6 +54,7 @@ export function AgendaProSettings() {
     sunday_enabled: false,
     sunday_start_time: "08:00",
     sunday_end_time: "12:00",
+    whatsapp_instance_id: null as string | null,
   });
 
   useEffect(() => {
@@ -93,6 +96,7 @@ export function AgendaProSettings() {
         sunday_enabled: settings.sunday_enabled ?? false,
         sunday_start_time: settings.sunday_start_time ?? "08:00",
         sunday_end_time: settings.sunday_end_time ?? "12:00",
+        whatsapp_instance_id: (settings as any).whatsapp_instance_id ?? null,
       });
     }
   }, [settings]);
@@ -137,7 +141,8 @@ export function AgendaProSettings() {
         sunday_enabled: formData.sunday_enabled,
         sunday_start_time: formData.sunday_start_time,
         sunday_end_time: formData.sunday_end_time,
-      });
+        whatsapp_instance_id: formData.whatsapp_instance_id,
+      } as any);
       toast({ title: "Configurações salvas!" });
     } finally {
       setIsSaving(false);
@@ -388,6 +393,37 @@ export function AgendaProSettings() {
                 onCheckedChange={(checked) => setFormData({ ...formData, send_whatsapp_confirmation: checked })}
               />
             </div>
+
+            {/* WhatsApp Instance Selector */}
+            {formData.send_whatsapp_confirmation && instances && instances.length > 0 && (
+              <div className="pl-4 border-l-2 border-primary/20 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Smartphone className="h-4 w-4 text-muted-foreground" />
+                  <Label className="text-sm">Número de envio</Label>
+                </div>
+                <Select
+                  value={formData.whatsapp_instance_id || "auto"}
+                  onValueChange={(value) => setFormData({ ...formData, whatsapp_instance_id: value === "auto" ? null : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o número" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Automático (primeira disponível)</SelectItem>
+                    {instances.map((inst: any) => (
+                      <SelectItem key={inst.id} value={inst.id}>
+                        {inst.display_name || inst.instance_name}
+                        {inst.phone_number ? ` (${inst.phone_number})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Escolha qual número WhatsApp será usado para enviar confirmações e lembretes
+                </p>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <div>
                 <Label>Confirmação por E-mail</Label>

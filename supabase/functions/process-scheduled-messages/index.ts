@@ -166,14 +166,40 @@ serve(async (req) => {
         } else {
           // Custom message without appointment - send directly via WhatsApp
           if (message.channel === "whatsapp" && clientPhone) {
-            // Get WhatsApp instance for this law firm (with api_url and api_key)
-            const { data: instance, error: instanceError } = await supabase
-              .from("whatsapp_instances")
-              .select("id, instance_name, status, api_url, api_key")
+            // Get configured WhatsApp instance from agenda_pro_settings, with fallback
+            const { data: agendaSettings } = await supabase
+              .from("agenda_pro_settings")
+              .select("whatsapp_instance_id")
               .eq("law_firm_id", message.law_firm_id)
-              .eq("status", "connected")
-              .limit(1)
               .maybeSingle();
+
+            let instance: any = null;
+            let instanceError: any = null;
+
+            // Try configured instance first
+            if (agendaSettings?.whatsapp_instance_id) {
+              const { data: configuredInst, error: configErr } = await supabase
+                .from("whatsapp_instances")
+                .select("id, instance_name, status, api_url, api_key")
+                .eq("id", agendaSettings.whatsapp_instance_id)
+                .eq("status", "connected")
+                .maybeSingle();
+              instance = configuredInst;
+              instanceError = configErr;
+            }
+
+            // Fallback to first connected instance
+            if (!instance && !instanceError) {
+              const { data: fallbackInst, error: fallbackErr } = await supabase
+                .from("whatsapp_instances")
+                .select("id, instance_name, status, api_url, api_key")
+                .eq("law_firm_id", message.law_firm_id)
+                .eq("status", "connected")
+                .limit(1)
+                .maybeSingle();
+              instance = fallbackInst;
+              instanceError = fallbackErr;
+            }
 
             if (instanceError) {
               throw new Error(`Database error: ${instanceError.message}`);
