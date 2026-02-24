@@ -41,6 +41,22 @@ export function useMessageNotifications(options: UseMessageNotificationsOptions 
       const cachedData = queryClient.getQueryData<any[]>(["conversations", lawFirm?.id]);
       const conversation = cachedData?.find((c: any) => c.id === message.conversation_id);
 
+      // If conversation not in cache (new or recently unarchived), always notify
+      if (!conversation) {
+        if (soundEnabled) {
+          playNotification();
+        }
+        if (browserEnabled && "Notification" in window && Notification.permission === "granted") {
+          new Notification("Nova mensagem do WhatsApp", {
+            body: message.content || "Nova mensagem recebida",
+            icon: "/favicon.png",
+            tag: message.id,
+          });
+        }
+        onNewMessage?.(message);
+        return;
+      }
+
       // If AI is handling -> no notification
       if (conversation?.current_handler === 'ai') return;
 
