@@ -6,6 +6,12 @@ import {
   logTenantSecurityEvent 
 } from "../_shared/tenant-validation.ts";
 import { humanDelay, DELAY_CONFIG } from "../_shared/human-delay.ts";
+import {
+  getProviderConfig,
+  getProvider,
+  isUazapi,
+  type ProviderConfig,
+} from "../_shared/whatsapp-provider.ts";
 
 // Production CORS configuration
 const ALLOWED_ORIGINS = [
@@ -85,6 +91,7 @@ interface EvolutionRequest {
   displayName?: string;
   apiUrl?: string;
   apiKey?: string;
+  provider?: 'evolution' | 'uazapi';
   instanceId?: string;
   rejectCall?: boolean;
   msgCall?: string;
@@ -566,6 +573,75 @@ serve(async (req) => {
           throw new Error("instanceName is required");
         }
 
+        const requestedProvider = body.provider || 'evolution';
+        console.log(`[Evolution API] Creating instance: ${body.instanceName}, provider: ${requestedProvider}`);
+
+        // ── UAZAPI PROVIDER ──
+        if (requestedProvider === 'uazapi') {
+          if (!body.apiUrl || !body.apiKey) {
+            throw new Error("apiUrl and apiKey are required for uazapi provider");
+          }
+
+          const uazapiConfig: ProviderConfig = {
+            provider: 'uazapi',
+            apiUrl: body.apiUrl,
+            apiKey: body.apiKey,
+            instanceName: body.instanceName,
+          };
+
+          // Connect to uazapi (instances are pre-provisioned)
+          const uazapiProvider = getProvider(uazapiConfig);
+          const connectResult = await uazapiProvider.connect(uazapiConfig);
+
+          // Build uazapi webhook URL
+          const UAZAPI_WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN") || "";
+          const uazapiWebhookUrl = UAZAPI_WEBHOOK_TOKEN
+            ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/uazapi-webhook?token=${UAZAPI_WEBHOOK_TOKEN}`
+            : `${Deno.env.get("SUPABASE_URL")}/functions/v1/uazapi-webhook`;
+
+          // Configure webhook
+          try {
+            await uazapiProvider.configureWebhook(uazapiConfig, { webhookUrl: uazapiWebhookUrl });
+            console.log(`[Evolution API] uazapi webhook configured`);
+          } catch (webhookErr) {
+            console.warn(`[Evolution API] uazapi webhook config failed (non-fatal):`, webhookErr);
+          }
+
+          // Save instance to database with api_provider = 'uazapi'
+          const { data: instance, error: insertError } = await supabaseClient
+            .from("whatsapp_instances")
+            .insert({
+              law_firm_id: lawFirmId,
+              instance_name: body.instanceName,
+              display_name: body.displayName || body.instanceName,
+              instance_id: body.instanceName,
+              api_url: body.apiUrl,
+              api_key: body.apiKey,
+              api_provider: 'uazapi',
+              status: connectResult.status === 'connected' ? 'connected' : (connectResult.qrCode ? 'awaiting_qr' : 'disconnected'),
+            })
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error(`[Evolution API] Database insert error (uazapi):`, insertError);
+            throw new Error(`Falha ao salvar a instância: ${insertError.message}`);
+          }
+
+          console.log(`[Evolution API] uazapi instance saved with ID: ${instance.id}`);
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              instance,
+              qrCode: connectResult.qrCode,
+              message: connectResult.qrCode ? "Instance created, scan QR code" : (connectResult.status === 'connected' ? "Connected" : "Instance created"),
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // ── EVOLUTION PROVIDER (existing logic) ──
         // If apiUrl/apiKey not provided, fetch from default Evolution API connection
         let apiUrl = body.apiUrl ? normalizeUrl(body.apiUrl) : "";
         let apiKey = body.apiKey || "";
@@ -630,7 +706,7 @@ serve(async (req) => {
         // Auto-configure settings to ignore groups by default
         try {
           const settingsPayload = {
-            rejectCall: false,    // Required by Evolution API v2
+            rejectCall: false,
             msgCall: "",
             groupsIgnore: true,
             alwaysOnline: false,
@@ -657,7 +733,7 @@ serve(async (req) => {
           console.warn(`[Evolution API] Error auto-configuring settings:`, settingsError);
         }
 
-        // Extract QR code from response - handle various v2.3.x formats
+        // Extract QR code from response
         console.log(`[Evolution API] create_instance qrcode field:`, JSON.stringify(createData?.qrcode).slice(0, 500));
         const _extractQr = (d: any): string | null => {
           if (d?.qrcode?.base64) return d.qrcode.base64;
@@ -671,13 +747,11 @@ serve(async (req) => {
         let qrCode: string | null = _extractQr(createData);
 
         // If no QR code from create response, retry with /instance/connect endpoint
-        // v2.2.3 - Baileys v6 fast init
         if (!qrCode) {
-          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect (v2.2.3 - fast init)`);
+          console.log(`[Evolution API] No QR from create response, retrying with /instance/connect`);
           const maxRetries = 2;
           const retryDelayMs = 2000;
 
-          // Wait for Baileys v6 to initialize
           await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
 
           for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -694,15 +768,11 @@ serve(async (req) => {
 
                 if (connectData.base64) {
                   qrCode = connectData.base64;
-                  console.log(`[Evolution API] QR code obtained on retry attempt ${attempt}`);
                   break;
                 } else if (connectData.qrcode?.base64) {
                   qrCode = connectData.qrcode.base64;
-                  console.log(`[Evolution API] QR code obtained on retry attempt ${attempt}`);
                   break;
                 }
-              } else {
-                console.warn(`[Evolution API] Connect response not ok on attempt ${attempt}: ${connectResponse.status}`);
               }
             } catch (retryError) {
               console.warn(`[Evolution API] QR retry attempt ${attempt} failed:`, retryError);
@@ -732,6 +802,7 @@ serve(async (req) => {
             instance_id: instanceId,
             api_url: apiUrl,
             api_key: apiKey,
+            api_provider: 'evolution',
             status: qrCode ? "awaiting_qr" : "disconnected",
           })
           .select()
@@ -763,6 +834,25 @@ serve(async (req) => {
         console.log(`[Evolution API] Getting QR code for instance: ${body.instanceId}`);
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+
+        // ── UAZAPI PROVIDER: Simple connect flow ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          const result = await provider.connect(config);
+
+          const uazapiStatus = result.status === 'connected' ? 'connected' : (result.qrCode ? 'awaiting_qr' : 'disconnected');
+          await supabaseClient.from("whatsapp_instances")
+            .update({ status: uazapiStatus, awaiting_qr: uazapiStatus === 'awaiting_qr', updated_at: new Date().toISOString() })
+            .eq("id", body.instanceId);
+
+          return new Response(
+            JSON.stringify({ success: true, qrCode: result.qrCode, status: uazapiStatus }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // ── EVOLUTION PROVIDER (existing logic) ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         console.log(`[Evolution API] Fetching QR from: ${apiUrl}/instance/connect/${instance.instance_name}`);
@@ -1570,6 +1660,28 @@ serve(async (req) => {
         console.log(`[Evolution API] Getting status for instance: ${body.instanceId}`);
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+
+        // ── UAZAPI PROVIDER ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          const statusResult = await provider.getStatus(config);
+
+          let dbStatus: string = statusResult.status;
+          const updatePayload: Record<string, unknown> = { status: dbStatus, updated_at: new Date().toISOString() };
+          if (dbStatus === 'connected') { updatePayload.awaiting_qr = false; }
+          if (statusResult.phoneNumber) { updatePayload.phone_number = statusResult.phoneNumber; }
+
+          const { data: updatedInstance } = await supabaseClient.from("whatsapp_instances")
+            .update(updatePayload).eq("id", body.instanceId).select().single();
+
+          return new Response(
+            JSON.stringify({ success: true, status: dbStatus, instance: updatedInstance }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         const statusResponse = await fetchWithTimeout(`${apiUrl}/instance/connectionState/${instance.instance_name}`, {
@@ -1692,6 +1804,31 @@ serve(async (req) => {
         console.log(`[Evolution API] Deleting instance: ${body.instanceId}`);
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+
+        // ── UAZAPI PROVIDER ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          await provider.deleteInstance(config);
+
+          // NULL + tracking for clients/conversations (same as Evolution)
+          await supabaseClient.from("clients")
+            .update({ whatsapp_instance_id: null, last_whatsapp_instance_id: body.instanceId } as any)
+            .eq("whatsapp_instance_id", body.instanceId).eq("law_firm_id", lawFirmId);
+
+          await supabaseClient.from("conversations")
+            .update({ whatsapp_instance_id: null, last_whatsapp_instance_id: body.instanceId } as any)
+            .eq("whatsapp_instance_id", body.instanceId).eq("law_firm_id", lawFirmId);
+
+          await supabaseClient.from("whatsapp_instances").delete().eq("id", body.instanceId).eq("law_firm_id", lawFirmId);
+
+          return new Response(
+            JSON.stringify({ success: true, message: "Instance deleted" }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         // Delete from Evolution API (best effort)
@@ -1853,6 +1990,22 @@ serve(async (req) => {
         console.log(`[Evolution API] Configuring webhook for instance: ${body.instanceId}`);
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+
+        // ── UAZAPI PROVIDER ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          const UAZAPI_WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN") || "";
+          const uazapiWebhookUrl = UAZAPI_WEBHOOK_TOKEN
+            ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/uazapi-webhook?token=${UAZAPI_WEBHOOK_TOKEN}`
+            : `${Deno.env.get("SUPABASE_URL")}/functions/v1/uazapi-webhook`;
+          await provider.configureWebhook(config, { webhookUrl: uazapiWebhookUrl });
+          return new Response(JSON.stringify({ success: true, message: "Webhook configured successfully" }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         const webhookResponse = await fetchWithTimeout(`${apiUrl}/webhook/set/${instance.instance_name}`, {
@@ -1886,6 +2039,15 @@ serve(async (req) => {
         }
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+
+        // ── UAZAPI PROVIDER: no equivalent settings ──
+        if (isUazapi(instance)) {
+          return new Response(JSON.stringify({ success: true, settings: { rejectCall: false } }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         const settingsResponse = await fetchWithTimeout(`${apiUrl}/settings/find/${instance.instance_name}`, {
@@ -1921,6 +2083,15 @@ serve(async (req) => {
         }
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+
+        // ── UAZAPI PROVIDER: no equivalent settings, just return success ──
+        if (isUazapi(instance)) {
+          return new Response(JSON.stringify({ success: true, settings: { rejectCall: body.rejectCall } }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         // Evolution API v2 requires all these fields
@@ -1966,6 +2137,28 @@ serve(async (req) => {
 
         // Use isGlobalAdmin to allow global admins to refresh any instance
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
+
+        // ── UAZAPI PROVIDER ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          const statusResult = await provider.getStatus(config);
+
+          let dbStatus = statusResult.status;
+          const refreshUpdatePayload: Record<string, unknown> = { status: dbStatus, updated_at: new Date().toISOString() };
+          if (dbStatus === 'connected') { refreshUpdatePayload.disconnected_since = null; refreshUpdatePayload.awaiting_qr = false; }
+          if (statusResult.phoneNumber) { refreshUpdatePayload.phone_number = statusResult.phoneNumber; }
+
+          const { data: updatedInstance } = await supabaseClient.from("whatsapp_instances")
+            .update(refreshUpdatePayload).eq("id", body.instanceId).select().single();
+
+          return new Response(
+            JSON.stringify({ success: true, status: dbStatus, instance: updatedInstance }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         let dbStatus = "disconnected";
@@ -2135,6 +2328,32 @@ serve(async (req) => {
         console.log(`[Evolution API] Fetching phone number (enhanced) for instance: ${body.instanceId}`);
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId, isGlobalAdmin);
+
+        // ── UAZAPI PROVIDER ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          const statusResult = await provider.getStatus(config);
+          const phoneNumber = statusResult.phoneNumber || null;
+
+          if (phoneNumber) {
+            const duplicate = await checkPhoneNumberDuplicate(supabaseClient, phoneNumber, body.instanceId);
+            if (duplicate) {
+              return new Response(
+                JSON.stringify({ success: false, error: `Este número (${phoneNumber}) já está conectado em outra instância: ${duplicate.instance_name}` }),
+                { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+              );
+            }
+            await supabaseClient.from("whatsapp_instances").update({ phone_number: phoneNumber, updated_at: new Date().toISOString() }).eq("id", body.instanceId);
+          }
+
+          return new Response(
+            JSON.stringify({ success: true, phoneNumber }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         const result = await fetchPhoneNumberEnhanced(apiUrl, instance.api_key || "", instance.instance_name);
@@ -2226,6 +2445,23 @@ serve(async (req) => {
         console.log(`[Evolution API] Restarting instance: ${body.instanceId}`);
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
+
+        // ── UAZAPI PROVIDER ──
+        if (isUazapi(instance)) {
+          const config = getProviderConfig(instance);
+          const provider = getProvider(config);
+          await provider.disconnect(config);
+
+          const { data: updatedInstance } = await supabaseClient.from("whatsapp_instances")
+            .update({ status: "disconnected", manual_disconnect: true, updated_at: new Date().toISOString() })
+            .eq("id", body.instanceId).eq("law_firm_id", lawFirmId).select().single();
+
+          return new Response(JSON.stringify({ success: true, message: "Instance disconnected", instance: updatedInstance }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        // ── EVOLUTION PROVIDER ──
         const apiUrl = normalizeUrl(instance.api_url);
 
         // Call Evolution API restart endpoint

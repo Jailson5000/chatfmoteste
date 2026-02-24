@@ -380,18 +380,22 @@ export default function Connections() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedInstance?.id, selectedInstance?.status]);
 
-  const handleCreateInstance = async (displayName: string, instanceName: string) => {
+  const handleCreateInstance = async (displayName: string, instanceName: string, provider?: string, uazapiUrl?: string, uazapiToken?: string) => {
     try {
       // Use the random instanceName for Evolution API, displayName for user display
-      // apiUrl and apiKey are now optional - edge function will use default connection
+      const isUazapi = provider === "uazapi";
       const result = await createInstance.mutateAsync({
-        instanceName, // Technical ID for Evolution API
+        instanceName, // Technical ID
         displayName,  // User-friendly name
-        // If tenant has configured their own API, use it; otherwise edge function uses global default
-        ...(evolutionApiUrl && evolutionApiKey ? {
+        provider: isUazapi ? "uazapi" : "evolution",
+        // For uazapi: use provided URL/token; for evolution: use tenant config or global default
+        ...(isUazapi ? {
+          apiUrl: uazapiUrl,
+          apiKey: uazapiToken,
+        } : (evolutionApiUrl && evolutionApiKey ? {
           apiUrl: evolutionApiUrl,
           apiKey: evolutionApiKey,
-        } : {}),
+        } : {})),
       });
 
       setIsNewInstanceOpen(false);
