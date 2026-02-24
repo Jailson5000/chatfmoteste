@@ -78,10 +78,27 @@ function extractPhone(value: string): string {
 
 /**
  * Detect message type from uazapi payload.
- * uazapi sends PascalCase types: "DocumentMessage", "ImageMessage", "StickerMessage", etc.
+ * uazapi sends PascalCase types OR generic "media" type.
+ * When type is "media", infer real type from mimeType or chat.wa_lastMessageType.
  */
-function detectMessageType(msg: any): string {
-  const t = (msg.type || "").toLowerCase();
+function detectMessageType(msg: any, chat?: any): string {
+  let t = (msg.type || "").toLowerCase();
+
+  // uazapi often sends generic "media" type — use wa_lastMessageType as fallback
+  if (t === "media" && chat?.wa_lastMessageType) {
+    t = chat.wa_lastMessageType.toLowerCase();
+  }
+
+  // If still "media", infer from mimeType
+  if (t === "media") {
+    const mime = (extractMimeType(msg) || "").toLowerCase();
+    if (mime.startsWith("image/webp")) return "sticker";
+    if (mime.startsWith("image/")) return "image";
+    if (mime.startsWith("video/")) return "video";
+    if (mime.startsWith("audio/")) return "audio";
+    return "document"; // PDFs, DOCX, etc.
+  }
+
   if (t === "image" || t === "imagemessage" || msg.imageMessage) return "image";
   if (t === "video" || t === "videomessage" || msg.videoMessage) return "video";
   if (t === "audio" || t === "audiomessage" || t === "ptt" || t === "pttmessage" || t === "myaudio" || msg.audioMessage) return "audio";
@@ -89,7 +106,6 @@ function detectMessageType(msg: any): string {
   if (t === "sticker" || t === "stickermessage" || msg.stickerMessage) return "sticker";
   if (t === "location" || t === "locationmessage" || msg.locationMessage) return "location";
   if (t === "contact" || t === "contactmessage" || t === "contactcardmessage" || msg.contactMessage || msg.contactsArrayMessage) return "contact";
-  // ExtendedTextMessage is still text
   if (t === "extendedtextmessage") return "text";
   return "text";
 }
@@ -433,7 +449,7 @@ serve(async (req) => {
 
         const remoteJid = toRemoteJid(remoteJidRaw);
         const phoneNumber = extractPhone(remoteJidRaw);
-        const messageType = detectMessageType(msg);
+        const messageType = detectMessageType(msg, chat);
         const content = extractContent(msg);
         const mediaUrl = extractMediaUrl(msg);
         const mimeType = extractMimeType(msg);
@@ -638,24 +654,28 @@ serve(async (req) => {
           || msg.audioMessage?.base64 || msg.documentMessage?.base64 
           || msg.stickerMessage?.base64 || null;
 
+        // Shared extension map for both base64 and CDN download paths
+        const extMap: Record<string, string> = {
+          "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+          "image/webp": ".webp", "audio/ogg": ".ogg", "audio/mpeg": ".mp3",
+          "audio/mp4": ".m4a", "audio/ogg;codecs=opus": ".ogg", "audio/ogg; codecs=opus": ".ogg",
+          "video/mp4": ".mp4", "application/pdf": ".pdf",
+          "application/msword": ".doc",
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+          "application/vnd.ms-excel": ".xls",
+        };
+        const baseMime = (mimeType || "").split(";")[0].trim().toLowerCase();
+
+        // Path 1: Persist base64 media (when available)
         if (rawBase64 && !mediaUrl) {
           try {
-            const base64Data = rawBase64;
-            const binaryStr = atob(base64Data);
+            const binaryStr = atob(rawBase64);
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) {
               bytes[i] = binaryStr.charCodeAt(i);
             }
 
-            const extMap: Record<string, string> = {
-              "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
-              "image/webp": ".webp", "audio/ogg": ".ogg", "audio/mpeg": ".mp3",
-              "audio/mp4": ".m4a", "audio/ogg;codecs=opus": ".ogg",
-              "video/mp4": ".mp4", "application/pdf": ".pdf",
-              "application/msword": ".doc",
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-            };
-            const baseMime = (mimeType || "").split(";")[0].trim().toLowerCase();
             const ext = extMap[baseMime] || extMap[mimeType || ""] || ".bin";
             const storagePath = `${lawFirmId}/${conversationId}/${whatsappMessageId}${ext}`;
 
@@ -672,13 +692,58 @@ serve(async (req) => {
                 .getPublicUrl(storagePath);
               if (publicUrlData?.publicUrl) {
                 messagePayload.media_url = publicUrlData.publicUrl;
-                console.log("[UAZAPI_WEBHOOK] Media persisted to storage:", storagePath);
+                console.log("[UAZAPI_WEBHOOK] Media persisted to storage (base64):", storagePath);
               }
             } else {
               console.warn("[UAZAPI_WEBHOOK] Media upload failed:", uploadError.message);
             }
           } catch (mediaErr) {
-            console.warn("[UAZAPI_WEBHOOK] Error persisting media:", mediaErr);
+            console.warn("[UAZAPI_WEBHOOK] Error persisting base64 media:", mediaErr);
+          }
+        }
+
+        // Path 2: Download from WhatsApp CDN URL when no base64 available
+        // CDN URLs (mmg.whatsapp.net) expire in hours — must persist to Storage
+        const currentMediaUrl = messagePayload.media_url as string | null;
+        if (currentMediaUrl &&
+            !currentMediaUrl.includes("supabase") &&
+            !currentMediaUrl.includes("/storage/v1/") &&
+            messageType !== "text") {
+          try {
+            console.log("[UAZAPI_WEBHOOK] Downloading media from CDN URL:", currentMediaUrl.slice(0, 120));
+            const dlResponse = await fetch(currentMediaUrl);
+            if (dlResponse.ok) {
+              const bytes = new Uint8Array(await dlResponse.arrayBuffer());
+              if (bytes.length > 100) {
+                const ext = extMap[baseMime] || extMap[mimeType || ""] || ".bin";
+                const storagePath = `${lawFirmId}/${conversationId}/${whatsappMessageId}${ext}`;
+
+                const { error: uploadError } = await supabaseClient.storage
+                  .from("chat-media")
+                  .upload(storagePath, bytes, {
+                    contentType: baseMime || "application/octet-stream",
+                    upsert: true,
+                  });
+
+                if (!uploadError) {
+                  const { data: publicUrlData } = supabaseClient.storage
+                    .from("chat-media")
+                    .getPublicUrl(storagePath);
+                  if (publicUrlData?.publicUrl) {
+                    messagePayload.media_url = publicUrlData.publicUrl;
+                    console.log("[UAZAPI_WEBHOOK] Media downloaded and persisted:", storagePath);
+                  }
+                } else {
+                  console.warn("[UAZAPI_WEBHOOK] CDN media upload failed:", uploadError.message);
+                }
+              } else {
+                console.warn("[UAZAPI_WEBHOOK] CDN download too small:", bytes.length, "bytes");
+              }
+            } else {
+              console.warn("[UAZAPI_WEBHOOK] CDN download HTTP error:", dlResponse.status);
+            }
+          } catch (dlErr) {
+            console.warn("[UAZAPI_WEBHOOK] CDN download failed (keeping original URL):", dlErr);
           }
         }
 
