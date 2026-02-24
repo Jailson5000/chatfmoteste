@@ -134,15 +134,8 @@ export function useMessagesWithPagination({
       loadingMoreRef.current = false;
 
       try {
-        // Get total count first
-        const { count } = await supabase
-          .from("messages")
-          .select("*", { count: "exact", head: true })
-          .eq("conversation_id", conversationId);
-
-        setTotalCount(count || 0);
-
         // Fetch the most recent messages (ordered desc, then reverse for display)
+        // NOTE: COUNT query removed for performance — hasMoreMessages is inferred from result size
         const { data, error } = await supabase
           .from("messages")
 .select("id, content, created_at, is_from_me, sender_type, ai_generated, media_url, media_mime_type, message_type, read_at, reply_to_message_id, whatsapp_message_id, ai_agent_id, ai_agent_name, status, delivered_at, is_internal, is_pontual, is_revoked, is_starred, my_reaction, client_reaction")
@@ -188,16 +181,20 @@ export function useMessagesWithPagination({
           }
           
           // Check if we have more messages
-          setHasMoreMessages((count || 0) > initialBatchSize);
+          // Infer hasMore from result size (no separate COUNT query needed)
+          setHasMoreMessages(data.length >= initialBatchSize);
 
-          // Mark messages as read
-          const { data: userData } = await supabase.auth.getUser();
-          if (userData.user?.id) {
-            await supabase.rpc('mark_messages_as_read', {
-              _conversation_id: conversationId,
-              _user_id: userData.user.id
-            });
-          }
+          // Fire-and-forget: mark messages as read without blocking UI
+          supabase.auth.getUser().then(({ data: userData }) => {
+            if (userData.user?.id) {
+              Promise.resolve(
+                supabase.rpc('mark_messages_as_read', {
+                  _conversation_id: conversationId,
+                  _user_id: userData.user.id
+                })
+              ).catch(() => {}); // Silent fail
+            }
+          });
         }
       } catch (err) {
         console.error("Error loading messages:", err);
