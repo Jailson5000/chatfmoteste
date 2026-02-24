@@ -382,7 +382,26 @@ serve(async (req) => {
           updatePayload.reconnect_attempts_count = 0;
           updatePayload.manual_disconnect = false;
 
-          const phone = body.phone || body.number || body.ownerJid?.split("@")[0] || null;
+          let phone = body.phone || body.number || body.ownerJid?.split("@")[0] || null;
+
+          // Auto-fetch phone from uazapi /instance/status when not in payload and not yet stored
+          if (!phone && !instance.phone_number && instance.api_url && instance.api_key) {
+            try {
+              const baseUrl = (instance.api_url as string).replace(/\/+$/, "");
+              const statusRes = await fetch(`${baseUrl}/instance/status`, {
+                method: "GET",
+                headers: { token: instance.api_key as string, "Content-Type": "application/json" },
+              });
+              if (statusRes.ok) {
+                const statusData = await statusRes.json();
+                phone = statusData?.phone || statusData?.number || statusData?.ownerJid?.split("@")[0] || null;
+                console.log("[UAZAPI_WEBHOOK] Auto-fetched phone from status:", phone);
+              }
+            } catch (e) {
+              console.warn("[UAZAPI_WEBHOOK] Failed to auto-fetch phone:", e);
+            }
+          }
+
           if (phone) {
             updatePayload.phone_number = extractPhone(phone);
           }
