@@ -1626,8 +1626,8 @@ serve(async (req) => {
                             const audioMime = (ttsData.mimeType || "audio/mpeg").split(";")[0].trim();
                             console.log("[UAZAPI_WEBHOOK] TTS audio MIME:", audioMime, "contentLen:", ttsData.audioContent?.length);
                             
-                            // Send audio via uazapi /send/audio (PTT)
-                            const audioSendRes = await fetch(`${apiUrl}/send/audio`, {
+                            // Send audio via uazapi /send/media (PTT) - correct endpoint per UAZAPi docs
+                            const audioSendRes = await fetch(`${apiUrl}/send/media`, {
                               method: "POST",
                               headers: {
                                 "Content-Type": "application/json",
@@ -1635,19 +1635,20 @@ serve(async (req) => {
                               },
                               body: JSON.stringify({
                                 number: targetNumber,
-                                audio: `data:${audioMime};base64,${ttsData.audioContent}`,
-                                ptt: true,
+                                type: "ptt",
+                                file: `data:${audioMime};base64,${ttsData.audioContent}`,
+                                mimetype: audioMime,
                               }),
                             });
                             
-                            console.log("[UAZAPI_WEBHOOK] /send/audio response:", { status: audioSendRes.status, ok: audioSendRes.ok });
+                            console.log("[UAZAPI_WEBHOOK] /send/media (ptt) response:", { status: audioSendRes.status, ok: audioSendRes.ok });
                             let audioSendData = await audioSendRes.json().catch(() => ({}));
-                            console.log("[UAZAPI_WEBHOOK] /send/audio data:", JSON.stringify(audioSendData).slice(0, 500));
+                            console.log("[UAZAPI_WEBHOOK] /send/media (ptt) data:", JSON.stringify(audioSendData).slice(0, 500));
                             
-                            // Fallback: if first attempt failed, retry with pure base64 (no data URI prefix)
+                            // Fallback: if ptt failed, retry with type "audio"
                             if (!audioSendRes.ok) {
-                              console.log("[UAZAPI_WEBHOOK] /send/audio failed, retrying with pure base64...");
-                              const retryRes = await fetch(`${apiUrl}/send/audio`, {
+                              console.log("[UAZAPI_WEBHOOK] /send/media (ptt) failed, retrying with type audio...");
+                              const retryRes = await fetch(`${apiUrl}/send/media`, {
                                 method: "POST",
                                 headers: {
                                   "Content-Type": "application/json",
@@ -1655,13 +1656,14 @@ serve(async (req) => {
                                 },
                                 body: JSON.stringify({
                                   number: targetNumber,
-                                  audio: ttsData.audioContent,
-                                  ptt: true,
+                                  type: "audio",
+                                  file: `data:${audioMime};base64,${ttsData.audioContent}`,
+                                  mimetype: audioMime,
                                 }),
                               });
-                              console.log("[UAZAPI_WEBHOOK] /send/audio retry response:", { status: retryRes.status, ok: retryRes.ok });
+                              console.log("[UAZAPI_WEBHOOK] /send/media (audio) retry response:", { status: retryRes.status, ok: retryRes.ok });
                               const retryData = await retryRes.json().catch(() => ({}));
-                              console.log("[UAZAPI_WEBHOOK] /send/audio retry data:", JSON.stringify(retryData).slice(0, 500));
+                              console.log("[UAZAPI_WEBHOOK] /send/media (audio) retry data:", JSON.stringify(retryData).slice(0, 500));
                               if (retryRes.ok) {
                                 audioSendData = retryData;
                               }
