@@ -616,8 +616,13 @@ const UazapiProvider = {
 
     const data = await res.json().catch(() => ({}));
 
-    // uazapi returns QR as base64 directly
-    const qrCode = data?.qrcode || data?.base64 || data?.qr || null;
+    console.log("[UazapiProvider] connect response:", JSON.stringify(data).slice(0, 500));
+
+    // uazapi returns QR as base64 directly - check multiple possible fields
+    const qrCode = data?.qrcode || data?.base64 || data?.qr ||
+                   data?.data?.qrcode || data?.data?.base64 ||
+                   data?.image || data?.data?.image ||
+                   data?.instance?.qrcode || null;
     const state = data?.status || data?.state || "unknown";
     
     let status = "awaiting_qr";
@@ -773,7 +778,13 @@ const UazapiProvider = {
     }
 
     const connectData = await connectRes.json().catch(() => ({}));
-    const qrCode = connectData?.qrcode || connectData?.base64 || connectData?.qr || null;
+
+    console.log("[UazapiProvider] Step 2 connect response:", JSON.stringify(connectData).slice(0, 500));
+
+    const qrCode = connectData?.qrcode || connectData?.base64 || connectData?.qr ||
+                   connectData?.data?.qrcode || connectData?.data?.base64 ||
+                   connectData?.image || connectData?.data?.image ||
+                   connectData?.instance?.qrcode || null;
     const state = connectData?.status || connectData?.state || "unknown";
 
     let status = "awaiting_qr";
