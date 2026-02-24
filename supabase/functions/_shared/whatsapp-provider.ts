@@ -556,8 +556,12 @@ const UazapiProvider = {
     const payload: Record<string, unknown> = {
       number: opts.number,
       type: opts.mediaType,
-      caption: opts.caption || "",
     };
+
+    // uazapi uses 'text' for caption (not 'caption') per /send/media docs
+    if (opts.caption) {
+      payload.text = opts.caption;
+    }
 
     if (opts.mediaBase64) {
       payload.file = opts.mediaBase64;
@@ -566,8 +570,9 @@ const UazapiProvider = {
       payload.file = opts.mediaUrl;
     }
 
+    // uazapi uses 'docName' for document file name (not 'fileName')
     if (opts.fileName) {
-      payload.fileName = opts.fileName;
+      payload.docName = opts.fileName;
     }
 
     const res = await fetchWithTimeout(
