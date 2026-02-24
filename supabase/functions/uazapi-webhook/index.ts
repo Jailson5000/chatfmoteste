@@ -842,7 +842,7 @@ serve(async (req) => {
               status: "novo_contato",
               current_handler: "ai",
               last_message_at: timestamp,
-              origin: "WHATSAPP",
+              origin: "WHATSAPP", // may be overridden to whatsapp_ctwa after ad detection
               department_id: instance.default_department_id || null,
               assigned_to: instance.default_assigned_to || null,
               current_automation_id: instance.default_automation_id || null,
@@ -868,6 +868,21 @@ serve(async (req) => {
           } else {
             conversationId = newConv?.id || null;
           }
+        }
+
+        // ---- CTWA AD DETECTION (externalAdReply) ----
+        const externalAdReply =
+          msg.contextInfo?.externalAdReply ||
+          msg.message?.extendedTextMessage?.contextInfo?.externalAdReply ||
+          msg.message?.imageMessage?.contextInfo?.externalAdReply ||
+          msg.message?.videoMessage?.contextInfo?.externalAdReply ||
+          msg.message?.buttonsResponseMessage?.contextInfo?.externalAdReply ||
+          msg.content?.contextInfo?.externalAdReply ||
+          null;
+
+        const isCtwaAd = !!externalAdReply && !isFromMe;
+        if (isCtwaAd) {
+          console.log(`[UAZAPI_WEBHOOK] 📢 CTWA ad detected for ${remoteJid}:`, JSON.stringify(externalAdReply).slice(0, 300));
         }
 
         console.log(`[UAZAPI_WEBHOOK] Conversation resolved: ${conversationId} (via: ${conversationFoundVia})`);
@@ -1242,6 +1257,21 @@ serve(async (req) => {
           }
         }
         
+        // ---- CTWA AD: set origin on conversation (new or existing) ----
+        if (isCtwaAd) {
+          convUpdate.origin = "whatsapp_ctwa";
+          convUpdate.origin_metadata = {
+            ad_title: externalAdReply.title || null,
+            ad_body: externalAdReply.body || null,
+            ad_thumbnail: externalAdReply.thumbnailUrl || externalAdReply.thumbnail || null,
+            ad_media_url: externalAdReply.mediaUrl || null,
+            ad_source_id: externalAdReply.sourceId || null,
+            ad_source_url: externalAdReply.sourceUrl || null,
+            ad_source_type: externalAdReply.sourceType || null,
+            detected_at: new Date().toISOString(),
+          };
+        }
+
         await supabaseClient
           .from("conversations")
           .update(convUpdate)
