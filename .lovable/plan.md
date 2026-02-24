@@ -1,70 +1,136 @@
 
-# Corrigir extracao do numero de telefone no uazapi-webhook
 
-## Problema raiz
+# Corrigir envio e recebimento de midia via uazapi
 
-Os logs de debug mostram claramente:
+## Problemas identificados
 
-```text
-"chat.id": "rcd60f68fb85b37"      <-- ID interno do uazapi (NAO e telefone!)
-"chat.phone": "+55 63 8462-2450"  <-- Numero REAL do contato
-"extractedPhone": "60688537"       <-- Lixo extraido do chat.id
+### 1. Envio de midia falha: campo `file` ausente
+Os logs mostram claramente:
+```
+Background media send error: Error: Falha ao enviar midia (500): {"error":"missing file field"}
 ```
 
-O codigo na linha 331 usa `chat.id` como fallback para o `remoteJid`:
+O `UazapiProvider.sendMedia` envia os campos `base64` e `url`, mas a API do uazapi espera o campo `file` para midia. Isso afeta **todos os tipos de midia**: imagens, documentos, videos e audios.
+
+### 2. Envio de audio usa endpoint errado
+O `UazapiProvider.sendAudio` simplesmente redireciona para `sendMedia` com `mediaType: 'audio'`. Para audios PTT (gravados), o uazapi tem endpoint especifico `/send/audio` com campos diferentes (`audio` em vez de `file`).
+
+### 3. Conversas antigas com numero errado ainda tentam enviar
+Conversas criadas antes da correcao do telefone ainda tem `remote_jid: "60688537@s.whatsapp.net"` e falham:
 ```
-const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid || chat.id || "";
+the number 60688537@s.whatsapp.net is not on WhatsApp
 ```
-
-Como `msg.from`, `msg.remoteJid` e `msg.key?.remoteJid` sao todos `undefined` no payload do uazapi, cai no `chat.id` que e um ID interno (`rcd60f68fb85b37`). A funcao `extractPhone` remove letras e pega `60688537` -- um numero incompleto e errado.
-
-O numero correto esta em `chat.phone` = `"+55 63 8462-2450"` = `5563984622450` (apos limpar).
-
-Isso causa:
-1. **Recebimento**: Conversa criada com `remote_jid: "60688537@s.whatsapp.net"` (errado)
-2. **Envio**: Tenta enviar para `60688537@s.whatsapp.net`, que nao existe no WhatsApp
-3. **Duplicatas**: Cada mensagem do mesmo contato pode criar nova conversa pois o JID errado nao bate
 
 ## Solucao
 
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
+### Arquivo: `supabase/functions/_shared/whatsapp-provider.ts`
 
-**Mudanca 1 -- Priorizar `chat.phone` na extracao do numero (linha 331):**
+**Correcao 1 -- Campo `file` no sendMedia (linhas 554-594)**
+
+O payload do `UazapiProvider.sendMedia` precisa usar `file` em vez de `base64`/`url`:
 
 Antes:
 ```typescript
-const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid || chat.id || "";
+if (opts.mediaBase64) {
+  payload.base64 = opts.mediaBase64;
+  payload.mimetype = opts.mimeType || "application/octet-stream";
+} else if (opts.mediaUrl) {
+  payload.url = opts.mediaUrl;
+}
 ```
 
 Depois:
 ```typescript
-// Build phone from chat.phone first (uazapi reliable source), then fallbacks
-const chatPhoneClean = chat.phone ? chat.phone.replace(/\D/g, "") : "";
-const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid 
-  || (chatPhoneClean.length >= 10 ? chatPhoneClean : null)
-  || chat.id || "";
+if (opts.mediaBase64) {
+  payload.file = opts.mediaBase64;
+  payload.mimetype = opts.mimeType || "application/octet-stream";
+} else if (opts.mediaUrl) {
+  payload.file = opts.mediaUrl;
+}
 ```
 
-Isso garante que quando `chat.phone` tem o numero completo (como `+55 63 8462-2450`), ele sera usado ao inves do `chat.id` interno do uazapi.
+A API do uazapi aceita tanto URL quanto base64 no campo `file`.
 
-**Mudanca 2 -- Corrigir conversas existentes com numero errado:**
+**Correcao 2 -- Endpoint e payload de audio (linhas 836-844)**
 
-Apos salvar a mensagem, se o `phoneNumber` extraido for curto demais (menos de 10 digitos) e `chat.phone` estiver disponivel, atualizar a conversa e o cliente com o numero correto. Isso corrige conversas que ja foram criadas com o numero errado.
+Para audios PTT (voz), usar endpoint `/send/audio` com campo `audio` e flag `ptt`:
 
-**Mudanca 3 -- Remover log de debug excessivo:**
+Antes:
+```typescript
+async sendAudio(config: ProviderConfig, opts: SendAudioOptions): Promise<SendMediaResult> {
+  return UazapiProvider.sendMedia(config, {
+    number: opts.number,
+    mediaType: 'audio',
+    mediaBase64: opts.audioBase64,
+    mimeType: opts.mimeType || 'audio/ogg',
+  });
+}
+```
 
-Manter o log de debug por enquanto para confirmar que a correcao funciona, mas simplificar.
+Depois:
+```typescript
+async sendAudio(config: ProviderConfig, opts: SendAudioOptions): Promise<SendMediaResult> {
+  const apiUrl = normalizeUrl(config.apiUrl);
 
-## Detalhes tecnicos
+  const payload = {
+    number: opts.number,
+    audio: opts.audioBase64,
+    ptt: true,
+    mimetype: opts.mimeType || "audio/ogg;codecs=opus",
+  };
+
+  const res = await fetchWithTimeout(
+    `${apiUrl}/send/audio`,
+    {
+      method: "POST",
+      headers: {
+        token: config.apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    },
+    SEND_TIMEOUT_MS,
+  );
+
+  if (!res.ok) {
+    // Fallback: tentar /send/media com campo file
+    return UazapiProvider.sendMedia(config, {
+      number: opts.number,
+      mediaType: 'audio',
+      mediaBase64: opts.audioBase64,
+      mimeType: opts.mimeType || 'audio/ogg',
+      ptt: true,
+    });
+  }
+
+  const data = await res.json().catch(() => ({}));
+  const whatsappMessageId = data?.key?.id || data?.id || data?.messageId || null;
+  return { success: true, whatsappMessageId, raw: data };
+}
+```
+
+### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
+
+**Correcao 3 -- Persistir midia recebida no Storage**
+
+Atualmente o webhook salva apenas a URL da midia que vem do uazapi. Se o uazapi envia base64 diretamente no payload (campo `msg.base64` ou `body.base64`), essa midia precisa ser salva no bucket `chat-media` para persistencia. Adicionar logica para extrair base64 do payload e salvar no Storage quando disponivel, seguindo o mesmo padrao do `evolution-webhook`.
+
+**Correcao 4 -- Log de debug para midia recebida**
+
+Adicionar log dos campos de midia do payload para verificar se base64, URL, mimetype e fileName estao sendo extraidos corretamente.
+
+## Resumo de mudancas
 
 | Arquivo | Mudanca |
 |---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Priorizar `chat.phone` na extracao do telefone |
-| | Adicionar fallback para corrigir conversas com numero errado |
-| | Garantir `remote_jid` sempre com numero completo (10+ digitos) |
+| `_shared/whatsapp-provider.ts` | Trocar `base64`/`url` por `file` no sendMedia do uazapi |
+| `_shared/whatsapp-provider.ts` | Implementar endpoint `/send/audio` dedicado para PTT |
+| `uazapi-webhook/index.ts` | Persistir midia recebida (base64) no Storage |
+| `uazapi-webhook/index.ts` | Logs de debug para campos de midia |
 
 ## Resultado esperado
 
-- Mensagens recebidas terao o numero correto (ex: `5563984622450@s.whatsapp.net`)
-- Envio de mensagens funcionara pois o numero estara completo
-- Novas conversas serao criadas com o telefone real do contato
+- Documentos, imagens, videos e audios serao enviados com sucesso via uazapi
+- Audios gravados serao enviados como PTT (voz) corretamente
+- Midias recebidas serao persistidas no Storage para acesso futuro
+
