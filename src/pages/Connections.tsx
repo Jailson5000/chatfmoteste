@@ -114,6 +114,7 @@ export default function Connections() {
   const [isQRDialogOpen, setIsQRDialogOpen] = useState(false);
   const [currentQRCode, setCurrentQRCode] = useState<string | null>(null);
   const currentQRCodeRef = useRef<string | null>(null);
+  const isPollingActiveRef = useRef(false);
   const [currentInstanceId, setCurrentInstanceId] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
@@ -157,6 +158,7 @@ export default function Connections() {
 
   // Stop polling function
   const stopPolling = useCallback(() => {
+    isPollingActiveRef.current = false;
     if (pollIntervalRef.current) {
       console.log("[Connections] Stopping status polling");
       clearTimeout(pollIntervalRef.current);
@@ -189,7 +191,7 @@ export default function Connections() {
             console.log("[Connections] Instance connected via Realtime! Stopping poll.");
             stopPolling();
             setConnectionStatus("Conectado!");
-            setCurrentQRCode(null);
+            // DON'T clear currentQRCode here - keeps ref non-null so residual polls won't call connect()
             refetch();
             // Auto-fetch phone number after connection
             if (currentInstanceId) {
@@ -198,6 +200,7 @@ export default function Connections() {
 
             setTimeout(() => {
               setIsQRDialogOpen(false);
+              setCurrentQRCode(null); // Clear QR only after dialog closes
               setConnectionStatus(null);
               setPollCount(0);
             }, 1000);
@@ -217,6 +220,10 @@ export default function Connections() {
   // Poll once and schedule next poll with backoff
   // Smart polling: if no QR code yet, actively fetch it via getQRCode instead of just checking status
   const pollOnce = useCallback(async (instanceId: string) => {
+    if (!isPollingActiveRef.current) {
+      console.log("[Connections] Poll skipped - polling no longer active");
+      return;
+    }
     pollCountRef.current++;
     const count = pollCountRef.current;
     setPollCount(count);
@@ -249,11 +256,11 @@ export default function Connections() {
             console.log("[Connections] Instance connected! Stopping poll.");
             stopPolling();
             setConnectionStatus("Conectado!");
-            setCurrentQRCode(null);
             await refetch();
             if (currentInstanceId) refreshPhone.mutate(currentInstanceId);
             setTimeout(() => {
               setIsQRDialogOpen(false);
+              setCurrentQRCode(null);
               setConnectionStatus(null);
               setPollCount(0);
             }, 1000);
@@ -287,11 +294,11 @@ export default function Connections() {
           console.log("[Connections] Instance connected! Stopping poll.");
           stopPolling();
           setConnectionStatus("Conectado!");
-          setCurrentQRCode(null);
           await refetch();
           if (currentInstanceId) refreshPhone.mutate(currentInstanceId);
           setTimeout(() => {
             setIsQRDialogOpen(false);
+            setCurrentQRCode(null);
             setConnectionStatus(null);
             setPollCount(0);
           }, 1000);
@@ -305,7 +312,11 @@ export default function Connections() {
       console.error("[Connections] Poll error:", error);
     }
 
-    // Schedule next poll with backoff
+    // Schedule next poll with backoff - but only if polling is still active
+    if (!isPollingActiveRef.current) {
+      console.log("[Connections] Poll completed but polling no longer active, not scheduling next");
+      return;
+    }
     const nextInterval = getPollingInterval(count, !!currentQRCodeRef.current);
     console.log(`[Connections] Next poll in ${nextInterval}ms`);
     pollIntervalRef.current = setTimeout(() => pollOnce(instanceId), nextInterval);
@@ -315,6 +326,7 @@ export default function Connections() {
   const startPolling = useCallback((instanceId: string) => {
     stopPolling();
     pollCountRef.current = 0;
+    isPollingActiveRef.current = true;
     
     console.log("[Connections] Starting status polling for:", instanceId);
     
@@ -481,7 +493,7 @@ export default function Connections() {
     }
   }, [reconnectId, instances, isLoading]);
 
-  const handleCloseQRDialog = () => {
+  const handleCloseQRDialog = async () => {
     console.log("[Connections] Closing QR dialog");
     stopPolling();
     setIsQRDialogOpen(false);
@@ -489,11 +501,14 @@ export default function Connections() {
     setQrError(null);
     setConnectionStatus(null);
     setPollCount(0);
-    // Refetch status imediato ao fechar - atualiza lista sem precisar clicar "Conectar"
-    if (currentInstanceId) {
-      getStatus.mutateAsync(currentInstanceId).catch(() => {});
-    }
+    // Await getStatus before refetch so DB is updated first
+    const instanceIdToCheck = currentInstanceId;
     setCurrentInstanceId(null);
+    if (instanceIdToCheck) {
+      try {
+        await getStatus.mutateAsync(instanceIdToCheck);
+      } catch {}
+    }
     refetch();
   };
 
