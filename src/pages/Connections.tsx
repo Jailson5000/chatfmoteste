@@ -185,6 +185,10 @@ export default function Connections() {
             setConnectionStatus("Conectado!");
             setCurrentQRCode(null);
             refetch();
+            // Auto-fetch phone number after connection
+            if (currentInstanceId) {
+              refreshPhone.mutate(currentInstanceId);
+            }
 
             setTimeout(() => {
               setIsQRDialogOpen(false);
@@ -241,6 +245,7 @@ export default function Connections() {
             setConnectionStatus("Conectado!");
             setCurrentQRCode(null);
             await refetch();
+            if (currentInstanceId) refreshPhone.mutate(currentInstanceId);
             setTimeout(() => {
               setIsQRDialogOpen(false);
               setConnectionStatus(null);
@@ -278,6 +283,7 @@ export default function Connections() {
           setConnectionStatus("Conectado!");
           setCurrentQRCode(null);
           await refetch();
+          if (currentInstanceId) refreshPhone.mutate(currentInstanceId);
           setTimeout(() => {
             setIsQRDialogOpen(false);
             setConnectionStatus(null);
@@ -697,9 +703,11 @@ export default function Connections() {
                                   </Button>
                                 </div>
                               )}
-                              {instance.instance_id && (
+                              {(instance.phone_number || instance.instance_id) && (
                                 <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                                  {instance.instance_id.slice(0, 4).toUpperCase()}
+                                  {instance.phone_number 
+                                    ? `••${instance.phone_number.replace(/\D/g, '').slice(-4)}`
+                                    : instance.instance_id?.slice(0, 4).toUpperCase()}
                                 </Badge>
                               )}
                             </div>

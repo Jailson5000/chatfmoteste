@@ -183,6 +183,7 @@ export function useGlobalAdminInstances() {
   });
 
   // Fetch Evolution API health
+  // Evolution API pausada - usando uazapi como provedor principal
   const {
     data: evolutionHealth,
     isLoading: isHealthLoading,
@@ -190,24 +191,15 @@ export function useGlobalAdminInstances() {
   } = useQuery({
     queryKey: ["evolution-health"],
     queryFn: async (): Promise<EvolutionHealthStatus> => {
-      console.log("[useGlobalAdminInstances] Checking Evolution health...");
-
-      const { data, error } = await supabase.functions.invoke("evolution-health");
-
-      if (error) {
-        console.error("[useGlobalAdminInstances] Health check error:", error);
-        return {
-          status: "offline",
-          latency_ms: null,
-          message: "Erro ao verificar status",
-          checked_at: new Date().toISOString(),
-        };
-      }
-
-      return data.health;
+      return {
+        status: "offline",
+        latency_ms: null,
+        message: "Evolution API pausada - usando uazapi",
+        checked_at: new Date().toISOString(),
+      };
     },
-    refetchInterval: 60000, // Refetch every minute
-    staleTime: 30000,
+    enabled: false,
+    staleTime: Infinity,
   });
 
   // Force refresh instance status
