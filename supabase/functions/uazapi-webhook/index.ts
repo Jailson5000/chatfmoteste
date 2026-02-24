@@ -702,48 +702,126 @@ serve(async (req) => {
           }
         }
 
-        // Path 2: Download from WhatsApp CDN URL when no base64 available
-        // CDN URLs (mmg.whatsapp.net) expire in hours — must persist to Storage
+        // Path 2: Use uazapi /message/download endpoint for media
+        // CDN URLs (mmg.whatsapp.net, web.whatsapp.net) are encrypted/expired — use uazapi's download API
         const currentMediaUrl = messagePayload.media_url as string | null;
-        if (currentMediaUrl &&
-            !currentMediaUrl.includes("supabase") &&
-            !currentMediaUrl.includes("/storage/v1/") &&
-            messageType !== "text") {
+        const isAlreadyPersisted = currentMediaUrl && (currentMediaUrl.includes("supabase") || currentMediaUrl.includes("/storage/v1/"));
+        if (!isAlreadyPersisted && messageType !== "text" && messageType !== "location" && messageType !== "contact") {
           try {
-            console.log("[UAZAPI_WEBHOOK] Downloading media from CDN URL:", currentMediaUrl.slice(0, 120));
-            const dlResponse = await fetch(currentMediaUrl);
-            if (dlResponse.ok) {
-              const bytes = new Uint8Array(await dlResponse.arrayBuffer());
-              if (bytes.length > 100) {
-                const ext = extMap[baseMime] || extMap[mimeType || ""] || ".bin";
-                const storagePath = `${lawFirmId}/${conversationId}/${whatsappMessageId}${ext}`;
-
-                const { error: uploadError } = await supabaseClient.storage
-                  .from("chat-media")
-                  .upload(storagePath, bytes, {
-                    contentType: baseMime || "application/octet-stream",
-                    upsert: true,
-                  });
-
-                if (!uploadError) {
-                  const { data: publicUrlData } = supabaseClient.storage
-                    .from("chat-media")
-                    .getPublicUrl(storagePath);
-                  if (publicUrlData?.publicUrl) {
-                    messagePayload.media_url = publicUrlData.publicUrl;
-                    console.log("[UAZAPI_WEBHOOK] Media downloaded and persisted:", storagePath);
+            const apiUrl = (instance.api_url || "").replace(/\/+$/, "");
+            const apiKey = instance.api_key || "";
+            
+            if (apiUrl && apiKey) {
+              console.log("[UAZAPI_WEBHOOK] Downloading media via /message/download for:", whatsappMessageId);
+              
+              const isAudio = messageType === "audio";
+              const downloadBody = {
+                id: whatsappMessageId,
+                return_link: true,
+                return_base64: false,
+                generate_mp3: isAudio, // Convert audio to mp3 for browser compatibility
+              };
+              
+              const dlResponse = await fetch(`${apiUrl}/message/download`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "token": apiKey,
+                },
+                body: JSON.stringify(downloadBody),
+              });
+              
+              if (dlResponse.ok) {
+                const dlData = await dlResponse.json();
+                const fileURL = dlData.fileURL || dlData.file_url || dlData.url;
+                const dlMime = dlData.mimetype || dlData.mimeType || mimeType || "";
+                const dlBaseMime = dlMime.split(";")[0].trim().toLowerCase();
+                
+                // Update mimeType if uazapi returned a better one (e.g. audio/mpeg after mp3 conversion)
+                if (dlBaseMime) {
+                  messagePayload.media_mime_type = dlMime;
+                }
+                
+                if (fileURL && typeof fileURL === "string" && fileURL.startsWith("http")) {
+                  // Download the file from uazapi's temporary URL and persist to our storage
+                  try {
+                    const fileResponse = await fetch(fileURL);
+                    if (fileResponse.ok) {
+                      const bytes = new Uint8Array(await fileResponse.arrayBuffer());
+                      if (bytes.length > 100) {
+                        const finalMime = dlBaseMime || baseMime;
+                        const ext = extMap[finalMime] || extMap[dlMime] || ".bin";
+                        const storagePath = `${lawFirmId}/${conversationId}/${whatsappMessageId}${ext}`;
+                        
+                        const { error: uploadError } = await supabaseClient.storage
+                          .from("chat-media")
+                          .upload(storagePath, bytes, {
+                            contentType: finalMime || "application/octet-stream",
+                            upsert: true,
+                          });
+                        
+                        if (!uploadError) {
+                          const { data: publicUrlData } = supabaseClient.storage
+                            .from("chat-media")
+                            .getPublicUrl(storagePath);
+                          if (publicUrlData?.publicUrl) {
+                            messagePayload.media_url = publicUrlData.publicUrl;
+                            console.log("[UAZAPI_WEBHOOK] Media persisted via /message/download:", storagePath);
+                          }
+                        } else {
+                          console.warn("[UAZAPI_WEBHOOK] Storage upload failed:", uploadError.message);
+                        }
+                      } else {
+                        console.warn("[UAZAPI_WEBHOOK] Downloaded file too small:", bytes.length, "bytes");
+                      }
+                    } else {
+                      console.warn("[UAZAPI_WEBHOOK] File download HTTP error:", fileResponse.status);
+                    }
+                  } catch (fileErr) {
+                    console.warn("[UAZAPI_WEBHOOK] File download from uazapi failed:", fileErr);
+                  }
+                } else if (dlData.base64Data || dlData.base64) {
+                  // Fallback: if uazapi returned base64 instead of link
+                  try {
+                    const b64 = dlData.base64Data || dlData.base64;
+                    const binaryStr = atob(b64);
+                    const bytes = new Uint8Array(binaryStr.length);
+                    for (let i = 0; i < binaryStr.length; i++) {
+                      bytes[i] = binaryStr.charCodeAt(i);
+                    }
+                    const finalMime = dlBaseMime || baseMime;
+                    const ext = extMap[finalMime] || ".bin";
+                    const storagePath = `${lawFirmId}/${conversationId}/${whatsappMessageId}${ext}`;
+                    
+                    const { error: uploadError } = await supabaseClient.storage
+                      .from("chat-media")
+                      .upload(storagePath, bytes, {
+                        contentType: finalMime || "application/octet-stream",
+                        upsert: true,
+                      });
+                    
+                    if (!uploadError) {
+                      const { data: publicUrlData } = supabaseClient.storage
+                        .from("chat-media")
+                        .getPublicUrl(storagePath);
+                      if (publicUrlData?.publicUrl) {
+                        messagePayload.media_url = publicUrlData.publicUrl;
+                        console.log("[UAZAPI_WEBHOOK] Media persisted via base64 fallback:", storagePath);
+                      }
+                    }
+                  } catch (b64Err) {
+                    console.warn("[UAZAPI_WEBHOOK] Base64 fallback failed:", b64Err);
                   }
                 } else {
-                  console.warn("[UAZAPI_WEBHOOK] CDN media upload failed:", uploadError.message);
+                  console.warn("[UAZAPI_WEBHOOK] /message/download returned no fileURL or base64:", JSON.stringify(dlData).slice(0, 300));
                 }
               } else {
-                console.warn("[UAZAPI_WEBHOOK] CDN download too small:", bytes.length, "bytes");
+                const errText = await dlResponse.text().catch(() => "");
+                console.warn("[UAZAPI_WEBHOOK] /message/download failed:", dlResponse.status, errText.slice(0, 200));
               }
-            } else {
-              console.warn("[UAZAPI_WEBHOOK] CDN download HTTP error:", dlResponse.status);
             }
           } catch (dlErr) {
-            console.warn("[UAZAPI_WEBHOOK] CDN download failed (keeping original URL):", dlErr);
+            console.warn("[UAZAPI_WEBHOOK] Media download failed:", dlErr);
           }
         }
 

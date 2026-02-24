@@ -1330,8 +1330,50 @@ function DocumentViewer({
     }
     
     if (!needsDecryption) {
-      // Direct download for non-encrypted files
-      window.open(src, "_blank");
+      // Direct download via blob (prevents opening new tab)
+      setIsDecrypting(true);
+      setError(false);
+      try {
+        const response = await fetch(src);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        let fileName = displayName;
+        if (fileName === "Documento" || !fileName.includes(".")) {
+          fileName = `documento${getFileExtension()}`;
+        }
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+      } catch (dlErr) {
+        console.warn("Direct blob download failed, trying get_media fallback:", dlErr);
+        // Fallback: try get_media if we have whatsappMessageId
+        if (whatsappMessageId && conversationId) {
+          try {
+            const response = await supabase.functions.invoke("evolution-api", {
+              body: { action: "get_media", conversationId, whatsappMessageId },
+            });
+            if (response.data?.success && response.data?.base64) {
+              const actualMimeType = response.data.mimetype || mimeType || "application/pdf";
+              const dataUrl = `data:${actualMimeType};base64,${response.data.base64}`;
+              downloadDataUrl(dataUrl);
+            } else {
+              setError(true);
+            }
+          } catch {
+            setError(true);
+          }
+        } else {
+          // Last resort: open in new tab
+          window.open(src, "_blank");
+        }
+      } finally {
+        setIsDecrypting(false);
+      }
       return;
     }
 
