@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { humanDelay, DELAY_CONFIG } from "../_shared/human-delay.ts";
 import { sendText } from "../_shared/whatsapp-provider.ts";
 
@@ -31,6 +31,7 @@ interface WhatsAppInstance {
   instance_name: string;
   api_url: string;
   api_key: string;
+  api_provider?: string;
 }
 
 serve(async (req) => {

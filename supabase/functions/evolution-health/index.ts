@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { createClient } from "npm:@supabase/supabase-js@2";
 
 // Production CORS configuration
 const ALLOWED_ORIGINS = [
@@ -97,32 +97,16 @@ serve(async (req) => {
       }
     );
 
-    // Validate JWT - try getClaims first (local), fallback to getUser (network)
+    // Validate JWT via getUser
     const token = authHeader.replace("Bearer ", "");
-    let userId: string | null = null;
+    const { data: { user }, error: userError } = await supabaseUser.auth.getUser(token);
 
-    // Attempt 1: getClaims (no network call)
-    try {
-      const { data: claimsData, error: claimsError } = await supabaseUser.auth.getClaims(token);
-      if (!claimsError && claimsData?.claims?.sub) {
-        userId = claimsData.claims.sub as string;
-      }
-    } catch (_) { /* fallback below */ }
-
-    // Attempt 2: getUser (network call to auth server)
-    if (!userId) {
-      try {
-        const { data: { user }, error: userError } = await supabaseUser.auth.getUser(token);
-        if (!userError && user?.id) {
-          userId = user.id;
-        }
-      } catch (_) { /* both failed */ }
-    }
-
-    if (!userId) {
-      console.error("[Evolution Health] Both getClaims and getUser failed for token validation");
+    if (userError || !user?.id) {
+      console.error("[Evolution Health] getUser failed:", userError?.message);
       throw new Error("Invalid authorization token");
     }
+
+    const userId = user.id;
 
     // Check if user is admin
     const { data: adminRole, error: adminError } = await supabaseAdmin.rpc("is_admin", {
