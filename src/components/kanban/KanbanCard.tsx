@@ -160,6 +160,10 @@ export function KanbanCard({
         return { label: `•••${digits.slice(-4)}`, isWidget: false, tooltipText: conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name || "WhatsApp" };
       }
     }
+    const fallbackName = conversation.whatsapp_instance?.display_name || conversation.whatsapp_instance?.instance_name;
+    if (fallbackName) {
+      return { label: fallbackName, isWidget: false, tooltipText: fallbackName };
+    }
     return { label: "----", isWidget: false, tooltipText: "Canal não identificado" };
   };
   
