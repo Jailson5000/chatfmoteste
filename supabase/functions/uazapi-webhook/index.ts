@@ -107,6 +107,22 @@ function detectMessageType(msg: any, chat?: any): string {
   if (t === "location" || t === "locationmessage" || msg.locationMessage) return "location";
   if (t === "contact" || t === "contactmessage" || t === "contactcardmessage" || msg.contactMessage || msg.contactsArrayMessage) return "contact";
   if (t === "extendedtextmessage") return "text";
+
+  // Interactive / Template message types — treat as text with structured content
+  if (t === "buttonsresponsemessage" || t === "buttons_response" || msg.buttonsResponseMessage) return "text";
+  if (t === "listresponsemessage" || t === "list_response" || msg.listResponseMessage) return "text";
+  if (t === "templatebuttonreplymessage" || t === "template_button_reply" || msg.templateButtonReplyMessage) return "text";
+  if (t === "interactiveresponsemessage" || t === "interactive_response" || msg.interactiveResponseMessage) return "text";
+  if (t === "templatemessage" || t === "template" || msg.templateMessage) {
+    // templateMessage can contain media — detect it
+    const tmpl = msg.templateMessage || msg.content?.templateMessage;
+    const hydrated = tmpl?.hydratedTemplate || tmpl?.hydratedFourRowTemplate;
+    if (hydrated?.imageMessage) return "image";
+    if (hydrated?.videoMessage) return "video";
+    if (hydrated?.documentMessage) return "document";
+    return "text";
+  }
+
   return "text";
 }
 
@@ -134,6 +150,70 @@ function extractContent(msg: any): string {
 
   // Extended text at msg level
   if (msg.extendedTextMessage?.text) return msg.extendedTextMessage.text;
+
+  // ============ Interactive / Template message extraction ============
+
+  // buttonsResponseMessage — user clicked a quick-reply button
+  const buttonsResp = msg.buttonsResponseMessage || c?.buttonsResponseMessage;
+  if (buttonsResp) {
+    return buttonsResp.selectedDisplayText || buttonsResp.selectedButtonId || "";
+  }
+
+  // listResponseMessage — user selected an item from a list
+  const listResp = msg.listResponseMessage || c?.listResponseMessage;
+  if (listResp) {
+    return listResp.title || listResp.description || listResp.singleSelectReply?.selectedRowId || "";
+  }
+
+  // templateButtonReplyMessage — user clicked a template button
+  const templateBtnReply = msg.templateButtonReplyMessage || c?.templateButtonReplyMessage;
+  if (templateBtnReply) {
+    return templateBtnReply.selectedDisplayText || templateBtnReply.selectedId || "";
+  }
+
+  // interactiveResponseMessage — generic interactive response (nfm, flows, etc.)
+  const interactiveResp = msg.interactiveResponseMessage || c?.interactiveResponseMessage;
+  if (interactiveResp) {
+    const body = interactiveResp.body || interactiveResp.nativeFlowResponseMessage;
+    if (body?.text) return body.text;
+    if (typeof body === "string") return body;
+    // Try extracting from params
+    if (body?.paramsJson) {
+      try {
+        const params = JSON.parse(body.paramsJson);
+        return params.response_text || params.text || body.paramsJson;
+      } catch { /* ignore */ }
+    }
+    return interactiveResp.selectedDisplayText || "";
+  }
+
+  // templateMessage — marketing/utility template with optional media and buttons
+  const tmpl = msg.templateMessage || c?.templateMessage;
+  if (tmpl) {
+    const hydrated = tmpl.hydratedTemplate || tmpl.hydratedFourRowTemplate;
+    if (hydrated) {
+      let text = hydrated.hydratedContentText || "";
+      
+      // Collect buttons
+      const buttons: string[] = [];
+      if (hydrated.hydratedButtons && Array.isArray(hydrated.hydratedButtons)) {
+        for (const btn of hydrated.hydratedButtons) {
+          const label = btn.quickReplyButton?.displayText || 
+                        btn.urlButton?.displayText || 
+                        btn.callButton?.displayText || "";
+          if (label) buttons.push(label);
+        }
+      }
+      
+      if (buttons.length > 0) {
+        text += `\n[Opções: ${buttons.join(" | ")}]`;
+      }
+      
+      return text.trim();
+    }
+  }
+
+  // ============ End interactive / template extraction ============
 
   // Media captions at msg level (Evolution format)
   if (msg.imageMessage?.caption) return msg.imageMessage.caption;
@@ -168,6 +248,15 @@ function extractMediaUrl(msg: any): string | null {
   if (msg.audioMessage?.url) return msg.audioMessage.url;
   if (msg.documentMessage?.url) return msg.documentMessage.url;
   if (msg.stickerMessage?.url) return msg.stickerMessage.url;
+
+  // templateMessage with media
+  const tmpl = msg.templateMessage || c?.templateMessage;
+  if (tmpl) {
+    const hydrated = tmpl.hydratedTemplate || tmpl.hydratedFourRowTemplate;
+    if (hydrated?.imageMessage?.url) return hydrated.imageMessage.url;
+    if (hydrated?.videoMessage?.url) return hydrated.videoMessage.url;
+    if (hydrated?.documentMessage?.url) return hydrated.documentMessage.url;
+  }
 
   return null;
 }

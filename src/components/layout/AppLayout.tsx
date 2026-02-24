@@ -5,8 +5,8 @@ import { usePresenceTracking } from "@/hooks/usePresenceTracking";
 import { SystemAlertBanner } from "./SystemAlertBanner";
 import { RealtimeSyncProvider } from "@/contexts/RealtimeSyncContext";
 
-export function AppLayout() {
-  // Enable real-time message notifications
+function AppLayoutInner() {
+  // Enable real-time message notifications (MUST be inside RealtimeSyncProvider)
   useMessageNotifications({ enabled: true });
   
   // Track user presence and last seen
@@ -16,22 +16,28 @@ export function AppLayout() {
   const isConversations = location.pathname.startsWith("/conversations");
 
   return (
-    <RealtimeSyncProvider>
-      <div className="flex flex-col h-screen w-full bg-background overflow-hidden">
-        <SystemAlertBanner />
-        <div className="flex flex-1 min-h-0 overflow-hidden">
-          <AppSidebar />
-          <main
-            className={
-              isConversations
-                ? "flex-1 h-full min-h-0 min-w-0 overflow-hidden transition-all duration-300"
-                : "flex-1 h-full min-h-0 min-w-0 overflow-auto transition-all duration-300"
-            }
-          >
-            <Outlet />
-          </main>
-        </div>
+    <div className="flex flex-col h-screen w-full bg-background overflow-hidden">
+      <SystemAlertBanner />
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <AppSidebar />
+        <main
+          className={
+            isConversations
+              ? "flex-1 h-full min-h-0 min-w-0 overflow-hidden transition-all duration-300"
+              : "flex-1 h-full min-h-0 min-w-0 overflow-auto transition-all duration-300"
+          }
+        >
+          <Outlet />
+        </main>
       </div>
+    </div>
+  );
+}
+
+export function AppLayout() {
+  return (
+    <RealtimeSyncProvider>
+      <AppLayoutInner />
     </RealtimeSyncProvider>
   );
 }
