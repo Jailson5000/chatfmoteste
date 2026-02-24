@@ -1,54 +1,87 @@
 
 
-# Correcao: IA Enviando Textos Sem Dividir (uazapi)
+# Correcao: Templates/Midias da IA Nao Chegam ao Cliente (uazapi)
 
 ## Diagnostico
 
-O problema esta na logica de fragmentacao do `uazapi-webhook`. Quando a IA responde via `ai-chat`, a funcao retorna dois campos:
-- `response`: texto completo
-- `responseParts`: array ja fragmentado pela funcao `splitIntoParagraphs` (divide por `\n\n`, `\n`, ou frases >400 chars)
+A funcao `executeTemplateTool` dentro de `ai-chat/index.ts` e responsavel por enviar templates (texto, imagens, documentos, links) diretamente ao WhatsApp quando a IA decide usar a tool `send_template`.
 
-**Porem o uazapi-webhook IGNORA `responseParts`** e usa sua propria logica de split que:
-1. So ativa quando texto > 800 caracteres
-2. Divide apenas por `\n\n+` (paragrafos duplos)
-3. Textos menores que 800 chars sao enviados como bloco unico
+**Problema confirmado:** Essa funcao usa EXCLUSIVAMENTE endpoints da Evolution API:
+- Texto: `POST {apiUrl}/message/sendText/{instance_name}` com header `apikey`
+- Media: `POST {apiUrl}/message/sendMedia/{instance_name}` com header `apikey`
 
-Resultado: respostas de 300-799 caracteres chegam como textao sem divisao no WhatsApp.
+A instancia FMOANTIGO usa **uazapi**, que tem endpoints completamente diferentes:
+- Texto: `POST {apiUrl}/send/text` com header `token`
+- Media: `POST {apiUrl}/send/media` com header `token`
 
-## Correcao
+**Resultado:** O `fetch` para `/message/sendText/...` retorna 404 ou erro na API uazapi. A mensagem e salva no banco (aparece no chat da plataforma) mas NUNCA chega ao WhatsApp do cliente. Os logs mostrariam "Failed to send template text to WhatsApp" mas o sistema continua sem falha visivel.
 
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
+Alem disso, a query de instancia (linha 2275) NAO busca `api_provider`, entao a funcao nem sabe qual provedor usar.
 
-**Mudanca unica** — Usar `responseParts` do `ai-chat` em vez de re-fragmentar:
+## Correcao Proposta
 
-Na linha 1214-1244, substituir a logica atual:
+### Arquivo: `supabase/functions/ai-chat/index.ts`
+
+**Mudanca A — Buscar `api_provider` da instancia (CRITICO):**
+
+Na linha 2275, adicionar `api_provider` ao SELECT:
 ```typescript
-// ANTES (logica propria de split):
-const aiText = result.response;
-// ... split manual com regex ...
-
-// DEPOIS (usar parts ja prontos do ai-chat):
-const aiText = result.response;
-const parts: string[] = (result.responseParts && result.responseParts.length > 1)
-  ? result.responseParts.slice(0, 5)  // Max 5 parts
-  : aiText.length > 400
-    ? aiText.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 0).slice(0, 5)
-    : [aiText];
+.select("api_url, api_key, instance_name, status, api_provider")
 ```
 
-Isso garante que:
-- Se `ai-chat` ja dividiu em paragrafos, usa essa divisao (mais inteligente — divide por `\n\n`, `\n`, ou frases)
-- Se nao, faz fallback com threshold de 400 chars (em vez de 800)
-- Limita a 5 partes para evitar spam
+**Mudanca B — Roteamento de envio de texto por provedor (CRITICO):**
+
+Na linha 2286-2305, substituir o envio de texto para suportar ambos os provedores:
+
+```text
+const isUazapi = instance.api_provider === 'uazapi';
+
+// TEXTO
+if (isUazapi) {
+  // uazapi: POST /send/text com header token
+  fetch(`${apiUrl}/send/text`, {
+    headers: { "Content-Type": "application/json", token: instance.api_key },
+    body: JSON.stringify({ number: targetNumber, text: finalContent })
+  })
+} else {
+  // Evolution: POST /message/sendText/{name} com header apikey
+  fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
+    headers: { "Content-Type": "application/json", apikey: instance.api_key },
+    body: JSON.stringify({ number: targetNumber, text: finalContent })
+  })
+}
+```
+
+**Mudanca C — Roteamento de envio de midia por provedor (CRITICO):**
+
+Na linha 2308-2380, substituir o envio de midia:
+
+```text
+if (isUazapi) {
+  // uazapi: POST /send/media com header token e campo "file"
+  fetch(`${apiUrl}/send/media`, {
+    headers: { "Content-Type": "application/json", token: instance.api_key },
+    body: JSON.stringify({ number: targetNumber, file: finalMediaUrl })
+  })
+} else {
+  // Evolution: POST /message/sendMedia/{name} com header apikey (logica atual mantida)
+  // ... mediaPayload com mediatype, mimetype, media ...
+}
+```
+
+Para uazapi, o endpoint `/send/media` aceita `{ number, file }` onde `file` pode ser URL, simplificando muito o envio.
 
 ## Resumo
 
-| Arquivo | Mudanca |
-|---|---|
-| `uazapi-webhook/index.ts` | Usar `responseParts` do ai-chat + baixar threshold de split |
+| Arquivo | Mudanca | Prioridade |
+|---|---|---|
+| `ai-chat/index.ts` | Buscar `api_provider` no SELECT da instancia | CRITICO |
+| `ai-chat/index.ts` | Roteamento de texto: uazapi (`/send/text` + `token`) vs Evolution (`/message/sendText` + `apikey`) | CRITICO |
+| `ai-chat/index.ts` | Roteamento de midia: uazapi (`/send/media` + `file`) vs Evolution (`/message/sendMedia` + `media`) | CRITICO |
 
 ## Resultado Esperado
-- Respostas da IA chegam divididas em mensagens naturais no WhatsApp
-- Cada paragrafo vira uma mensagem separada, como no evolution-webhook
-- Textos curtos continuam como mensagem unica
+
+- Templates com texto, imagens, links e documentos chegam ao cliente no WhatsApp via uazapi
+- Compatibilidade mantida com Evolution API para instancias que a usem
+- Mensagens continuam salvas no banco para exibicao na plataforma
 
