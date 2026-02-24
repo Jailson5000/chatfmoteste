@@ -3710,7 +3710,22 @@ ATENÇÃO: Sempre faça o cálculo ANTES de responder sobre prazos. NÃO assuma 
 
 `;
 
-    const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + toolBehaviorRules + toolExecutionRules;
+    // Inject audio capability instructions when audioRequested is true
+    let audioContextInstructions = '';
+    if (context?.audioRequested) {
+      audioContextInstructions = `
+
+### MODO DE ÁUDIO ATIVO ###
+Você TEM capacidade de responder por áudio. O sistema converte automaticamente sua resposta em áudio de voz.
+O cliente solicitou ou prefere comunicação por áudio. Responda normalmente com texto — o sistema cuidará da conversão.
+IMPORTANTE: NÃO diga que não pode enviar áudio. Você PODE e VAI enviar áudio. Apenas escreva sua resposta e ela será convertida em áudio automaticamente.
+Mantenha respostas concisas e naturais para áudio (sem formatação markdown, sem listas longas, sem links, sem emojis excessivos).
+Fale de forma conversacional e fluida, como se estivesse falando ao telefone.
+`;
+      console.log('[AI Chat] 🔊 Audio mode active - injecting audio capability instructions');
+    }
+
+    const fullSystemPrompt = dateContextPrefix + systemPrompt + knowledgeText + audioContextInstructions + toolBehaviorRules + toolExecutionRules;
     const messages: Array<{ role: string; content: string }> = [
       { role: "system", content: fullSystemPrompt }
     ];

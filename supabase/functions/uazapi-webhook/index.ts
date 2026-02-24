@@ -1458,6 +1458,14 @@ serve(async (req) => {
               console.warn("[UAZAPI_WEBHOOK] Failed to fetch automation name:", e);
             }
             
+            // ---- PRE-DETECT AUDIO MODE (before AI call so context is passed) ----
+            const audioRequestedForThisMessage = await shouldRespondWithAudio(
+              supabaseClient, conversationId, contentForAI || '', messageType
+            );
+            if (audioRequestedForThisMessage) {
+              console.log("[UAZAPI_WEBHOOK] 🔊 Audio mode pre-detected, will pass audioRequested=true to ai-chat");
+            }
+
             try {
               const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
               const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -1480,6 +1488,7 @@ serve(async (req) => {
                     clientId: resolvedClientId,
                     skipSaveUserMessage: true,
                     skipSaveAIResponse: true,
+                    audioRequested: audioRequestedForThisMessage,
                   },
                 }),
               });
@@ -1522,10 +1531,8 @@ serve(async (req) => {
                   const apiUrl = instance.api_url.replace(/\/+$/, "");
                   const targetNumber = remoteJid.replace("@s.whatsapp.net", "");
 
-                  // ---- CHECK IF AUDIO RESPONSE IS ENABLED (state machine) ----
-                  const audioEnabled = await shouldRespondWithAudio(
-                    supabaseClient, conversationId, contentForAI || '', messageType
-                  );
+                  // ---- CHECK IF AUDIO RESPONSE IS ENABLED (already pre-computed) ----
+                  const audioEnabled = audioRequestedForThisMessage;
                   let sentAsAudio = false;
 
                   if (audioEnabled) {
