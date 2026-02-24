@@ -107,15 +107,20 @@ serve(async (req) => {
 
       console.log(`Checking tenant: ${company.name} (${subdomain || 'no subdomain'})`);
 
-      // Check 1: Client App Status
-      if (company.client_app_status === 'created') {
+      // Check 1: Client App Status — accept any "operational" status
+      const validClientStatuses = ['created', 'healthy', 'active'];
+      if (validClientStatuses.includes(company.client_app_status || '')) {
         checks.client_app = true;
       } else {
         issues.push(`Client App status: ${company.client_app_status || 'unknown'}`);
       }
 
       // Check 2: n8n Workflow Status
-      if (company.n8n_workflow_status === 'created' && company.n8n_workflow_id) {
+      // If no workflow is configured (n8n_workflow_id is null), treat as OK (n8n not applicable)
+      if (!company.n8n_workflow_id) {
+        // N8N not configured for this company — skip check, mark as passing
+        checks.n8n_workflow = true;
+      } else if (company.n8n_workflow_status === 'created') {
         checks.n8n_workflow = true;
       } else {
         issues.push(`n8n workflow status: ${company.n8n_workflow_status || 'not created'}`);
