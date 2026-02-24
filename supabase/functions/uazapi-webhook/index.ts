@@ -270,7 +270,7 @@ serve(async (req) => {
     
     // Detect event type from uazapi payload
     const rawEvent = body.event || body.type || body.EventType || "unknown";
-    const event = rawEvent.toLowerCase();
+    const event = String(rawEvent).toLowerCase();
     
     console.log(`[UAZAPI_WEBHOOK] Event: ${event}`, JSON.stringify(body).slice(0, 2000));
 
@@ -473,11 +473,71 @@ serve(async (req) => {
 
         // Skip group messages
         const chatPhoneClean = chat.phone ? chat.phone.replace(/\D/g, "") : "";
-        const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid 
+        let remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid 
           || (chatPhoneClean.length >= 10 ? chatPhoneClean : null)
           || chat.id || "";
+
+        // ============================================================
+        // LID RESOLUTION: Convert @lid to real JID
+        // uazapi sometimes sends LID (Linked ID) instead of phone-based JID.
+        // We must resolve to real phone JID to match existing conversations.
+        // ============================================================
+        if (String(remoteJidRaw).includes("@lid")) {
+          console.log(`[UAZAPI_WEBHOOK] 🔄 LID detected: ${remoteJidRaw}, attempting resolution...`);
+          let resolvedFromLid = false;
+
+          // Try 1: chat.wa_chatid (e.g. "557196084344@s.whatsapp.net")
+          if (!resolvedFromLid && chat.wa_chatid && String(chat.wa_chatid).includes("@s.whatsapp.net")) {
+            remoteJidRaw = chat.wa_chatid;
+            resolvedFromLid = true;
+            console.log(`[UAZAPI_WEBHOOK] ✅ LID resolved via wa_chatid: ${remoteJidRaw}`);
+          }
+
+          // Try 2: chat.wa_fastid (format "owner:realphone") — extract part after ":"
+          if (!resolvedFromLid && chat.wa_fastid && String(chat.wa_fastid).includes(":")) {
+            const fastIdParts = String(chat.wa_fastid).split(":");
+            const realPhone = fastIdParts[fastIdParts.length - 1]?.replace(/\D/g, "");
+            if (realPhone && realPhone.length >= 10) {
+              remoteJidRaw = `${realPhone}@s.whatsapp.net`;
+              resolvedFromLid = true;
+              console.log(`[UAZAPI_WEBHOOK] ✅ LID resolved via wa_fastid: ${remoteJidRaw}`);
+            }
+          }
+
+          // Try 3: chat.phone if it's a real phone number (not LID)
+          if (!resolvedFromLid && chat.phone) {
+            const cleanChatPhone = String(chat.phone).replace(/\D/g, "");
+            if (cleanChatPhone.length >= 10 && !String(chat.phone).includes("@lid")) {
+              remoteJidRaw = `${cleanChatPhone}@s.whatsapp.net`;
+              resolvedFromLid = true;
+              console.log(`[UAZAPI_WEBHOOK] ✅ LID resolved via chat.phone: ${remoteJidRaw}`);
+            }
+          }
+
+          // Try 4: msg.participant or msg.key.participant (for individual chats, this is the real JID)
+          if (!resolvedFromLid) {
+            const participant = msg.participant || msg.key?.participant || "";
+            if (participant && String(participant).includes("@s.whatsapp.net")) {
+              remoteJidRaw = participant;
+              resolvedFromLid = true;
+              console.log(`[UAZAPI_WEBHOOK] ✅ LID resolved via participant: ${remoteJidRaw}`);
+            }
+          }
+
+          // If still unresolved, log and SKIP (like evolution-webhook does)
+          if (!resolvedFromLid) {
+            console.warn(`[UAZAPI_WEBHOOK] ⚠️ BLOCK LID: Could not resolve ${remoteJidRaw} to real JID. Skipping message.`, {
+              "chat.wa_chatid": chat.wa_chatid,
+              "chat.wa_fastid": chat.wa_fastid,
+              "chat.phone": chat.phone,
+              "msg.participant": msg.participant,
+            });
+            break;
+          }
+        }
+
         // Robust group filtering: multiple checks
-        const isGroup = remoteJidRaw.includes("@g.us") 
+        const isGroup = String(remoteJidRaw).includes("@g.us") 
           || chat.isGroup === true 
           || (chat as any).isGroup === true
           || (body as any).isGroup === true;
@@ -557,10 +617,12 @@ serve(async (req) => {
 
         // ---- FIND OR CREATE CONVERSATION ----
         let conversationId: string | null = null;
+        let conversationFoundVia = "";
 
+        // Step 1: Exact match by remote_jid + instance
         const { data: existingConv } = await supabaseClient
           .from("conversations")
-          .select("id")
+          .select("id, remote_jid")
           .eq("law_firm_id", lawFirmId)
           .eq("remote_jid", remoteJid)
           .eq("whatsapp_instance_id", instance.id)
@@ -569,11 +631,42 @@ serve(async (req) => {
 
         if (existingConv) {
           conversationId = existingConv.id;
-        } else {
-          // FALLBACK: Search for orphan conversation from same contact (any instance)
+          conversationFoundVia = "exact_jid_instance";
+        }
+
+        // Step 2: Fallback — search by contact_phone + instance
+        if (!conversationId && phoneNumber && phoneNumber.length >= 10) {
+          const { data: phoneConv } = await supabaseClient
+            .from("conversations")
+            .select("id, remote_jid, whatsapp_instance_id, client_id")
+            .eq("law_firm_id", lawFirmId)
+            .eq("contact_phone", phoneNumber)
+            .eq("whatsapp_instance_id", instance.id)
+            .order("last_message_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (phoneConv) {
+            conversationId = phoneConv.id;
+            conversationFoundVia = "phone_instance";
+            console.log(`[UAZAPI_WEBHOOK] 📱 Found conversation via phone+instance: ${phoneConv.id} (old jid: ${phoneConv.remote_jid}, new: ${remoteJid})`);
+            
+            // Sync remote_jid if different
+            if (phoneConv.remote_jid !== remoteJid) {
+              await supabaseClient
+                .from("conversations")
+                .update({ remote_jid: remoteJid, updated_at: new Date().toISOString() })
+                .eq("id", phoneConv.id);
+              console.log(`[UAZAPI_WEBHOOK] 🔄 Updated remote_jid: ${phoneConv.remote_jid} → ${remoteJid}`);
+            }
+          }
+        }
+
+        // Step 3: Orphan by remote_jid (any instance)
+        if (!conversationId) {
           const { data: orphanConv } = await supabaseClient
             .from("conversations")
-            .select("id, whatsapp_instance_id, client_id")
+            .select("id, whatsapp_instance_id, client_id, remote_jid")
             .eq("law_firm_id", lawFirmId)
             .eq("remote_jid", remoteJid)
             .order("last_message_at", { ascending: false })
@@ -581,8 +674,8 @@ serve(async (req) => {
             .maybeSingle();
 
           if (orphanConv) {
-            // Reassign orphan conversation to current instance
             conversationId = orphanConv.id;
+            conversationFoundVia = "orphan_jid";
             console.log(`[UAZAPI_WEBHOOK] Found orphan conversation ${orphanConv.id}, reassigning from instance ${orphanConv.whatsapp_instance_id} to ${instance.id}`);
             
             await supabaseClient
@@ -594,7 +687,6 @@ serve(async (req) => {
               })
               .eq("id", orphanConv.id);
 
-            // Reassign client to current instance as well
             if (orphanConv.client_id) {
               await supabaseClient
                 .from("clients")
@@ -605,47 +697,91 @@ serve(async (req) => {
                 })
                 .eq("id", orphanConv.client_id);
             }
-          } else {
-            // No existing conversation found — create new one
-            const { data: newConv, error: convError } = await supabaseClient
-              .from("conversations")
-              .insert({
-                law_firm_id: lawFirmId,
-                remote_jid: remoteJid,
-                contact_name: contactName,
-                contact_phone: phoneNumber,
-                whatsapp_instance_id: instance.id,
-                status: "novo_contato",
-                current_handler: "ai",
-                last_message_at: timestamp,
-                origin: "WHATSAPP",
-                department_id: instance.default_department_id || null,
-                assigned_to: instance.default_assigned_to || null,
-                current_automation_id: instance.default_automation_id || null,
-              })
-              .select("id")
-              .single();
+          }
+        }
 
-            if (convError) {
-              if (convError.code === "23505") {
-                const { data: existingConv2 } = await supabaseClient
-                  .from("conversations")
-                  .select("id")
-                  .eq("law_firm_id", lawFirmId)
-                  .eq("remote_jid", remoteJid)
-                  .eq("whatsapp_instance_id", instance.id)
-                  .limit(1)
-                  .maybeSingle();
-                conversationId = existingConv2?.id || null;
-              } else {
-                console.error("[UAZAPI_WEBHOOK] Failed to create conversation:", convError);
-                break;
-              }
-            } else {
-              conversationId = newConv?.id || null;
+        // Step 4: Orphan by contact_phone (any instance) 
+        if (!conversationId && phoneNumber && phoneNumber.length >= 10) {
+          const { data: phoneOrphan } = await supabaseClient
+            .from("conversations")
+            .select("id, whatsapp_instance_id, client_id, remote_jid")
+            .eq("law_firm_id", lawFirmId)
+            .eq("contact_phone", phoneNumber)
+            .order("last_message_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (phoneOrphan) {
+            conversationId = phoneOrphan.id;
+            conversationFoundVia = "orphan_phone";
+            console.log(`[UAZAPI_WEBHOOK] 📱 Found orphan via phone ${phoneNumber}: ${phoneOrphan.id}, reassigning from ${phoneOrphan.whatsapp_instance_id} to ${instance.id}`);
+            
+            await supabaseClient
+              .from("conversations")
+              .update({
+                whatsapp_instance_id: instance.id,
+                last_whatsapp_instance_id: phoneOrphan.whatsapp_instance_id,
+                remote_jid: remoteJid,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", phoneOrphan.id);
+
+            if (phoneOrphan.client_id) {
+              await supabaseClient
+                .from("clients")
+                .update({
+                  whatsapp_instance_id: instance.id,
+                  last_whatsapp_instance_id: phoneOrphan.whatsapp_instance_id,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", phoneOrphan.client_id);
             }
           }
         }
+
+        // Step 5: Create new conversation
+        if (!conversationId) {
+          conversationFoundVia = "created_new";
+          const { data: newConv, error: convError } = await supabaseClient
+            .from("conversations")
+            .insert({
+              law_firm_id: lawFirmId,
+              remote_jid: remoteJid,
+              contact_name: contactName,
+              contact_phone: phoneNumber,
+              whatsapp_instance_id: instance.id,
+              status: "novo_contato",
+              current_handler: "ai",
+              last_message_at: timestamp,
+              origin: "WHATSAPP",
+              department_id: instance.default_department_id || null,
+              assigned_to: instance.default_assigned_to || null,
+              current_automation_id: instance.default_automation_id || null,
+            })
+            .select("id")
+            .single();
+
+          if (convError) {
+            if (convError.code === "23505") {
+              const { data: existingConv2 } = await supabaseClient
+                .from("conversations")
+                .select("id")
+                .eq("law_firm_id", lawFirmId)
+                .eq("remote_jid", remoteJid)
+                .eq("whatsapp_instance_id", instance.id)
+                .limit(1)
+                .maybeSingle();
+              conversationId = existingConv2?.id || null;
+            } else {
+              console.error("[UAZAPI_WEBHOOK] Failed to create conversation:", convError);
+              break;
+            }
+          } else {
+            conversationId = newConv?.id || null;
+          }
+        }
+
+        console.log(`[UAZAPI_WEBHOOK] Conversation resolved: ${conversationId} (via: ${conversationFoundVia})`);
 
         if (!conversationId) {
           console.error("[UAZAPI_WEBHOOK] Could not resolve conversation");
