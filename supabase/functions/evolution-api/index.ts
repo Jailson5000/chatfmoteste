@@ -2085,9 +2085,10 @@ serve(async (req) => {
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
 
-        // ── UAZAPI PROVIDER: no equivalent settings ──
+        // ── UAZAPI PROVIDER: read reject_calls from DB ──
         if (isUazapi(instance)) {
-          return new Response(JSON.stringify({ success: true, settings: { rejectCall: false } }), {
+          const rejectCalls = instance.reject_calls === true;
+          return new Response(JSON.stringify({ success: true, settings: { rejectCall: rejectCalls } }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -2129,8 +2130,12 @@ serve(async (req) => {
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, body.instanceId);
 
-        // ── UAZAPI PROVIDER: no equivalent settings, just return success ──
+        // ── UAZAPI PROVIDER: save reject_calls preference in DB ──
         if (isUazapi(instance)) {
+          await supabaseClient
+            .from("whatsapp_instances")
+            .update({ reject_calls: body.rejectCall, updated_at: new Date().toISOString() })
+            .eq("id", body.instanceId);
           return new Response(JSON.stringify({ success: true, settings: { rejectCall: body.rejectCall } }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });

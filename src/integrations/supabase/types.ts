@@ -5737,6 +5737,7 @@ export type Database = {
           manual_disconnect: boolean | null
           phone_number: string | null
           reconnect_attempts_count: number | null
+          reject_calls: boolean | null
           status: string
           updated_at: string
         }
@@ -5765,6 +5766,7 @@ export type Database = {
           manual_disconnect?: boolean | null
           phone_number?: string | null
           reconnect_attempts_count?: number | null
+          reject_calls?: boolean | null
           status?: string
           updated_at?: string
         }
@@ -5793,6 +5795,7 @@ export type Database = {
           manual_disconnect?: boolean | null
           phone_number?: string | null
           reconnect_attempts_count?: number | null
+          reject_calls?: boolean | null
           status?: string
           updated_at?: string
         }

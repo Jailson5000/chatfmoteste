@@ -890,28 +890,78 @@ const UazapiProvider = {
 
   async fetchProfilePicture(config: ProviderConfig, phoneNumber: string): Promise<FetchProfilePictureResult> {
     const apiUrl = normalizeUrl(config.apiUrl);
+    const cleanPhone = phoneNumber.replace(/\D/g, "").split("@")[0];
     
-    // uazapi: POST /profile/image with jid parameter
-    const jid = phoneNumber.includes("@") ? phoneNumber : `${phoneNumber}@s.whatsapp.net`;
-    const res = await fetchWithTimeout(
-      `${apiUrl}/profile/image`,
-      {
-        method: "POST",
-        headers: {
-          token: config.apiKey,
-          "Content-Type": "application/json",
+    // Try 1: POST /profile/image with jid parameter
+    const jid = `${cleanPhone}@s.whatsapp.net`;
+    try {
+      const res = await fetchWithTimeout(
+        `${apiUrl}/profile/image`,
+        {
+          method: "POST",
+          headers: {
+            token: config.apiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ jid }),
         },
-        body: JSON.stringify({ jid }),
-      },
-    );
+      );
 
-    if (!res.ok) {
-      return { profilePicUrl: null };
-    }
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const url = data?.profilePictureUrl || data?.picture || data?.url || data?.imgUrl || data?.image || null;
+        if (typeof url === "string" && url.startsWith("http")) {
+          return { profilePicUrl: url, raw: data };
+        }
+      }
+    } catch (_e) { /* fallback below */ }
 
-    const data = await res.json().catch(() => ({}));
-    const url = data?.profilePictureUrl || data?.picture || data?.url || data?.imgUrl || data?.image || null;
-    return { profilePicUrl: typeof url === "string" && url.startsWith("http") ? url : null, raw: data };
+    // Try 2: POST /profile/image with number parameter (alternative uazapi format)
+    try {
+      const res2 = await fetchWithTimeout(
+        `${apiUrl}/profile/image`,
+        {
+          method: "POST",
+          headers: {
+            token: config.apiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ number: cleanPhone }),
+        },
+      );
+
+      if (res2.ok) {
+        const data2 = await res2.json().catch(() => ({}));
+        const url2 = data2?.profilePictureUrl || data2?.picture || data2?.url || data2?.imgUrl || data2?.image || null;
+        if (typeof url2 === "string" && url2.startsWith("http")) {
+          return { profilePicUrl: url2, raw: data2 };
+        }
+      }
+    } catch (_e) { /* fallback below */ }
+
+    // Try 3: GET /profile/image?number={phone} (some uazapi versions)
+    try {
+      const res3 = await fetchWithTimeout(
+        `${apiUrl}/profile/image?number=${cleanPhone}`,
+        {
+          method: "GET",
+          headers: {
+            token: config.apiKey,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+
+      if (res3.ok) {
+        const data3 = await res3.json().catch(() => ({}));
+        const url3 = data3?.profilePictureUrl || data3?.picture || data3?.url || data3?.imgUrl || data3?.image || null;
+        if (typeof url3 === "string" && url3.startsWith("http")) {
+          return { profilePicUrl: url3, raw: data3 };
+        }
+      }
+    } catch (_e) { /* no more fallbacks */ }
+
+    return { profilePicUrl: null };
   },
 
   async sendContact(config: ProviderConfig, opts: SendContactOptions): Promise<SendTextResult> {

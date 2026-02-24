@@ -476,8 +476,13 @@ serve(async (req) => {
         const remoteJidRaw = msg.from || msg.remoteJid || msg.key?.remoteJid 
           || (chatPhoneClean.length >= 10 ? chatPhoneClean : null)
           || chat.id || "";
-        if (remoteJidRaw.includes("@g.us")) {
-          console.log("[UAZAPI_WEBHOOK] Skipping group message");
+        // Robust group filtering: multiple checks
+        const isGroup = remoteJidRaw.includes("@g.us") 
+          || chat.isGroup === true 
+          || (chat as any).isGroup === true
+          || (body as any).isGroup === true;
+        if (isGroup) {
+          console.log("[UAZAPI_WEBHOOK] Skipping group message (robust check)");
           break;
         }
 
@@ -689,8 +694,48 @@ serve(async (req) => {
           }
 
           // ---- PERSIST PROFILE PICTURE ----
-          if (resolvedClientId && chat.imagePreview && typeof chat.imagePreview === "string" && chat.imagePreview.startsWith("http")) {
-            persistProfilePicture(supabaseClient, resolvedClientId, lawFirmId, chat.imagePreview).catch(() => {});
+          if (resolvedClientId) {
+            const clientHasAvatar = existingClient?.avatar_url;
+            if (!clientHasAvatar) {
+              if (chat.imagePreview && typeof chat.imagePreview === "string" && chat.imagePreview.startsWith("http")) {
+                // Use imagePreview from payload
+                persistProfilePicture(supabaseClient, resolvedClientId, lawFirmId, chat.imagePreview).catch(() => {});
+              } else if (instance.api_url && instance.api_key) {
+                // Fallback: fetch profile picture via uazapi API
+                (async () => {
+                  try {
+                    const apiUrl = (instance.api_url as string).replace(/\/+$/, "");
+                    const jid = `${phoneNumber}@s.whatsapp.net`;
+                    
+                    // Try POST /profile/image
+                    let picRes = await fetch(`${apiUrl}/profile/image`, {
+                      method: "POST",
+                      headers: { token: instance.api_key as string, "Content-Type": "application/json" },
+                      body: JSON.stringify({ jid }),
+                    });
+                    
+                    // Fallback: try with number param
+                    if (!picRes.ok) {
+                      picRes = await fetch(`${apiUrl}/profile/image`, {
+                        method: "POST",
+                        headers: { token: instance.api_key as string, "Content-Type": "application/json" },
+                        body: JSON.stringify({ number: phoneNumber }),
+                      });
+                    }
+                    
+                    if (picRes.ok) {
+                      const picData = await picRes.json().catch(() => ({}));
+                      const picUrl = picData?.profilePictureUrl || picData?.picture || picData?.url || picData?.imgUrl || picData?.image || null;
+                      if (typeof picUrl === "string" && picUrl.startsWith("http")) {
+                        await persistProfilePicture(supabaseClient, resolvedClientId!, lawFirmId, picUrl);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn("[UAZAPI_WEBHOOK] Auto-fetch profile picture failed:", e);
+                  }
+                })();
+              }
+            }
           }
         }
 
@@ -944,6 +989,19 @@ serve(async (req) => {
           if (conv?.current_handler === "ai" && conv?.current_automation_id) {
             console.log("[UAZAPI_WEBHOOK] Triggering AI processing for conversation:", conversationId, "message:", content?.substring(0, 50));
             
+            // Fetch automation name for ai_agent_name
+            let automationName: string | null = null;
+            try {
+              const { data: automation } = await supabaseClient
+                .from("automations")
+                .select("name")
+                .eq("id", conv.current_automation_id)
+                .single();
+              automationName = automation?.name || null;
+            } catch (e) {
+              console.warn("[UAZAPI_WEBHOOK] Failed to fetch automation name:", e);
+            }
+            
             try {
               const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
               const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -1038,6 +1096,8 @@ serve(async (req) => {
                     sender_type: "ai",
                     ai_generated: true,
                     law_firm_id: lawFirmId,
+                    ai_agent_id: conv.current_automation_id,
+                    ai_agent_name: automationName,
                   });
 
                   // Update conversation timestamp
