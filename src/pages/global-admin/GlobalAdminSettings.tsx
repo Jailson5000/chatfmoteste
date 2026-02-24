@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building, Users, FileText, Download } from "lucide-react";
+import { Settings, Shield, Bell, Database, Zap, Save, AlertTriangle, CreditCard, Building, Users, FileText, Download, MessageSquare, Eye, EyeOff } from "lucide-react";
 import { useSystemSettings } from "@/hooks/useSystemSettings";
 import { supabase } from "@/integrations/supabase/client";
 import { Json } from "@/integrations/supabase/types";
@@ -342,7 +342,113 @@ export default function GlobalAdminSettings() {
         </CardContent>
       </Card>
 
-      {/* System Alert Settings */}
+      {/* WhatsApp Provider Settings */}
+      <Card className="border-primary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5" />
+            Provedor WhatsApp
+            <Badge variant={
+              String(getSetting("default_whatsapp_provider") || "evolution").replace(/"/g, "") === "uazapi" 
+                ? "default" 
+                : "secondary"
+            }>
+              {String(getSetting("default_whatsapp_provider") || "evolution").replace(/"/g, "") === "uazapi" ? "uazapi" : "Evolution API"}
+            </Badge>
+          </CardTitle>
+          <CardDescription>
+            Escolha o provedor padrão para novas conexões WhatsApp
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-3">
+            <Label className="font-medium">Provedor Padrão</Label>
+            <RadioGroup
+              value={String(getSetting("default_whatsapp_provider") || "evolution").replace(/"/g, "")}
+              onValueChange={(value) => handleChange("default_whatsapp_provider", value)}
+              className="flex flex-col gap-3"
+            >
+              <div className="flex items-center space-x-3 p-3 rounded-lg border">
+                <RadioGroupItem value="evolution" id="provider-evolution" />
+                <Label htmlFor="provider-evolution" className="flex-1 cursor-pointer">
+                  <div className="font-medium">Evolution API</div>
+                  <div className="text-sm text-muted-foreground">Servidor centralizado com gerenciamento de instâncias</div>
+                </Label>
+              </div>
+              <div className="flex items-center space-x-3 p-3 rounded-lg border">
+                <RadioGroupItem value="uazapi" id="provider-uazapi" />
+                <Label htmlFor="provider-uazapi" className="flex-1 cursor-pointer">
+                  <div className="font-medium">uazapi</div>
+                  <div className="text-sm text-muted-foreground">Cada instância com seu próprio servidor e token</div>
+                </Label>
+              </div>
+            </RadioGroup>
+            {localSettings["default_whatsapp_provider"] !== undefined && (
+              <Button size="sm" onClick={() => handleSave("default_whatsapp_provider")}>
+                <Save className="h-4 w-4 mr-1" /> Salvar Provedor
+              </Button>
+            )}
+          </div>
+
+          {String(getSetting("default_whatsapp_provider") || "evolution").replace(/"/g, "") === "uazapi" && (
+            <>
+              <Separator />
+              <div className="space-y-4">
+                <Label className="font-medium">Configurações uazapi</Label>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="uazapi_server_url">Server URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="uazapi_server_url"
+                      placeholder="https://minha-instancia.uazapi.com"
+                      value={getSettingString("uazapi_server_url")}
+                      onChange={(e) => handleChange("uazapi_server_url", e.target.value)}
+                    />
+                    {localSettings["uazapi_server_url"] !== undefined && (
+                      <Button size="sm" onClick={() => handleSave("uazapi_server_url")}>
+                        <Save className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">URL base do servidor uazapi (sem barra no final)</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="uazapi_admin_token">Admin Token</Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Input
+                        id="uazapi_admin_token"
+                        type={(localSettings["_show_uazapi_token"] as boolean) ? "text" : "password"}
+                        placeholder="Token de administração"
+                        value={getSettingString("uazapi_admin_token")}
+                        onChange={(e) => handleChange("uazapi_admin_token", e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full"
+                        onClick={() => setLocalSettings(prev => ({ ...prev, _show_uazapi_token: !prev._show_uazapi_token }))}
+                      >
+                        {(localSettings["_show_uazapi_token"] as boolean) ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                    {localSettings["uazapi_admin_token"] !== undefined && localSettings["uazapi_admin_token"] !== true && localSettings["uazapi_admin_token"] !== false && (
+                      <Button size="sm" onClick={() => handleSave("uazapi_admin_token")}>
+                        <Save className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">Token de admin para gerenciamento global das instâncias uazapi</p>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
       <Card className="border-warning/30">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
