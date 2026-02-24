@@ -1,125 +1,84 @@
 
 
-# Auditoria Completa: Fluxos de Mensagens, Performance e Kanban
+# Analise de Contagem de Consumos — Diagnostico Completo
 
----
+## Estado Atual dos Rastreamentos
 
-## 1. Fluxos de Envio e Recebimento de Mensagens
+### 1. Conversas de IA — OK
+- `ai-chat/index.ts` registra 1 conversa unica por periodo de faturamento via `recordAIConversationUsage`
+- Ambos os webhooks (uazapi e evolution) chamam `ai-chat`, que faz o tracking
+- Dados reais: 543 conversas em fev/2026, 542 com source=whatsapp
+- Deduplicacao por `conversation_id + billing_period` funciona corretamente
 
-### Estado Atual: Funcional com 2 problemas menores
+### 2. Minutos TTS — OK para Evolution, AUSENTE para uazapi
+- `evolution-webhook` gera audio TTS e registra uso via `recordTTSUsage` (com `skipUsageTracking: true` para evitar contagem dupla)
+- `ai-text-to-speech` registra uso de previews do frontend (30 records, source=frontend_preview)
+- **BUG CRITICO**: `uazapi-webhook` NAO gera respostas em audio — mesmo com `ai_audio_enabled = true`, so envia texto. A funcao `sendAIResponseToWhatsApp` com TTS existe APENAS no `evolution-webhook`.
 
-**Fluxo de Recebimento (uazapi-webhook) — OK**
-- Resolucao de conversa em 5 etapas (JID exato → JID qualquer instancia → telefone exato → telefone orfao → criar nova) — robusto
-- Criacao automatica de cliente e persistencia de avatar — OK
-- Deteccao de duplicatas por `whatsapp_message_id` — OK
-- Persistencia de midia via base64 ou `/message/download` com fallback — OK
-- Auto-desarquivamento com restauracao de handler — OK
-- Processamento de IA com fragmentacao inteligente (`responseParts` + fallback 400 chars) — OK (corrigido recentemente)
-- Envio de templates com `type` field para midia — OK (corrigido recentemente)
+### 3. Transcricao de Audio — AUSENTE para uazapi
+- `evolution-webhook` transcreve audios do cliente via `transcribe-audio` edge function e injeta `[Audio transcrito]: ...` no conteudo antes de enviar pra IA
+- **BUG CRITICO**: `uazapi-webhook` NAO transcreve audios — quando o cliente envia audio, o conteudo chega como `[audio]` para a IA, que nao consegue processar o conteudo real
+- Transcricao nunca e registrada como usage_type (nao impacta billing, e gratis)
 
-**Fluxo de Envio (evolution-api) — OK**
-- Usa `whatsapp-provider.ts` abstraction para roteamento uazapi/evolution — OK
-- Envio assincrono com `EdgeRuntime.waitUntil` — OK
-- Reconciliacao de IDs (temp → real) via Realtime — OK
+### 4. View `company_usage_summary` — OK
+- A view agrega corretamente `usage_records` por `billing_period` atual
+- Calcula `current_ai_conversations` (sum count) e `current_tts_minutes` (sum duration_seconds / 60)
+- Retorna 0 rows apenas porque a query analitica nao tem contexto de auth — funciona normalmente no app
 
-**Fluxo Realtime (useMessagesWithPagination) — OK com 1 bug**
-- INSERT: Merge otimista com 5 estrategias de deduplicacao — robusto
-- UPDATE: Reconciliacao de status/midia — OK
-- Scroll anchoring para paginacao — OK
-- Fallback polling a cada 3 segundos — OK
+## Resumo de Problemas Encontrados
 
-### Bug Encontrado: Polling query incompleta
+| # | Problema | Severidade | Impacto |
+|---|----------|------------|---------|
+| 1 | uazapi-webhook nao transcreve audios do cliente | CRITICO | IA recebe `[audio]` em vez do conteudo real — cliente nao e atendido corretamente |
+| 2 | uazapi-webhook nao gera respostas em audio (TTS) | CRITICO | Mesmo com voz ativada, IA responde apenas texto no WhatsApp via uazapi |
+| 3 | Previews de voz do frontend ainda sendo contabilizados | BAIXO | 30 records de `frontend_preview` em fev — infla levemente o consumo TTS |
 
-No `useMessagesWithPagination.tsx`, linha 865, a query de polling esta faltando `client_reaction`:
+## Correcoes Propostas
 
+### Correcao 1: Transcricao de Audio no uazapi-webhook (CRITICO)
+
+**Arquivo: `supabase/functions/uazapi-webhook/index.ts`**
+
+Antes de enviar para `ai-chat`, se `messageType === "audio"`, fazer download do audio via `/message/download`, converter para base64, e chamar `transcribe-audio`. Substituir o conteudo da mensagem com a transcricao.
+
+Logica (inserir entre a linha ~1092 onde salva a mensagem e ~1163 onde dispara AI):
+
+```text
+if (messageType === "audio" && !isFromMe) {
+  // 1. Buscar media_url ja persistido no storage
+  // 2. Chamar transcribe-audio com o base64
+  // 3. Se transcricao OK, atualizar content da mensagem no banco
+  // 4. Usar transcricao como content para AI processing
+}
 ```
-Linha 148 (initial load): "...my_reaction, client_reaction"  ← CORRETO
-Linha 222 (load more):    "...my_reaction, client_reaction"  ← CORRETO  
-Linha 865 (polling):      "...my_reaction"                   ← FALTA client_reaction
+
+### Correcao 2: Respostas em Audio (TTS) no uazapi-webhook (CRITICO)
+
+**Arquivo: `supabase/functions/uazapi-webhook/index.ts`**
+
+Apos receber resposta da IA (linha ~1213), verificar se `ai_audio_enabled` esta ativo na conversa. Se sim:
+1. Buscar config de voz do agente/empresa
+2. Chamar `ai-text-to-speech` com `skipUsageTracking: true`
+3. Enviar audio via uazapi `/send/media` (type: audio)
+4. Registrar uso TTS localmente (como faz o evolution-webhook)
+
+```text
+// Verificar ai_audio_enabled na conversa
+// Se ativo: gerar TTS, enviar via /send/media, registrar usage
+// Se nao: enviar texto como ja faz
 ```
 
-**Impacto**: Reacoes de emoji do cliente podem desaparecer se capturadas via polling em vez de Realtime. Baixa severidade, pois Realtime normalmente captura primeiro.
+### Correcao 3: Preview TTS nao contabilizar (BAIXO)
 
-**Correcao**: Adicionar `, client_reaction` na query de polling (linha 865).
+**Arquivo: `src/components/settings/AIVoiceSettings.tsx`** (ou onde chama o preview)
 
----
+Passar `skipUsageTracking: true` nas chamadas de preview de voz nas configuracoes.
 
-## 2. Velocidade de Carregamento
+## Arquivos Afetados
 
-### Metricas Atuais (Preview/Dev)
-
-| Metrica | Valor | Avaliacao |
-|---------|-------|-----------|
-| TTFB | 622ms | Aceitavel |
-| FCP | 5088ms | Lento (dev mode) |
-| DOM Content Loaded | 4426ms | Lento (dev mode) |
-| CLS | 0.0002 | Excelente |
-| JS Heap | 14.8MB | Bom |
-| DOM Nodes | 831 | Bom |
-| Layout Duration | 67ms | Bom |
-| Scripts | 120 (1346KB) | Alto para dev |
-
-**Nota importante**: Esses numeros sao do ambiente de DESENVOLVIMENTO (Vite dev server). Em producao, com bundling e minificacao, o FCP deve ficar em ~1500ms conforme ja documentado.
-
-### Otimizacoes ja implementadas — OK
-- Lazy loading em 29+ rotas via `React.lazy` com retry — OK
-- `staleTime` global 2min / `gcTime` 10min — OK
-- `RealtimeSyncProvider` apenas no AppLayout (nao no Global Admin) — OK
-- Consolidacao de Realtime (18 → 3-4 canais) — OK
-- Font externo (Google Fonts) como unico recurso render-blocking — aceitavel
-
-### Nenhuma acao necessaria
-A performance esta otimizada para producao. Os numeros altos de FCP sao exclusivamente do ambiente de preview/dev.
-
----
-
-## 3. Kanban de Conversas
-
-### Estado Atual: Funcional com 1 bug de UI
-
-**Funcionalidades OK:**
-- Agrupamento por departamento com drag-and-drop — OK
-- Agrupamento por status com drag-and-drop de clientes — OK
-- Coluna "Sem Departamento" / "Sem Status" — OK
-- Coluna de Arquivados com permissao — OK
-- Reordenacao de departamentos via drag — OK
-- Painel lateral (KanbanChatPanel) com injecao de estado — OK
-- Auto-load de todas conversas para visao completa — OK
-- Filtros multi-select (responsavel, status, departamento, tags, conexao, data) — OK
-- Lock otimista de 3 segundos contra race conditions — OK
-
-### Bug Encontrado: Modos "Responsavel" e "Conexao" nao implementados
-
-O dropdown "Agrupar por" oferece 4 opcoes:
-1. **Departamento** — Funciona ✓
-2. **Status** — Funciona ✓
-3. **Responsavel** — Mostra colunas de STATUS (bug)
-4. **Conexao** — Mostra colunas de STATUS (bug)
-
-A causa: o JSX usa um ternario simples `groupBy === 'department' ? ... : ...` que so distingue departamento dos demais. Os modos "responsible" e "connection" caem no branch else e renderizam como status.
-
-**Impacto**: Medio. O usuario seleciona "Responsavel" esperando ver colunas por atendente/IA, mas ve colunas de status.
-
-**Correcao**: Implementar as renderizacoes para `groupBy === 'responsible'` (colunas: cada membro + "Sem Responsavel") e `groupBy === 'connection'` (colunas: cada instancia WhatsApp + "Sem Conexao").
-
----
-
-## 4. Kanban de Tarefas (TaskKanbanView)
-
-### Estado: Funcional — OK
-- 3 colunas (A Fazer, Em Progresso, Concluido) com drag-and-drop via @dnd-kit — OK
-- DragOverlay para feedback visual — OK
-- Ativacao com distancia de 8px (evita cliques acidentais) — OK
-- Ordenacao por position — OK
-
----
-
-## Resumo de Acoes
-
-| # | Problema | Severidade | Arquivo | Correcao |
-|---|----------|------------|---------|----------|
-| 1 | Polling falta `client_reaction` | Baixa | `useMessagesWithPagination.tsx` L865 | Adicionar `, client_reaction` |
-| 2 | Kanban "Responsavel" e "Conexao" nao implementados | Media | `Kanban.tsx` L476-618 | Implementar renderizacao de colunas para esses modos |
-
-Todos os outros fluxos — recebimento, envio, IA, midia, deduplicacao, Realtime, performance — estao corretos e otimizados.
+| Arquivo | Mudanca | Prioridade |
+|---|---|---|
+| `supabase/functions/uazapi-webhook/index.ts` | Adicionar transcricao de audio antes do AI processing | CRITICO |
+| `supabase/functions/uazapi-webhook/index.ts` | Adicionar geracao e envio de audio TTS nas respostas da IA | CRITICO |
+| Frontend (AIVoiceSettings) | Passar `skipUsageTracking: true` em previews | BAIXO |
 
