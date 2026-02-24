@@ -383,10 +383,13 @@ serve(async (req) => {
         console.log(`[UAZAPI_WEBHOOK] Message: ${messageType} from ${phoneNumber} (fromMe: ${isFromMe})`, {
           contentPreview: content?.slice(0, 50),
           hasMedia: !!mediaUrl,
+          hasBase64: !!(msg.base64 || body.base64),
+          mimeType: mimeType || null,
+          fileName: fileName || null,
         });
 
         // Skip empty messages
-        if (!content && !mediaUrl && messageType === "text") {
+        if (!content && !mediaUrl && !msg.base64 && !body.base64 && messageType === "text") {
           console.log("[UAZAPI_WEBHOOK] Skipping empty text message");
           break;
         }
@@ -522,11 +525,15 @@ serve(async (req) => {
           law_firm_id: lawFirmId,
         };
 
-        // Handle base64 media from uazapi
-        if (msg.base64 && !mediaUrl) {
+        // Handle base64 media from uazapi (check msg.base64, body.base64, and type-specific fields)
+        const rawBase64 = msg.base64 || body.base64 
+          || msg.imageMessage?.base64 || msg.videoMessage?.base64 
+          || msg.audioMessage?.base64 || msg.documentMessage?.base64 
+          || msg.stickerMessage?.base64 || null;
+        if (rawBase64 && !mediaUrl) {
           // Store base64 media to Supabase Storage
           try {
-            const base64Data = msg.base64;
+            const base64Data = rawBase64;
             const binaryStr = atob(base64Data);
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) {
