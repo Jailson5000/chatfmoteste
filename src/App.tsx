@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect } from "react";
+import React, { Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -9,32 +9,30 @@ import { GlobalAdminRoute } from "@/components/auth/GlobalAdminRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { GlobalAdminLayout } from "@/components/layout/GlobalAdminLayout";
 import { AdminAuthProvider } from "@/hooks/useAdminAuth";
-import { TenantProvider } from "@/hooks/useTenant";
-import { RealtimeSyncProvider } from "@/contexts/RealtimeSyncContext";
 import { TabSessionProvider } from "@/contexts/TabSessionContext";
 import { AuthProvider } from "@/hooks/useAuth";
 import { Loader2 } from "lucide-react";
 
-// Synchronous imports — frequently used pages (instant load)
+// Only Index and Auth are synchronous (landing + login = first screens)
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
-import AuthCallback from "./pages/AuthCallback";
-import MetaAuthCallback from "./pages/MetaAuthCallback";
-import ResetPassword from "./pages/ResetPassword";
-import ChangePassword from "./pages/ChangePassword";
-import Dashboard from "./pages/Dashboard";
-import Conversations from "./pages/Conversations";
-import Kanban from "./pages/Kanban";
-import Settings from "./pages/Settings";
-import Contacts from "./pages/Contacts";
-import Connections from "./pages/Connections";
-import AIAgents from "./pages/AIAgents";
-import AIAgentEdit from "./pages/AIAgentEdit";
-import Tasks from "./pages/Tasks";
-import Onboarding from "./pages/Onboarding";
-import NotFound from "./pages/NotFound";
 
-// Lazy imports — secondary pages (loaded on demand)
+// All other pages are lazy-loaded
+const AuthCallback = React.lazy(() => import("./pages/AuthCallback"));
+const MetaAuthCallback = React.lazy(() => import("./pages/MetaAuthCallback"));
+const ResetPassword = React.lazy(() => import("./pages/ResetPassword"));
+const ChangePassword = React.lazy(() => import("./pages/ChangePassword"));
+const Dashboard = React.lazy(() => import("./pages/Dashboard"));
+const Conversations = React.lazy(() => import("./pages/Conversations"));
+const Kanban = React.lazy(() => import("./pages/Kanban"));
+const Settings = React.lazy(() => import("./pages/Settings"));
+const Contacts = React.lazy(() => import("./pages/Contacts"));
+const Connections = React.lazy(() => import("./pages/Connections"));
+const AIAgents = React.lazy(() => import("./pages/AIAgents"));
+const AIAgentEdit = React.lazy(() => import("./pages/AIAgentEdit"));
+const Tasks = React.lazy(() => import("./pages/Tasks"));
+const Onboarding = React.lazy(() => import("./pages/Onboarding"));
+const NotFound = React.lazy(() => import("./pages/NotFound"));
 const AgendaPro = React.lazy(() => import("./pages/AgendaPro"));
 const KnowledgeBase = React.lazy(() => import("./pages/KnowledgeBase"));
 const AIVoice = React.lazy(() => import("./pages/AIVoice"));
@@ -48,8 +46,7 @@ const ConfirmAppointment = React.lazy(() => import("./pages/ConfirmAppointment")
 const Support = React.lazy(() => import("./pages/Support"));
 const Tutorials = React.lazy(() => import("./pages/Tutorials"));
 
-
-// Lazy imports — Global Admin pages (accessed by <0.1% of users)
+// Global Admin pages
 const GlobalAdminAuth = React.lazy(() => import("./pages/global-admin/GlobalAdminAuth"));
 const GlobalAdminDashboard = React.lazy(() => import("./pages/global-admin/GlobalAdminDashboard"));
 const GlobalAdminCompanies = React.lazy(() => import("./pages/global-admin/GlobalAdminCompanies"));
@@ -70,18 +67,15 @@ const GlobalAdminTickets = React.lazy(() => import("./pages/global-admin/GlobalA
 const GlobalAdminTutorials = React.lazy(() => import("./pages/global-admin/GlobalAdminTutorials"));
 const GlobalAdminOnboarding = React.lazy(() => import("./pages/global-admin/GlobalAdminOnboarding"));
 
-import { APP_BUILD_ID } from "@/lib/buildInfo";
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 2 * 60 * 1000,   // 2 min — dados ficam "frescos"
-      gcTime: 10 * 60 * 1000,     // 10 min — cache mantido em memória
-      retry: 1,                    // 1 retry em vez de 3
+      staleTime: 2 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
+      retry: 1,
     },
   },
 });
-
 
 const LazyFallback = () => (
   <div className="flex items-center justify-center min-h-screen">
@@ -92,289 +86,127 @@ const LazyFallback = () => (
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <TenantProvider>
-        <TabSessionProvider>
-          <RealtimeSyncProvider>
-            <TooltipProvider>
-              <Toaster />
-              <Sonner />
-            <BrowserRouter>
+      <TabSessionProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
             <Suspense fallback={<LazyFallback />}>
-            <Routes>
-          {/* Public routes */}
-          <Route path="/" element={<Index />} />
-          <Route path="/login" element={<Navigate to="/auth" replace />} />
-          <Route path="/auth" element={<Auth />} />
-           <Route path="/auth/callback" element={<AuthCallback />} />
-           <Route path="/auth/meta-callback" element={<MetaAuthCallback />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/payment-success" element={<PaymentSuccess />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/change-password" element={<ChangePassword />} />
-          
-          <Route path="/privacidade" element={<PrivacyPolicy />} />
-          <Route path="/termos" element={<TermsOfService />} />
-          <Route path="/agendar/:slug" element={<PublicBooking />} />
-          <Route path="/confirmar" element={<ConfirmAppointment />} />
-          
-          {/* Protected routes with AppLayout */}
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-          </Route>
-          
-          <Route
-            path="/conversations"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Conversations />} />
-          </Route>
-          
-          <Route
-            path="/kanban"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Kanban />} />
-          </Route>
-          
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Settings />} />
-          </Route>
-          
-          <Route
-            path="/contacts"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Contacts />} />
-          </Route>
-          
-          <Route
-            path="/connections"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Connections />} />
-          </Route>
-          
-          <Route
-            path="/ai-agents"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<AIAgents />} />
-          </Route>
-          
-          <Route
-            path="/ai-agents/:id/edit"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<AIAgentEdit />} />
-          </Route>
-          
-          <Route
-            path="/knowledge-base"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<KnowledgeBase />} />
-          </Route>
-          
-          <Route
-            path="/ai-voice"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<AIVoice />} />
-          </Route>
-          
-          {/* Legacy routes: redirect old calendar/agenda routes to agenda-pro */}
-          <Route path="/calendar" element={<Navigate to="/agenda-pro" replace />} />
-          <Route path="/agenda" element={<Navigate to="/agenda-pro" replace />} />
-          
-          <Route
-            path="/agenda-pro"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<AgendaPro />} />
-          </Route>
-          
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Profile />} />
-          </Route>
-          
-          <Route
-            path="/suporte"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Support />} />
-          </Route>
-          
-          <Route
-            path="/tutoriais"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-          <Route index element={<Tutorials />} />
-          </Route>
-          
-          <Route
-            path="/tarefas"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-          <Route index element={<Tasks />} />
-          </Route>
-          
-          <Route
-            path="/onboarding"
-            element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Onboarding />} />
-          </Route>
-          
-          {/* Redirect /admin to /settings for backwards compatibility */}
-          <Route path="/admin" element={<Navigate to="/settings" replace />} />
-          <Route path="/admin/*" element={<Navigate to="/settings" replace />} />
-          
-          
-          {/* Global Admin Routes - MiauChat SaaS Administration */}
-          <Route
-            path="/global-admin/auth"
-            element={
-              <AdminAuthProvider>
-                <GlobalAdminAuth />
-              </AdminAuthProvider>
-            }
-          />
-          
-          <Route
-            path="/global-admin"
-            element={
-              <AdminAuthProvider>
-                <GlobalAdminRoute>
-                  <GlobalAdminLayout />
-                </GlobalAdminRoute>
-              </AdminAuthProvider>
-            }
-          >
-            <Route index element={<GlobalAdminDashboard />} />
-            <Route path="companies" element={<GlobalAdminCompanies />} />
-            <Route path="connections" element={<GlobalAdminConnections />} />
-            <Route path="plans" element={<GlobalAdminPlans />} />
-            <Route path="payments" element={<GlobalAdminPayments />} />
-            <Route
-              path="users"
-              element={
-                <GlobalAdminRoute allowedRoles={["super_admin"]}>
-                  <GlobalAdminUsers />
-                </GlobalAdminRoute>
-              }
-            />
-            <Route path="monitoring" element={<GlobalAdminMonitoring />} />
-            <Route
-              path="settings"
-              element={
-                <GlobalAdminRoute allowedRoles={["super_admin"]}>
-                  <GlobalAdminSettings />
-                </GlobalAdminRoute>
-              }
-            />
-            <Route path="n8n-settings" element={<GlobalAdminN8NSettings />} />
-            <Route path="ai-apis" element={<GlobalAdminAIAPIs />} />
-            <Route path="audit-logs" element={<GlobalAdminAuditLogs />} />
-            <Route path="provisioning" element={<GlobalAdminProvisioningDashboard />} />
-            <Route path="alert-history" element={<GlobalAdminAlertHistory />} />
-            <Route 
-              path="template-base" 
-              element={
-                <GlobalAdminRoute allowedRoles={["super_admin"]}>
-                  <GlobalAdminTemplateBase />
-                </GlobalAdminRoute>
-              }
-            />
-            <Route path="agent-templates" element={<GlobalAdminAgentTemplates />} />
-            <Route path="tickets" element={<GlobalAdminTickets />} />
-            <Route path="tutorials" element={<GlobalAdminTutorials />} />
-            <Route path="onboarding" element={<GlobalAdminOnboarding />} />
-          </Route>
-          
-              {/* Catch-all route */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+              <Routes>
+                {/* Public routes */}
+                <Route path="/" element={<Index />} />
+                <Route path="/login" element={<Navigate to="/auth" replace />} />
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/auth/callback" element={<AuthCallback />} />
+                <Route path="/auth/meta-callback" element={<MetaAuthCallback />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/payment-success" element={<PaymentSuccess />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/change-password" element={<ChangePassword />} />
+                <Route path="/privacidade" element={<PrivacyPolicy />} />
+                <Route path="/termos" element={<TermsOfService />} />
+                <Route path="/agendar/:slug" element={<PublicBooking />} />
+                <Route path="/confirmar" element={<ConfirmAppointment />} />
+
+                {/* Protected routes — TenantProvider + RealtimeSyncProvider inside AppLayout */}
+                <Route path="/dashboard" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Dashboard />} />
+                </Route>
+                <Route path="/conversations" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Conversations />} />
+                </Route>
+                <Route path="/kanban" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Kanban />} />
+                </Route>
+                <Route path="/settings" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Settings />} />
+                </Route>
+                <Route path="/contacts" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Contacts />} />
+                </Route>
+                <Route path="/connections" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Connections />} />
+                </Route>
+                <Route path="/ai-agents" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<AIAgents />} />
+                </Route>
+                <Route path="/ai-agents/:id/edit" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<AIAgentEdit />} />
+                </Route>
+                <Route path="/knowledge-base" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<KnowledgeBase />} />
+                </Route>
+                <Route path="/ai-voice" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<AIVoice />} />
+                </Route>
+                <Route path="/calendar" element={<Navigate to="/agenda-pro" replace />} />
+                <Route path="/agenda" element={<Navigate to="/agenda-pro" replace />} />
+                <Route path="/agenda-pro" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<AgendaPro />} />
+                </Route>
+                <Route path="/profile" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Profile />} />
+                </Route>
+                <Route path="/suporte" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Support />} />
+                </Route>
+                <Route path="/tutoriais" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Tutorials />} />
+                </Route>
+                <Route path="/tarefas" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Tasks />} />
+                </Route>
+                <Route path="/onboarding" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+                  <Route index element={<Onboarding />} />
+                </Route>
+
+                {/* Redirect /admin to /settings */}
+                <Route path="/admin" element={<Navigate to="/settings" replace />} />
+                <Route path="/admin/*" element={<Navigate to="/settings" replace />} />
+
+                {/* Global Admin Routes — NO TenantProvider / RealtimeSyncProvider */}
+                <Route
+                  path="/global-admin/auth"
+                  element={<AdminAuthProvider><GlobalAdminAuth /></AdminAuthProvider>}
+                />
+                <Route
+                  path="/global-admin"
+                  element={
+                    <AdminAuthProvider>
+                      <GlobalAdminRoute>
+                        <GlobalAdminLayout />
+                      </GlobalAdminRoute>
+                    </AdminAuthProvider>
+                  }
+                >
+                  <Route index element={<GlobalAdminDashboard />} />
+                  <Route path="companies" element={<GlobalAdminCompanies />} />
+                  <Route path="connections" element={<GlobalAdminConnections />} />
+                  <Route path="plans" element={<GlobalAdminPlans />} />
+                  <Route path="payments" element={<GlobalAdminPayments />} />
+                  <Route path="users" element={<GlobalAdminRoute allowedRoles={["super_admin"]}><GlobalAdminUsers /></GlobalAdminRoute>} />
+                  <Route path="monitoring" element={<GlobalAdminMonitoring />} />
+                  <Route path="settings" element={<GlobalAdminRoute allowedRoles={["super_admin"]}><GlobalAdminSettings /></GlobalAdminRoute>} />
+                  <Route path="n8n-settings" element={<GlobalAdminN8NSettings />} />
+                  <Route path="ai-apis" element={<GlobalAdminAIAPIs />} />
+                  <Route path="audit-logs" element={<GlobalAdminAuditLogs />} />
+                  <Route path="provisioning" element={<GlobalAdminProvisioningDashboard />} />
+                  <Route path="alert-history" element={<GlobalAdminAlertHistory />} />
+                  <Route path="template-base" element={<GlobalAdminRoute allowedRoles={["super_admin"]}><GlobalAdminTemplateBase /></GlobalAdminRoute>} />
+                  <Route path="agent-templates" element={<GlobalAdminAgentTemplates />} />
+                  <Route path="tickets" element={<GlobalAdminTickets />} />
+                  <Route path="tutorials" element={<GlobalAdminTutorials />} />
+                  <Route path="onboarding" element={<GlobalAdminOnboarding />} />
+                </Route>
+
+                <Route path="*" element={<NotFound />} />
+              </Routes>
             </Suspense>
           </BrowserRouter>
         </TooltipProvider>
-      </RealtimeSyncProvider>
-    </TabSessionProvider>
-  </TenantProvider>
-  </AuthProvider>
-</QueryClientProvider>
+      </TabSessionProvider>
+    </AuthProvider>
+  </QueryClientProvider>
 );
 
 export default App;
