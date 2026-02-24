@@ -33,6 +33,18 @@ export interface SendMediaOptions {
   fileName?: string;
   caption?: string;
   mimeType?: string;
+  ptt?: boolean;  // For audio: send as push-to-talk voice note
+}
+
+export interface SendAudioOptions {
+  number: string;
+  audioBase64: string;
+  mimeType?: string;
+}
+
+export interface FetchProfilePictureResult {
+  profilePicUrl: string | null;
+  raw?: unknown;
 }
 
 export interface ConnectResult {
@@ -356,6 +368,84 @@ const EvolutionProvider = {
     return { qrCode, status: qrCode ? "awaiting_qr" : "disconnected", raw: data };
   },
 
+  async sendAudio(config: ProviderConfig, opts: SendAudioOptions): Promise<SendMediaResult> {
+    const apiUrl = normalizeUrl(config.apiUrl);
+
+    // Try sendWhatsAppAudio first (PTT voice note)
+    const res = await fetchWithTimeout(
+      `${apiUrl}/message/sendWhatsAppAudio/${config.instanceName}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: config.apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          number: opts.number,
+          audio: opts.audioBase64,
+          delay: 500,
+        }),
+      },
+      SEND_TIMEOUT_MS,
+    );
+
+    if (!res.ok) {
+      // Fallback to sendMedia
+      const fallbackRes = await fetchWithTimeout(
+        `${apiUrl}/message/sendMedia/${config.instanceName}`,
+        {
+          method: "POST",
+          headers: {
+            apikey: config.apiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            number: opts.number,
+            mediatype: "audio",
+            mimetype: opts.mimeType || "audio/ogg;codecs=opus",
+            fileName: "audio.ogg",
+            media: opts.audioBase64,
+          }),
+        },
+        SEND_TIMEOUT_MS,
+      );
+
+      if (!fallbackRes.ok) {
+        const text = await fallbackRes.text().catch(() => "");
+        throw new Error(`Evolution sendAudio failed (${fallbackRes.status}): ${text.slice(0, 300)}`);
+      }
+
+      const data = await fallbackRes.json().catch(() => ({}));
+      return { success: true, whatsappMessageId: data?.key?.id || data?.messageId || null, raw: data };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    return { success: true, whatsappMessageId: data?.key?.id || data?.messageId || null, raw: data };
+  },
+
+  async fetchProfilePicture(config: ProviderConfig, phoneNumber: string): Promise<FetchProfilePictureResult> {
+    const apiUrl = normalizeUrl(config.apiUrl);
+    const res = await fetchWithTimeout(
+      `${apiUrl}/chat/fetchProfilePictureUrl/${config.instanceName}`,
+      {
+        method: "POST",
+        headers: {
+          apikey: config.apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ number: phoneNumber }),
+      },
+    );
+
+    if (!res.ok) {
+      return { profilePicUrl: null };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const url = data?.profilePictureUrl || data?.picture || data?.url || data?.pictureUrl || data?.profilePicture || null;
+    return { profilePicUrl: typeof url === "string" && url.startsWith("http") ? url : null, raw: data };
+  },
+
   async deleteMessage(config: ProviderConfig, remoteJid: string, messageId: string, isFromMe: boolean): Promise<void> {
     const apiUrl = normalizeUrl(config.apiUrl);
     await fetchWithTimeout(
@@ -662,18 +752,48 @@ const UazapiProvider = {
       SEND_TIMEOUT_MS,
     ).catch(() => { /* best effort */ });
   },
+
+  async sendAudio(config: ProviderConfig, opts: SendAudioOptions): Promise<SendMediaResult> {
+    // uazapi uses the same /send/media endpoint for audio
+    return UazapiProvider.sendMedia(config, {
+      number: opts.number,
+      mediaType: 'audio',
+      mediaBase64: opts.audioBase64,
+      mimeType: opts.mimeType || 'audio/ogg',
+    });
+  },
+
+  async fetchProfilePicture(config: ProviderConfig, phoneNumber: string): Promise<FetchProfilePictureResult> {
+    const apiUrl = normalizeUrl(config.apiUrl);
+    const res = await fetchWithTimeout(
+      `${apiUrl}/contacts/profile-picture`,
+      {
+        method: "POST",
+        headers: {
+          token: config.apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ number: phoneNumber }),
+      },
+    );
+
+    if (!res.ok) {
+      return { profilePicUrl: null };
+    }
+
+    const data = await res.json().catch(() => ({}));
+    const url = data?.profilePictureUrl || data?.picture || data?.url || data?.imgUrl || null;
+    return { profilePicUrl: typeof url === "string" && url.startsWith("http") ? url : null, raw: data };
+  },
 };
 
 // ============================================================================
 // PUBLIC API - PROVIDER RESOLVER
 // ============================================================================
 
-export function getProviderConfig(instance: {
-  api_provider?: string;
-  api_url: string;
-  api_key: string | null;
-  instance_name: string;
-}): ProviderConfig {
+type InstanceRef = { api_provider?: string; api_url: string; api_key: string | null; instance_name: string };
+
+export function getProviderConfig(instance: InstanceRef): ProviderConfig {
   return {
     provider: (instance.api_provider || 'evolution') as ProviderType,
     apiUrl: instance.api_url,
@@ -690,10 +810,6 @@ export function isEvolution(instance: { api_provider?: string }): boolean {
   return !instance.api_provider || instance.api_provider === 'evolution';
 }
 
-/**
- * Get the provider implementation for an instance.
- * Returns the appropriate provider object based on api_provider field.
- */
 export function getProvider(config: ProviderConfig) {
   if (config.provider === 'uazapi') {
     return UazapiProvider;
@@ -701,123 +817,62 @@ export function getProvider(config: ProviderConfig) {
   return EvolutionProvider;
 }
 
-/**
- * High-level send text function that resolves the provider automatically.
- */
-export async function sendText(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-  opts: SendTextOptions,
-): Promise<SendTextResult> {
+export async function sendText(instance: InstanceRef, opts: SendTextOptions): Promise<SendTextResult> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.sendText(config, opts);
+  return getProvider(config).sendText(config, opts);
 }
 
-/**
- * High-level send media function that resolves the provider automatically.
- */
-export async function sendMedia(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-  opts: SendMediaOptions,
-): Promise<SendMediaResult> {
+export async function sendMedia(instance: InstanceRef, opts: SendMediaOptions): Promise<SendMediaResult> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.sendMedia(config, opts);
+  return getProvider(config).sendMedia(config, opts);
 }
 
-/**
- * High-level connect function that resolves the provider automatically.
- */
-export async function connectInstance(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-): Promise<ConnectResult> {
+export async function sendAudio(instance: InstanceRef, opts: SendAudioOptions): Promise<SendMediaResult> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.connect(config);
+  return getProvider(config).sendAudio(config, opts);
 }
 
-/**
- * High-level get status function that resolves the provider automatically.
- */
-export async function getInstanceStatus(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-): Promise<StatusResult> {
+export async function fetchProfilePicture(instance: InstanceRef, phoneNumber: string): Promise<FetchProfilePictureResult> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.getStatus(config);
+  return getProvider(config).fetchProfilePicture(config, phoneNumber);
 }
 
-/**
- * Configure webhook for an instance.
- */
-export async function configureWebhook(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-  webhookConfig: WebhookConfig,
-): Promise<void> {
+export async function connectInstance(instance: InstanceRef): Promise<ConnectResult> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.configureWebhook(config, webhookConfig);
+  return getProvider(config).connect(config);
 }
 
-/**
- * Disconnect an instance (logout without deleting).
- */
-export async function disconnectInstance(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-): Promise<void> {
+export async function getInstanceStatus(instance: InstanceRef): Promise<StatusResult> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.disconnect(config);
+  return getProvider(config).getStatus(config);
 }
 
-/**
- * Delete an instance from the WhatsApp provider.
- */
-export async function deleteProviderInstance(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-): Promise<void> {
+export async function configureWebhook(instance: InstanceRef, webhookConfig: WebhookConfig): Promise<void> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.deleteInstance(config);
+  return getProvider(config).configureWebhook(config, webhookConfig);
 }
 
-/**
- * Create a new instance on the WhatsApp provider.
- */
-export async function createProviderInstance(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-  webhookUrl: string,
-): Promise<ConnectResult> {
+export async function disconnectInstance(instance: InstanceRef): Promise<void> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.createInstance(config, webhookUrl);
+  return getProvider(config).disconnect(config);
 }
 
-/**
- * Delete a message for everyone.
- */
-export async function deleteMessage(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-  remoteJid: string,
-  messageId: string,
-  isFromMe: boolean,
-): Promise<void> {
+export async function deleteProviderInstance(instance: InstanceRef): Promise<void> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.deleteMessage(config, remoteJid, messageId, isFromMe);
+  return getProvider(config).deleteInstance(config);
 }
 
-/**
- * Send emoji reaction to a message.
- */
-export async function sendReaction(
-  instance: { api_provider?: string; api_url: string; api_key: string | null; instance_name: string },
-  remoteJid: string,
-  messageId: string,
-  reaction: string,
-  isFromMe: boolean,
-): Promise<void> {
+export async function createProviderInstance(instance: InstanceRef, webhookUrl: string): Promise<ConnectResult> {
   const config = getProviderConfig(instance);
-  const provider = getProvider(config);
-  return provider.sendReaction(config, remoteJid, messageId, reaction, isFromMe);
+  return getProvider(config).createInstance(config, webhookUrl);
+}
+
+export async function deleteMessage(instance: InstanceRef, remoteJid: string, messageId: string, isFromMe: boolean): Promise<void> {
+  const config = getProviderConfig(instance);
+  return getProvider(config).deleteMessage(config, remoteJid, messageId, isFromMe);
+}
+
+export async function sendReaction(instance: InstanceRef, remoteJid: string, messageId: string, reaction: string, isFromMe: boolean): Promise<void> {
+  const config = getProviderConfig(instance);
+  return getProvider(config).sendReaction(config, remoteJid, messageId, reaction, isFromMe);
 }
