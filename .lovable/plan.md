@@ -1,189 +1,156 @@
 
 
-# Tornar uazapi 100% funcional -- substituir todas as dependencias do Evolution API
+# Corrigir recebimento de midias do WhatsApp -- Diagnostico real dos logs de producao
 
-## Diagnostico
+## Problema confirmado pelos logs
 
-Analisei todo o sistema e identifiquei que **2 Edge Functions criticas** ainda operam exclusivamente com endpoints da Evolution API, sem nenhum tratamento para instancias uazapi:
+Os logs de producao mostram **dois bugs criticos** que impedem o funcionamento de midias:
 
-### 1. `auto-reconnect-instances/index.ts` (800 linhas)
+### Bug 1: `detectMessageType` retorna "text" para todas as midias
 
-**Problemas:**
-- Usa `esm.sh` para importar supabase-js (proibido -- causa erros 401/522)
-- Funcoes `checkConnectionState()`, `attemptConnect()`, `deleteAndRecreateInstance()`, `forceLogout()` chamam diretamente endpoints da Evolution API (`/instance/fetchInstances`, `/instance/connectionState`, `/instance/connect`, `/instance/logout`, `/instance/delete`, `/instance/create`) com header `apikey`
-- Nao verifica `api_provider` -- instancias uazapi recebem chamadas Evolution que falham silenciosamente
-- A instancia uazapi `inst_xcehi4b8` esta marcada como "connected" sem `phone_number`, e o auto-reconnect nao consegue verificar se realmente esta conectada
+O uazapi envia `msg.type = "media"` (generico) para TODOS os tipos de midia, nao PascalCase como "DocumentMessage". A funcao `detectMessageType` nao reconhece "media" e retorna "text":
 
-**Correcoes:**
-- Trocar import para `npm:@supabase/supabase-js@2`
-- Adicionar filtro `api_provider` na query inicial: processar apenas instancias `evolution` OU criar branch uazapi
-- Para instancias uazapi: usar `GET /instance/status` com header `token` (em vez de `apikey`) para verificar estado
-- Para reconexao uazapi: usar `POST /instance/connect` com header `token`
-- Nao tentar `deleteAndRecreateInstance` para uazapi (fluxo diferente: `init` + `connect`)
-- Ignorar ghost session detection para uazapi (nao tem o conceito de fetchInstances vs connectionState)
+```text
+Logs de producao:
+Message: text from 556384622450 { mimeType: "application/pdf", msgType: "media" }
+Message: text from 556384622450 { mimeType: "image/jpeg", msgType: "media" }
+Message: text from 556384622450 { mimeType: "audio/ogg; codecs=opus", msgType: "media" }
+Message: text from 556384622450 { mimeType: "image/webp", msgType: "media" }
+```
 
-### 2. `sync-evolution-instances/index.ts` (580 linhas)
+Todas as midias ficam com `message_type = "text"` no banco.
 
-**Problemas:**
-- Usa `esm.sh` para importar supabase-js
-- `fetchEvolutionInstances()` chama `GET /instance/fetchInstances` com header `apikey` -- endpoint que nao existe no uazapi
-- `fetchInstanceDetails()` chama endpoints Evolution para buscar numero de telefone
-- Filtra instancias DB por `api_url` para fazer match com conexoes Evolution -- nao considera uazapi
-- Atualiza status de instancias uazapi baseado em respostas de endpoints Evolution (que falham)
+### Bug 2: Midias nunca sao persistidas no Storage
 
-**Correcoes:**
-- Trocar import para `npm:@supabase/supabase-js@2`
-- Adicionar filtro para processar apenas instancias com `api_provider = 'evolution'` (ou null)
-- Instancias uazapi nao precisam de sync via `evolution_api_connections` -- elas usam credenciais individuais
+O codigo na linha 641 faz: `if (rawBase64 && !mediaUrl)` -- so persiste quando ha base64 E nao ha URL. O uazapi envia `mediaUrl` (URL do CDN do WhatsApp) mas **sem base64** (`hasBase64: false` em todos os logs). Resultado: a URL do CDN do WhatsApp e salva diretamente no banco, mas essas URLs expiram em poucas horas. Depois disso, a plataforma mostra "Imagem nao disponivel" / "Audio nao disponivel".
 
-### 3. `whatsapp-provider.ts` -- Correcoes pendentes
+Banco de dados confirma -- todas as `media_url` apontam para `mmg.whatsapp.net`:
+```text
+media_url: https://mmg.whatsapp.net/o1/v/t24/f2/m238/...  (EXPIRADA)
+media_url: https://mmg.whatsapp.net/v/t62.7119-24/...      (EXPIRADA)
+```
 
-O arquivo `_shared/whatsapp-provider.ts` esta exportando `sendContact` e `deleteMessage` mas faltam metodos:
-- `archiveChat`: uazapi tem endpoint `POST /chat/archive` conforme docs. Deve ser adicionado ao UazapiProvider.
-- `sendContact` no EvolutionProvider: esta ausente (nao tem implementacao, se chamado lanca erro)
-
-### 4. `evolution-api/index.ts` -- Actions globais sem uazapi
-
-As actions `global_configure_webhook`, `global_get_status`, `global_create_instance`, `global_recreate_instance`, `global_delete_instance`, `global_logout_instance` usam `EVOLUTION_BASE_URL` e `EVOLUTION_GLOBAL_API_KEY` como credenciais fixas. Estas actions precisam de branch uazapi que busque as credenciais de `system_settings`.
+Nenhuma midia foi persistida no Storage.
 
 ---
 
-## Plano de implementacao
+## Solucao
 
-### Arquivo 1: `supabase/functions/auto-reconnect-instances/index.ts`
+### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
 
-1. **Linha 2**: Trocar `import { createClient } from "https://esm.sh/@supabase/supabase-js@2"` para `import { createClient } from "npm:@supabase/supabase-js@2"`
+#### Correcao 1 -- `detectMessageType`: tratar `type: "media"` inferindo do mimeType
 
-2. **Linha 471-476**: Na query de instancias, adicionar campo `api_provider`:
+Quando `msg.type = "media"`, usar o mimeType extraido para determinar o tipo real:
+
 ```typescript
-.select("id, instance_name, status, api_url, api_key, api_provider, law_firm_id, ...")
+function detectMessageType(msg: any): string {
+  const t = (msg.type || "").toLowerCase();
+  
+  // uazapi sends generic "media" type - infer from mimeType
+  if (t === "media") {
+    const mime = extractMimeType(msg) || "";
+    const mLower = mime.toLowerCase();
+    if (mLower.startsWith("image/webp")) return "sticker";
+    if (mLower.startsWith("image/")) return "image";
+    if (mLower.startsWith("video/")) return "video";
+    if (mLower.startsWith("audio/")) return "audio";
+    return "document"; // PDFs, DOCX, etc.
+  }
+  
+  // PascalCase types (keep existing)
+  if (t === "image" || t === "imagemessage" || msg.imageMessage) return "image";
+  if (t === "video" || t === "videomessage" || msg.videoMessage) return "video";
+  if (t === "audio" || t === "audiomessage" || t === "ptt" || t === "pttmessage" || ...) return "audio";
+  if (t === "document" || t === "documentmessage" || msg.documentMessage) return "document";
+  if (t === "sticker" || t === "stickermessage" || msg.stickerMessage) return "sticker";
+  if (t === "location" || t === "locationmessage" || ...) return "location";
+  if (t === "contact" || t === "contactmessage" || ...) return "contact";
+  if (t === "extendedtextmessage") return "text";
+  return "text";
+}
 ```
 
-3. **Criar funcao `checkConnectionStateUazapi()`** para verificar status via `GET /instance/status` com header `token`:
+#### Correcao 2 -- Baixar midia da URL do WhatsApp e persistir no Storage
+
+Apos o bloco de base64 (linha 641-683), adicionar um bloco que baixa a midia da URL quando base64 nao esta disponivel:
+
 ```typescript
-async function checkConnectionStateUazapi(instance: InstanceToReconnect): Promise<{
-  isConnected: boolean;
-  state: string;
-  ghostSession: boolean;
-}> {
-  const apiUrl = normalizeUrl(instance.api_url);
+// EXISTING: if (rawBase64 && !mediaUrl) { ... persist base64 ... }
+
+// NEW: Download from WhatsApp CDN URL when no base64
+const currentMediaUrl = messagePayload.media_url as string | null;
+if (currentMediaUrl && 
+    !currentMediaUrl.includes("supabase") && 
+    messageType !== "text") {
   try {
-    const res = await fetchWithTimeout(`${apiUrl}/instance/status`, {
-      method: "GET",
-      headers: { token: instance.api_key, "Content-Type": "application/json" },
-    }, 10000);
-    if (!res.ok) return { isConnected: false, state: "error", ghostSession: false };
-    const data = await res.json().catch(() => ({}));
-    const state = data?.status || data?.state || "unknown";
-    const isConnected = state === "connected" || state === "open";
-    return { isConnected, state, ghostSession: false };
-  } catch {
-    return { isConnected: false, state: "error", ghostSession: false };
+    console.log("[UAZAPI_WEBHOOK] Downloading media from CDN URL:", currentMediaUrl.slice(0, 100));
+    const response = await fetch(currentMediaUrl);
+    if (response.ok) {
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if (bytes.length > 100) { // Valid file
+        const baseMime = (mimeType || "").split(";")[0].trim().toLowerCase();
+        const ext = extMap[baseMime] || extMap[mimeType || ""] || ".bin";
+        const storagePath = `${lawFirmId}/${conversationId}/${whatsappMessageId}${ext}`;
+        
+        const { error: uploadError } = await supabaseClient.storage
+          .from("chat-media")
+          .upload(storagePath, bytes, {
+            contentType: baseMime || "application/octet-stream",
+            upsert: true,
+          });
+        
+        if (!uploadError) {
+          const { data: publicUrlData } = supabaseClient.storage
+            .from("chat-media")
+            .getPublicUrl(storagePath);
+          if (publicUrlData?.publicUrl) {
+            messagePayload.media_url = publicUrlData.publicUrl;
+            console.log("[UAZAPI_WEBHOOK] Media downloaded and persisted:", storagePath);
+          }
+        }
+      }
+    }
+  } catch (dlErr) {
+    console.warn("[UAZAPI_WEBHOOK] CDN download failed (will use original URL):", dlErr);
   }
 }
 ```
 
-4. **Criar funcao `attemptConnectUazapi()`** para reconexao via `POST /instance/connect`:
+#### Correcao 3 -- Mover `extMap` para escopo acessivel
+
+O `extMap` atualmente esta dentro do bloco `if (rawBase64 && !mediaUrl)`. Precisa ser movido para antes dos dois blocos (base64 e download) para ser reutilizado.
+
+#### Correcao 4 -- Usar `chat.wa_lastMessageType` como fallback para tipo
+
+O payload do uazapi inclui `body.chat.wa_lastMessageType` com o tipo correto em PascalCase (ex: "DocumentMessage", "ImageMessage"). Usar como fallback quando `msg.type = "media"`:
+
 ```typescript
-async function attemptConnectUazapi(instance: InstanceToReconnect): Promise<ReconnectResult> {
-  const apiUrl = normalizeUrl(instance.api_url);
-  try {
-    const res = await fetchWithTimeout(`${apiUrl}/instance/connect`, {
-      method: "POST",
-      headers: { token: instance.api_key, "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    }, 15000);
-    if (!res.ok) return { instance_id: instance.id, instance_name: instance.instance_name, success: false, action: "connect", message: `Connect failed (${res.status})` };
-    const data = await res.json().catch(() => ({}));
-    const state = data?.status || data?.state || "unknown";
-    const qrcode = data?.qrcode || data?.base64 || null;
-    if (state === "connected" || state === "open") {
-      return { instance_id: instance.id, instance_name: instance.instance_name, success: true, action: "connect", message: "Instance reconnected automatically" };
-    }
-    if (qrcode) {
-      return { instance_id: instance.id, instance_name: instance.instance_name, success: false, action: "connect", message: "QR code scan required", qrcode, needs_qr: true };
-    }
-    return { instance_id: instance.id, instance_name: instance.instance_name, success: true, action: "connect", message: `Connection initiated (${state})` };
-  } catch (e: any) {
-    return { instance_id: instance.id, instance_name: instance.instance_name, success: false, action: "connect", message: e.message };
+// Na funcao detectMessageType, aceitar segundo parametro opcional:
+function detectMessageType(msg: any, chat?: any): string {
+  let t = (msg.type || "").toLowerCase();
+  
+  // uazapi sends "media" as generic type - try chat.wa_lastMessageType first
+  if (t === "media" && chat?.wa_lastMessageType) {
+    t = chat.wa_lastMessageType.toLowerCase();
   }
-}
+  // ... rest of function
 ```
-
-5. **No loop principal (linhas 599-741)**: Adicionar branch por `api_provider`:
-```typescript
-const isUazapiInstance = (instance as any).api_provider === "uazapi";
-
-// STEP 1: Check connection
-const connectionCheck = isUazapiInstance 
-  ? await checkConnectionStateUazapi(instance)
-  : await checkConnectionState(instance);
-
-// STEP 3: Attempt reconnect
-const result = isUazapiInstance
-  ? await attemptConnectUazapi(instance)
-  : await attemptConnect(instance);
-```
-
-6. **Pular ghost session detection e `deleteAndRecreateInstance` para uazapi** -- nao se aplica.
-
-### Arquivo 2: `supabase/functions/sync-evolution-instances/index.ts`
-
-1. **Linha 2**: Trocar `import { createClient } from "https://esm.sh/@supabase/supabase-js@2"` para `import { createClient } from "npm:@supabase/supabase-js@2"`
-
-2. **Linha 353-358**: Na query de `whatsapp_instances`, filtrar apenas Evolution:
-```typescript
-const { data: dbInstances } = await supabaseAdmin
-  .from("whatsapp_instances")
-  .select("*")
-  .or("api_provider.eq.evolution,api_provider.is.null"); // Apenas Evolution
-```
-
-Isso impede que instancias uazapi sejam marcadas como "stale" (nao encontradas no Evolution) ou tenham seus status sobrescritos.
-
-### Arquivo 3: `supabase/functions/_shared/whatsapp-provider.ts`
-
-Adicionar `archiveChat` ao UazapiProvider (conforme docs `/chat/archive`):
-```typescript
-async archiveChat(config: ProviderConfig, chatId: string, archive: boolean): Promise<void> {
-  const apiUrl = normalizeUrl(config.apiUrl);
-  await fetchWithTimeout(`${apiUrl}/chat/archive`, {
-    method: "POST",
-    headers: { token: config.apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ chatId, archive }),
-  });
-}
-```
-
-Adicionar `sendContact` ao EvolutionProvider (stub que nao faz nada ou adapta para o formato Evolution):
-```typescript
-async sendContact(_config: ProviderConfig, _opts: SendContactOptions): Promise<SendTextResult> {
-  console.warn("[EvolutionProvider] sendContact not implemented");
-  return { success: false, whatsappMessageId: undefined };
-}
-```
-
-### Arquivo 4: `supabase/functions/evolution-api/index.ts`
-
-Nas actions `global_configure_webhook` e `global_get_status` (linhas ~4100+):
-- Para instancias com `api_provider = 'uazapi'`: usar `system_settings` para buscar credenciais e chamar endpoints uazapi
-- Para instancias com `api_provider = 'evolution'` ou null: manter logica atual
 
 ---
 
 ## Resumo de mudancas
 
-| Arquivo | Mudanca | Impacto |
-|---|---|---|
-| `auto-reconnect-instances/index.ts` | Import npm, branch uazapi para check/reconnect | **CRITICO** -- impede chamadas Evolution em instancias uazapi |
-| `sync-evolution-instances/index.ts` | Import npm, filtrar apenas instancias Evolution | **CRITICO** -- impede marcacao incorreta como "stale" |
-| `_shared/whatsapp-provider.ts` | Adicionar `archiveChat`, `sendContact` no EvolutionProvider | Funcionalidade completa |
-| `evolution-api/index.ts` | Branch uazapi nas actions globais | Admin pode gerenciar instancias uazapi |
+| Mudanca | Impacto |
+|---|---|
+| `detectMessageType`: tratar `type: "media"` via mimeType + `wa_lastMessageType` | Imagens, audios, PDFs e figurinhas classificados corretamente |
+| Download de midia da URL do CDN do WhatsApp | Midias persistidas no Storage com URL permanente |
+| Mover `extMap` para escopo compartilhado | Base64 e download usam o mesmo mapeamento de extensoes |
 
 ## Resultado esperado
 
-- Auto-reconnect funciona para instancias uazapi (verifica status e reconecta usando os endpoints corretos)
-- Sync nao marca instancias uazapi como "not_found_in_evolution"
-- Arquivamento de chat disponivel via uazapi
-- Erros 401/522 eliminados nas Edge Functions corrigidas (import npm)
+- Imagens aparecerao na conversa (persistidas no Storage)
+- Audios serao reproduziveis (URL permanente em vez de CDN expirado)
+- PDFs e documentos serao visualizaveis e baixaveis
+- Figurinhas (.webp) serao exibidas corretamente
+- Fotos de perfil continuam sendo capturadas do `chat.imagePreview`
 
