@@ -11,24 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 
 interface NewInstanceDialogProps {
   open: boolean;
   onClose: () => void;
-  onCreate: (displayName: string, instanceName: string, provider?: string, uazapiUrl?: string, uazapiToken?: string) => Promise<void>;
+  onCreate: (displayName: string, instanceName: string) => Promise<void>;
   isCreating: boolean;
 }
 
-// Generate a short random string for instance name
 function generateInstanceId(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let result = '';
@@ -45,19 +36,14 @@ export function NewInstanceDialog({
   isCreating,
 }: NewInstanceDialogProps) {
   const [displayName, setDisplayName] = useState("");
-  const [provider, setProvider] = useState<"evolution" | "uazapi">("evolution");
-  const [uazapiSubdomain, setUazapiSubdomain] = useState("");
-  const [uazapiToken, setUazapiToken] = useState("");
   const { toast } = useToast();
 
-  // Generate a unique instance name when dialog opens
   const instanceName = useMemo(() => {
     return `inst_${generateInstanceId()}`;
   }, [open]);
 
   const handleCreate = async () => {
     const name = displayName.trim();
-    
     if (!name) {
       toast({
         title: "Nome obrigatório",
@@ -66,48 +52,14 @@ export function NewInstanceDialog({
       });
       return;
     }
-
-    if (provider === "uazapi") {
-      if (!uazapiSubdomain.trim()) {
-        toast({
-          title: "Subdomínio obrigatório",
-          description: "Informe o subdomínio da sua instância uazapi",
-          variant: "destructive",
-        });
-        return;
-      }
-      if (!uazapiToken.trim()) {
-        toast({
-          title: "Token obrigatório",
-          description: "Informe o token da sua instância uazapi",
-          variant: "destructive",
-        });
-        return;
-      }
-      const uazapiUrl = `https://${uazapiSubdomain.trim()}.uazapi.com`;
-      await onCreate(name, instanceName, "uazapi", uazapiUrl, uazapiToken.trim());
-    } else {
-      await onCreate(name, instanceName);
-    }
-    resetForm();
-  };
-
-  const resetForm = () => {
+    await onCreate(name, instanceName);
     setDisplayName("");
-    setProvider("evolution");
-    setUazapiSubdomain("");
-    setUazapiToken("");
   };
 
   const handleClose = () => {
-    resetForm();
+    setDisplayName("");
     onClose();
   };
-
-  const isValid = displayName.trim() && (
-    provider === "evolution" || 
-    (provider === "uazapi" && uazapiSubdomain.trim() && uazapiToken.trim())
-  );
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -133,75 +85,13 @@ export function NewInstanceDialog({
               Este nome será exibido para identificar a conexão
             </p>
           </div>
-
-          <div className="space-y-2">
-            <Label>Provedor</Label>
-            <Select 
-              value={provider} 
-              onValueChange={(v) => setProvider(v as "evolution" | "uazapi")}
-              disabled={isCreating}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="evolution">
-                  <div className="flex items-center gap-2">
-                    Evolution API
-                    <Badge variant="outline" className="text-xs">Padrão</Badge>
-                  </div>
-                </SelectItem>
-                <SelectItem value="uazapi">
-                  <div className="flex items-center gap-2">
-                    uazapi
-                    <Badge variant="outline" className="text-xs bg-emerald-500/10 text-emerald-600 border-emerald-500/30">SaaS</Badge>
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {provider === "uazapi" && (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="uazapi-subdomain">Subdomínio uazapi</Label>
-                <div className="flex items-center gap-1">
-                  <span className="text-sm text-muted-foreground">https://</span>
-                  <Input
-                    id="uazapi-subdomain"
-                    value={uazapiSubdomain}
-                    onChange={(e) => setUazapiSubdomain(e.target.value.replace(/[^a-zA-Z0-9-]/g, ""))}
-                    placeholder="minha-instancia"
-                    disabled={isCreating}
-                    className="flex-1"
-                  />
-                  <span className="text-sm text-muted-foreground">.uazapi.com</span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="uazapi-token">Token</Label>
-                <Input
-                  id="uazapi-token"
-                  type="password"
-                  value={uazapiToken}
-                  onChange={(e) => setUazapiToken(e.target.value)}
-                  placeholder="Token da instância uazapi"
-                  disabled={isCreating}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Encontre o token no painel admin da uazapi
-                </p>
-              </div>
-            </>
-          )}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose} disabled={isCreating}>
             Cancelar
           </Button>
-          <Button onClick={handleCreate} disabled={isCreating || !isValid}>
+          <Button onClick={handleCreate} disabled={isCreating || !displayName.trim()}>
             {isCreating ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />

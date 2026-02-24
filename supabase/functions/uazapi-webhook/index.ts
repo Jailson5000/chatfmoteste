@@ -20,12 +20,12 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, token",
 };
 
-// Webhook token for security validation
-const UAZAPI_WEBHOOK_TOKEN = Deno.env.get("UAZAPI_WEBHOOK_TOKEN");
+// Webhook token for security validation — uses the same secret as evolution-api webhook URL builder
+const UAZAPI_WEBHOOK_TOKEN = Deno.env.get("EVOLUTION_WEBHOOK_TOKEN");
 
 function validateWebhookToken(req: Request): Response | null {
   if (!UAZAPI_WEBHOOK_TOKEN) {
-    console.error("[UAZAPI_WEBHOOK] ❌ UAZAPI_WEBHOOK_TOKEN not configured");
+    console.error("[UAZAPI_WEBHOOK] ❌ EVOLUTION_WEBHOOK_TOKEN not configured");
     return new Response(
       JSON.stringify({ error: "Webhook authentication not configured" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
