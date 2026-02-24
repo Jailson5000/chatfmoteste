@@ -10,7 +10,16 @@ import {
   getProviderConfig,
   getProvider,
   isUazapi,
+  isEvolution,
+  sendText as providerSendText,
+  sendMedia as providerSendMedia,
+  sendAudio as providerSendAudio,
+  fetchProfilePicture as providerFetchProfilePicture,
+  deleteMessage as providerDeleteMessage,
+  sendReaction as providerSendReaction,
   type ProviderConfig,
+  type SendTextResult,
+  type SendMediaResult,
 } from "../_shared/whatsapp-provider.ts";
 
 // Production CORS configuration
@@ -2800,161 +2809,87 @@ serve(async (req) => {
               // 1. Send text before (if any)
               if (textBefore) {
                 console.log(`[Evolution API] Sending text before media: "${textBefore.substring(0, 50)}..."`);
-                const beforePayload: Record<string, unknown> = { number: targetNumber, text: textBefore };
-                if (replyToWhatsAppMessageId) {
-                  beforePayload.quoted = { key: { id: replyToWhatsAppMessageId } };
-                }
-                const beforeRes = await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
-                  method: "POST",
-                  headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-                  body: JSON.stringify(beforePayload),
+                await providerSendText(instance, {
+                  number: targetNumber,
+                  text: textBefore,
+                  quotedMessageId: replyToWhatsAppMessageId || undefined,
                 });
-                console.log(`[Evolution API] Text before sent, status: ${beforeRes.status}`);
               }
               
-              // 2. Send the media using correct endpoint/payload for each type
-              let mediaEndpoint = "";
-              let mediaPayload: Record<string, unknown> = { number: targetNumber };
-              
-              // Detect mimetype from URL extension when possible
+              // 2. Send the media via provider abstraction
               const urlLower = mediaUrl.toLowerCase();
+              let mediaMime = "application/octet-stream";
+              let mediaFileName: string | undefined;
               
               switch (mediaTypeRaw) {
-                case 'IMAGE': {
-                  mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-                  let imageMime = "image/jpeg";
-                  if (urlLower.includes(".png")) imageMime = "image/png";
-                  else if (urlLower.includes(".gif")) imageMime = "image/gif";
-                  else if (urlLower.includes(".webp")) imageMime = "image/webp";
-                  mediaPayload = { ...mediaPayload, mediatype: "image", mimetype: imageMime, caption, media: mediaUrl };
+                case 'IMAGE':
+                  mediaMime = urlLower.includes(".png") ? "image/png" : urlLower.includes(".gif") ? "image/gif" : urlLower.includes(".webp") ? "image/webp" : "image/jpeg";
                   break;
-                }
-                case 'VIDEO': {
-                  mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-                  let videoMime = "video/mp4";
-                  if (urlLower.includes(".webm")) videoMime = "video/webm";
-                  else if (urlLower.includes(".mov")) videoMime = "video/quicktime";
-                  mediaPayload = { ...mediaPayload, mediatype: "video", mimetype: videoMime, caption, media: mediaUrl };
+                case 'VIDEO':
+                  mediaMime = urlLower.includes(".webm") ? "video/webm" : urlLower.includes(".mov") ? "video/quicktime" : "video/mp4";
                   break;
-                }
-                case 'AUDIO': {
-                  // Use sendMedia with mediatype audio for better format compatibility
-                  mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-                  const audioMime = urlLower.includes('.ogg') ? 'audio/ogg' : urlLower.includes('.mp3') ? 'audio/mpeg' : 'audio/ogg';
-                  mediaPayload = { ...mediaPayload, mediatype: "audio", mimetype: audioMime, media: mediaUrl };
+                case 'AUDIO':
+                  mediaMime = urlLower.includes('.ogg') ? 'audio/ogg' : urlLower.includes('.mp3') ? 'audio/mpeg' : 'audio/ogg';
                   break;
-                }
                 case 'DOCUMENT': {
-                  mediaEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-                  // Extract filename from URL
                   const urlPath = mediaUrl.split('?')[0];
-                  const fileName = decodeURIComponent(urlPath.split('/').pop() || 'documento');
-                  // Try to detect mime from extension
-                  let docMime = "application/octet-stream";
-                  if (urlLower.includes(".pdf")) docMime = "application/pdf";
-                  else if (urlLower.includes(".doc")) docMime = "application/msword";
-                  else if (urlLower.includes(".docx")) docMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-                  else if (urlLower.includes(".xls")) docMime = "application/vnd.ms-excel";
-                  else if (urlLower.includes(".xlsx")) docMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-                  mediaPayload = { ...mediaPayload, mediatype: "document", mimetype: docMime, fileName, caption, media: mediaUrl };
+                  mediaFileName = decodeURIComponent(urlPath.split('/').pop() || 'documento');
+                  if (urlLower.includes(".pdf")) mediaMime = "application/pdf";
+                  else if (urlLower.includes(".docx")) mediaMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                  else if (urlLower.includes(".doc")) mediaMime = "application/msword";
+                  else if (urlLower.includes(".xlsx")) mediaMime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                  else if (urlLower.includes(".xls")) mediaMime = "application/vnd.ms-excel";
                   break;
                 }
               }
               
-              console.log(`[Evolution API] Sending ${mediaTypeRaw} to endpoint: ${mediaEndpoint}`);
+              console.log(`[Evolution API] Sending ${mediaTypeRaw} via provider`);
               
-              const mediaResponse = await fetch(mediaEndpoint, {
-                method: "POST",
-                headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-                body: JSON.stringify(mediaPayload),
-              });
-              
-              const mediaResponseText = await mediaResponse.text();
-              console.log(`[Evolution API] Media response status: ${mediaResponse.status}, body: ${mediaResponseText.substring(0, 200)}`);
-              
-              if (!mediaResponse.ok) {
-                console.error(`[Evolution API] Media send failed:`, mediaResponseText);
-                
-                // Check for Connection Closed - retry once after 3s
-                let mediaIsConnectionClosed = false;
-                try {
-                  const mediaErrJson = JSON.parse(mediaResponseText);
-                  const mediaErrMsgs = mediaErrJson?.response?.message || mediaErrJson?.message || [];
-                  const mediaErrArray = Array.isArray(mediaErrMsgs) ? mediaErrMsgs : [mediaErrMsgs];
-                  mediaIsConnectionClosed = mediaErrArray.some(
-                    (m: unknown) => typeof m === 'string' && m.includes('Connection Closed')
-                  );
-                } catch { /* ignore parse errors */ }
-
-                if (mediaIsConnectionClosed && instanceId) {
-                  // Force logout to invalidate stale Evolution session cache.
-                  // Without this, fetchInstances keeps reporting "open" even though
-                  // the Baileys socket is dead, causing an infinite reconnect loop.
-                  console.warn(`[Evolution API] Media Connection Closed for ${instanceId} - forcing logout then marking disconnected`);
-                  
-                  try {
-                    const logoutRes = await fetchWithTimeout(
-                      `${apiUrl}/instance/logout/${instance.instance_name}`,
-                      { method: "DELETE", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } },
-                      10000
-                    );
-                    console.log(`[Evolution API] Logout response for ${instance.instance_name}: ${logoutRes.status}`);
-                  } catch (logoutErr: any) {
-                    console.warn(`[Evolution API] Logout failed (non-blocking): ${logoutErr?.message}`);
-                  }
-                  
-                  await supabaseClient.from("whatsapp_instances")
-                    .update({ 
-                      status: 'disconnected', 
-                      disconnected_since: new Date().toISOString(),
-                      updated_at: new Date().toISOString() 
-                    })
-                    .eq("id", instanceId);
-                }
-
-                if (conversationId) {
-                  await supabaseClient
-                    .from("messages")
-                    .update({ status: "failed", content: `❌ ${mediaIsConnectionClosed ? 'Conexão temporariamente indisponível' : 'Falha ao enviar mídia'}: ${caption || mediaTypeRaw}` })
-                    .eq("id", tempMessageId);
-                }
-                return;
-              }
-              
-              let mediaData;
               try {
-                mediaData = JSON.parse(mediaResponseText);
-              } catch {
-                mediaData = {};
-              }
-              const whatsappMessageId = mediaData.key?.id || mediaData.messageId || mediaData.id || crypto.randomUUID();
-              console.log(`[Evolution API] Media sent successfully, whatsapp_message_id: ${whatsappMessageId}`);
-              
-              // Update the message with correct type, media_url and whatsapp_message_id
-              if (conversationId) {
-                const updateResult = await supabaseClient
-                  .from("messages")
-                  .update({ 
+                const mediaResult = await providerSendMedia(instance, {
+                  number: targetNumber,
+                  mediaType: mediaTypeRaw.toLowerCase() as 'image' | 'video' | 'audio' | 'document',
+                  mediaUrl: mediaUrl,
+                  caption: caption,
+                  mimeType: mediaMime,
+                  fileName: mediaFileName,
+                });
+                
+                const whatsappMessageId = mediaResult.whatsappMessageId || crypto.randomUUID();
+                console.log(`[Evolution API] Media sent successfully, whatsapp_message_id: ${whatsappMessageId}`);
+                
+                if (conversationId) {
+                  await supabaseClient.from("messages").update({ 
                     whatsapp_message_id: whatsappMessageId,
                     status: "sent",
                     message_type: mediaTypeRaw.toLowerCase() as "image" | "video" | "audio" | "document",
                     content: caption || `[${mediaTypeRaw}]`,
                     media_url: mediaUrl,
-                  })
-                  .eq("id", tempMessageId);
-                  
-                console.log(`[Evolution API] Message updated to ${mediaTypeRaw.toLowerCase()}, error:`, updateResult.error);
+                  }).eq("id", tempMessageId);
+                }
+              } catch (mediaErr: any) {
+                console.error(`[Evolution API] Media send failed:`, mediaErr?.message);
+                
+                // Connection Closed detection (Evolution-only)
+                if (isEvolution(instance) && mediaErr?.message?.includes('Connection Closed') && instanceId) {
+                  console.warn(`[Evolution API] Connection Closed for ${instanceId} - marking disconnected`);
+                  await supabaseClient.from("whatsapp_instances")
+                    .update({ status: 'disconnected', disconnected_since: new Date().toISOString(), updated_at: new Date().toISOString() })
+                    .eq("id", instanceId);
+                }
+
+                if (conversationId) {
+                  await supabaseClient.from("messages")
+                    .update({ status: "failed", content: `❌ Falha ao enviar mídia: ${caption || mediaTypeRaw}` })
+                    .eq("id", tempMessageId);
+                }
+                return;
               }
               
               // 3. Send remaining text after media (if any)
               if (remainingText) {
                 console.log(`[Evolution API] Sending remaining text: "${remainingText.substring(0, 50)}..."`);
-                const afterPayload: Record<string, unknown> = { number: targetNumber, text: remainingText };
-                await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
-                  method: "POST",
-                  headers: { apikey: instance.api_key || "", "Content-Type": "application/json" },
-                  body: JSON.stringify(afterPayload),
-                });
+                await providerSendText(instance, { number: targetNumber, text: remainingText }).catch(() => {});
               }
               
               return; // Done - media template was handled
@@ -2964,115 +2899,48 @@ serve(async (req) => {
             // REGULAR TEXT MESSAGE (no media pattern found)
             // ========================================================================
             
-            // Build payload with optional quoted message for reply
-            const sendPayload: Record<string, unknown> = {
-              number: targetNumber,
-              text: body.message,
-            };
+            console.log(`[Evolution API] Sending text via provider (${instance.api_provider || 'evolution'})`);
             
-            // Include quoted message info if replying (Evolution API v2 format)
-            if (replyToWhatsAppMessageId) {
-              sendPayload.quoted = {
-                key: {
-                  id: replyToWhatsAppMessageId,
-                },
-              };
-              console.log(`[Evolution API] Including quoted message: ${replyToWhatsAppMessageId}`);
-            }
-            
-            const sendResponse = await fetch(`${apiUrl}/message/sendText/${instance.instance_name}`, {
-              method: "POST",
-              headers: {
-                apikey: instance.api_key || "",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(sendPayload),
-            });
+            try {
+              const sendResult = await providerSendText(instance, {
+                number: targetNumber,
+                text: body.message,
+                quotedMessageId: replyToWhatsAppMessageId || undefined,
+              });
 
-            if (!sendResponse.ok) {
-              const errorText = await sendResponse.text();
-              console.error(`[Evolution API] Background send failed:`, JSON.stringify({ status: sendResponse.status, error: errorText }));
-              
-              // Parse error to detect specific failure reasons
-              let errorReason = "Falha no envio";
-              try {
-                const errorJson = JSON.parse(errorText);
-                // Check for "Connection Closed" error - instance lost WhatsApp session
-                const errorMessages = errorJson?.response?.message || errorJson?.message || [];
-                const messageArray = Array.isArray(errorMessages) ? errorMessages : [errorMessages];
-                const isConnectionClosed = messageArray.some(
-                  (m: unknown) => typeof m === 'string' && m.includes('Connection Closed')
-                );
+              const whatsappMessageId = sendResult.whatsappMessageId;
+              console.log(`[Evolution API] Background send completed, whatsapp_message_id: ${whatsappMessageId}`);
 
-                if (isConnectionClosed && instanceId) {
-                  // Force logout to invalidate stale Evolution session cache.
-                  // Without this, fetchInstances keeps reporting "open" even though
-                  // the Baileys socket is dead, causing an infinite reconnect loop.
-                  console.warn(`[Evolution API] Connection Closed for ${instanceId} - forcing logout then marking disconnected`);
-                  
-                  try {
-                    const logoutRes = await fetchWithTimeout(
-                      `${apiUrl}/instance/logout/${instance.instance_name}`,
-                      { method: "DELETE", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } },
-                      10000
-                    );
-                    console.log(`[Evolution API] Logout response for ${instance.instance_name}: ${logoutRes.status}`);
-                  } catch (logoutErr: any) {
-                    console.warn(`[Evolution API] Logout failed (non-blocking): ${logoutErr?.message}`);
-                  }
-                  
-                  errorReason = "Conexão perdida - reconexão automática em andamento";
-                  
-                  await supabaseClient
-                    .from("whatsapp_instances")
-                    .update({ status: 'disconnected', disconnected_since: new Date().toISOString(), updated_at: new Date().toISOString() })
-                    .eq("id", instanceId)
-                    .not("status", "in", '("disconnected")');
-
-                  errorReason = "Conexão temporariamente indisponível. Tentando reconectar...";
-                } else if (Array.isArray(errorMessages)) {
-                  // Check for "number not on WhatsApp" error
-                  const notOnWhatsApp = errorMessages.find((m: any) => m.exists === false);
-                  if (notOnWhatsApp) {
-                    errorReason = "Número não registrado no WhatsApp";
-                  }
-                } else if (errorJson.error) {
-                  errorReason = errorJson.error;
-                }
-              } catch (parseErr: any) {
-                // QR_NEEDED is a controlled flow - errorReason already set
-                if (parseErr?.message !== "QR_NEEDED") {
-                  // Keep generic error if parsing fails
-                }
-              }
-              
-              // Mark message as failed in DB (don't delete - show error to user)
-              if (conversationId) {
-                await supabaseClient
-                  .from("messages")
-                  .update({ 
-                    status: "failed",
-                    // Keep original content intact - user will see "failed" status badge in UI
-                  })
-                  .eq("id", tempMessageId);
-                console.log(`[Evolution API] Message marked as failed: ${errorReason}`, { tempMessageId });
-              }
-              return;
-            }
-
-            const sendData = await sendResponse.json();
-            const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id;
-            console.log(`[Evolution API] Background send completed, whatsapp_message_id: ${whatsappMessageId}`);
-
-            // Update the message with the real whatsapp_message_id
-            if (conversationId && whatsappMessageId) {
-              await supabaseClient
-                .from("messages")
-                .update({ 
+              if (conversationId && whatsappMessageId) {
+                await supabaseClient.from("messages").update({ 
                   whatsapp_message_id: whatsappMessageId,
                   status: "sent"
-                })
-                .eq("id", tempMessageId);
+                }).eq("id", tempMessageId);
+              }
+            } catch (sendErr: any) {
+              console.error(`[Evolution API] Background send failed:`, sendErr?.message);
+              
+              // Connection Closed detection (Evolution-only)
+              if (isEvolution(instance) && sendErr?.message?.includes('Connection Closed') && instanceId) {
+                console.warn(`[Evolution API] Connection Closed for ${instanceId} - marking disconnected`);
+                try {
+                  const logoutApiUrl = normalizeUrl(instance.api_url);
+                  await fetchWithTimeout(
+                    `${logoutApiUrl}/instance/logout/${instance.instance_name}`,
+                    { method: "DELETE", headers: { apikey: instance.api_key || "", "Content-Type": "application/json" } },
+                    10000
+                  );
+                } catch { /* best effort */ }
+                
+                await supabaseClient.from("whatsapp_instances")
+                  .update({ status: 'disconnected', disconnected_since: new Date().toISOString(), updated_at: new Date().toISOString() })
+                  .eq("id", instanceId)
+                  .not("status", "in", '("disconnected")');
+              }
+              
+              if (conversationId) {
+                await supabaseClient.from("messages").update({ status: "failed" }).eq("id", tempMessageId);
+              }
             }
           } catch (error) {
             console.error("[Evolution API] Background send error:", error);
@@ -3155,27 +3023,14 @@ serve(async (req) => {
 
         const startedAt = Date.now();
 
-        const sendResponse = await fetchWithTimeout(`${apiUrl}/message/sendText/${instance.instance_name}`, {
-          method: "POST",
-          headers: {
-            apikey: instance.api_key || "",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            number: targetNumber,
-            text: body.message,
-          }),
-        }, SEND_MESSAGE_TIMEOUT_MS);
+        const sendResult = await providerSendText(instance, {
+          number: targetNumber,
+          text: body.message,
+        });
 
-        console.log(`[Evolution API] Send message response status: ${sendResponse.status} (${Date.now() - startedAt}ms)`);
+        console.log(`[Evolution API] Send message completed (${Date.now() - startedAt}ms)`);
 
-        if (!sendResponse.ok) {
-          const errorText = await safeReadResponseText(sendResponse);
-          throw new Error(simplifyEvolutionError(sendResponse.status, errorText));
-        }
-
-        const sendData = await sendResponse.json();
-        const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id || crypto.randomUUID();
+        const whatsappMessageId = sendResult.whatsappMessageId || crypto.randomUUID();
 
         if (conversationId) {
           await supabaseClient
@@ -3246,6 +3101,15 @@ serve(async (req) => {
         // Use the conversation's law_firm_id to get the instance
         const targetLawFirmId = conversation.law_firm_id;
         const instance = await getInstanceById(supabaseClient, targetLawFirmId, conversation.whatsapp_instance_id, isGlobalAdmin);
+
+        // uazapi: media is already persisted by webhook, no need for this endpoint
+        if (isUazapi(instance)) {
+          return new Response(JSON.stringify({
+            success: false,
+            error: "Mídia não disponível para download via API neste provider. Verifique o Storage.",
+          }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
         const apiUrl = normalizeUrl(instance.api_url);
 
         // Call Evolution API to get decrypted media
@@ -3477,127 +3341,56 @@ serve(async (req) => {
         // Background task - send to WhatsApp and update message
         const backgroundSendMedia = async () => {
           try {
-            console.log(`[Evolution API] Background: Starting media send for ${body.mediaType}`);
+            console.log(`[Evolution API] Background: Starting media send for ${body.mediaType} (provider: ${instance.api_provider || 'evolution'})`);
             
             let whatsappMessageId: string | null = null;
             let extractedMediaUrl: string | null = null;
             let extractedMimeType: string | null = body.mimeType || null;
 
-            // AUDIO: Special handling for voice notes (PTT)
             if (body.mediaType === "audio") {
               const audioBase64 = body.mediaBase64 || "";
               if (!audioBase64 || audioBase64.length < 1000) {
                 throw new Error("Áudio inválido/muito pequeno para enviar.");
               }
-
               const cleanedAudioBase64 = audioBase64.trim().replace(/\s+/g, "");
-              const audioEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
-              const audioPayload = {
-                number: targetNumber,
-                audio: cleanedAudioBase64,
-                delay: 500,
-              };
 
-              console.log(`[Evolution API] Background: Sending audio via sendWhatsAppAudio`);
-              let audioResponse = await fetch(audioEndpoint, {
-                method: "POST",
-                headers: {
-                  apikey: instance.api_key || "",
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify(audioPayload),
+              const audioResult = await providerSendAudio(instance, {
+                number: targetNumber,
+                audioBase64: cleanedAudioBase64,
+                mimeType: body.mimeType,
               });
 
-              // Fallback to sendMedia if sendWhatsAppAudio fails
-              if (!audioResponse.ok) {
-                console.warn(`[Evolution API] Background: sendWhatsAppAudio failed, trying sendMedia`);
-                const fallbackEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-                audioResponse = await fetch(fallbackEndpoint, {
-                  method: "POST",
-                  headers: {
-                    apikey: instance.api_key || "",
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    number: targetNumber,
-                    mediatype: "audio",
-                    mimetype: body.mimeType || "audio/ogg;codecs=opus",
-                    fileName: body.fileName || "audio.ogg",
-                    media: audioBase64,
-                  }),
-                });
-              }
-
-              if (!audioResponse.ok) {
-                const errorText = await audioResponse.text();
-                throw new Error(`Falha ao enviar áudio: ${audioResponse.status}`);
-              }
-
-              const audioData = await audioResponse.json();
-              whatsappMessageId = audioData.key?.id || audioData.messageId || audioData.id;
-              extractedMediaUrl = audioData.message?.audioMessage?.url || null;
-              extractedMimeType = audioData.message?.audioMessage?.mimetype || body.mimeType || "audio/ogg";
-              
-              // Normalize video/webm to audio/webm
+              whatsappMessageId = audioResult.whatsappMessageId || null;
+              const audioRaw = audioResult.raw as any;
+              extractedMediaUrl = audioRaw?.message?.audioMessage?.url || null;
+              extractedMimeType = audioRaw?.message?.audioMessage?.mimetype || body.mimeType || "audio/ogg";
               if (extractedMimeType === "video/webm") extractedMimeType = "audio/webm";
             } else {
-              // IMAGE, VIDEO, DOCUMENT: Use sendMedia endpoint
-              const endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-              const payload: Record<string, unknown> = {
+              const mediaResult = await providerSendMedia(instance, {
                 number: targetNumber,
-                mediatype: body.mediaType,
-                mimetype: body.mimeType || (body.mediaType === "image" ? "image/jpeg" : "application/octet-stream"),
-                caption: body.caption || "",
-                media: body.mediaBase64 || body.mediaUrl,
-              };
-
-              if (body.mediaType === "document") {
-                payload.fileName = body.fileName || "document";
-              }
-
-              console.log(`[Evolution API] Background: Sending ${body.mediaType} via sendMedia`);
-              const response = await fetch(endpoint, {
-                method: "POST",
-                headers: {
-                  apikey: instance.api_key || "",
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify(payload),
+                mediaType: body.mediaType,
+                mediaBase64: body.mediaBase64,
+                mediaUrl: body.mediaUrl,
+                fileName: body.fileName,
+                caption: body.caption,
+                mimeType: body.mimeType,
               });
 
-              if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Falha ao enviar mídia: ${response.status}`);
-              }
-
-              const sendData = await response.json();
-              whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id;
-              extractedMediaUrl = 
-                sendData.message?.imageMessage?.url ||
-                sendData.message?.videoMessage?.url ||
-                sendData.message?.documentMessage?.url ||
-                body.mediaUrl || 
-                null;
-              extractedMimeType =
-                sendData.message?.imageMessage?.mimetype ||
-                sendData.message?.videoMessage?.mimetype ||
-                sendData.message?.documentMessage?.mimetype ||
-                body.mimeType;
+              whatsappMessageId = mediaResult.whatsappMessageId || null;
+              const raw = mediaResult.raw as any;
+              extractedMediaUrl = raw?.message?.imageMessage?.url || raw?.message?.videoMessage?.url || raw?.message?.documentMessage?.url || body.mediaUrl || null;
+              extractedMimeType = raw?.message?.imageMessage?.mimetype || raw?.message?.videoMessage?.mimetype || raw?.message?.documentMessage?.mimetype || body.mimeType;
             }
 
             console.log(`[Evolution API] Background: Media sent successfully, id=${whatsappMessageId}`);
 
-            // Update message with real WhatsApp ID and status
             if (conversationId && whatsappMessageId) {
-              await supabaseClient
-                .from("messages")
-                .update({ 
-                  whatsapp_message_id: whatsappMessageId,
-                  media_url: extractedMediaUrl || body.mediaUrl,
-                  media_mime_type: extractedMimeType,
-                  status: "sent",
-                })
-                .eq("id", tempMessageId);
+              await supabaseClient.from("messages").update({ 
+                whatsapp_message_id: whatsappMessageId,
+                media_url: extractedMediaUrl || body.mediaUrl,
+                media_mime_type: extractedMimeType,
+                status: "sent",
+              }).eq("id", tempMessageId);
             }
           } catch (error) {
             console.error("[Evolution API] Background media send error:", error);
@@ -3706,359 +3499,117 @@ serve(async (req) => {
         }
 
         const instance = await getInstanceById(supabaseClient, lawFirmId, instanceId);
-        const apiUrl = normalizeUrl(instance.api_url);
+        // Provider-based sending
 
-        console.log(`[Evolution API] Sending ${body.mediaType} to ${targetRemoteJid} via ${instance.instance_name}`);
+        console.log(`[Evolution API] Sending ${body.mediaType} to ${targetRemoteJid} via ${instance.instance_name} (provider: ${instance.api_provider || 'evolution'})`);
 
-        // Determine the endpoint based on media type
-        // IMPORTANT: Some WhatsApp JIDs can include non-digit suffixes (e.g. ":76");
-        // always sanitize to digits only. Prefer contact_phone when available.
         const jidPart = (targetRemoteJid || "").split("@")[0];
         const targetNumber = ((contactPhone || jidPart) || "").replace(/\D/g, "");
         if (!targetNumber) {
           throw new Error("remoteJid inválido para envio de mídia");
         }
 
-        let endpoint = "";
-        let payload: Record<string, unknown> = {
-          number: targetNumber,
-        };
+        let whatsappMessageId: string;
+        let extractedMediaUrl: string | null = null;
+        let extractedMimeType: string | null = body.mimeType || null;
 
-        switch (body.mediaType) {
-          case "image":
-            endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-            payload = {
-              ...payload,
-              mediatype: "image",
-              mimetype: body.mimeType || "image/jpeg",
-              caption: body.caption || "",
-              media: body.mediaBase64 || body.mediaUrl,
-            };
-            break;
-          case "audio": {
-            // ==============================================================
-            // AUDIO: Use sendWhatsAppAudio (voice note / PTT) for delivery
-            // This endpoint sets ptt:true and uses the proper WhatsApp audio pipeline
-            // ==============================================================
-
-            // Fail-fast: prefer base64 for audio; if present, validate size
-            const audioBase64 = body.mediaBase64 || "";
-            const audioBase64Len = audioBase64.length;
-            const audioEstimatedBytes = Math.floor((audioBase64Len * 3) / 4);
-            const audioEstimatedKB = Math.round(audioEstimatedBytes / 1024);
-            
-            if (!audioBase64 || audioBase64Len < 1000) {
-              console.error("[Evolution API] Audio rejected (base64 vazio/muito pequeno)", {
-                base64Len: audioBase64Len,
-                estimatedKB: audioEstimatedKB,
-              });
-              throw new Error("Áudio inválido/muito pequeno para enviar.");
-            }
-            
-            console.log("[Evolution API] Audio payload prepared for sendWhatsAppAudio", {
-              estimatedKB: audioEstimatedKB,
-              mimeType: body.mimeType,
-              fileName: body.fileName,
-              targetNumber,
-            });
-
-            // Optional (recommended): check instance state before sending to avoid endless PENDING
-            try {
-              const stateResp = await fetchWithTimeout(
-                `${apiUrl}/instance/connectionState/${instance.instance_name}`,
-                {
-                  method: "GET",
-                  headers: {
-                    apikey: instance.api_key || "",
-                    "Content-Type": "application/json",
-                  },
-                },
-                DEFAULT_TIMEOUT_MS,
-              );
-
-              if (stateResp.ok) {
-                const stateData = await stateResp.json().catch(() => null);
-                const stateText = JSON.stringify(stateData || {}).toLowerCase();
-                // Heuristic: if it looks disconnected, fail fast
-                if (stateText.includes("disconnected") || stateText.includes("close") || stateText.includes("connecting")) {
-                  console.error("[Evolution API] Instance not connected for audio send", { stateData });
-                  throw new Error("Instância WhatsApp desconectada. Reconecte e tente novamente.");
-                }
-              } else {
-                const t = await safeReadResponseText(stateResp);
-                console.warn("[Evolution API] connectionState check failed (continuando) ", {
-                  status: stateResp.status,
-                  body: t.slice(0, 200),
-                });
-              }
-            } catch (e) {
-              if (e instanceof Error && e.message.includes("Instância WhatsApp desconectada")) {
-                throw e;
-              }
-              console.warn("[Evolution API] connectionState check skipped due to error", {
-                error: e instanceof Error ? e.message : String(e),
-              });
-            }
-
-            // Build data URI for the audio (audio/ogg works best for voice notes)
-            // Strip codec params for compatibility: "audio/ogg;codecs=opus" -> "audio/ogg"
-            const rawMime = (body.mimeType || "audio/ogg").toLowerCase();
-            const audioPureMime = rawMime.includes("ogg") ? "audio/ogg" 
-              : rawMime.includes("mp4") || rawMime.includes("m4a") ? "audio/mp4"
-              : rawMime.includes("mpeg") || rawMime.includes("mp3") ? "audio/mpeg"
-              : "audio/ogg"; // default to ogg for best PTT compatibility
-            
-            // Clean base64: remove whitespace and newlines that may corrupt the payload
-            // CRITICAL: Evolution API sendWhatsAppAudio expects RAW base64, NOT Data URI
-            const cleanedAudioBase64 = audioBase64.trim().replace(/\s+/g, "");
-
-            // Use dedicated audio endpoint with PTT (voice note) support
-            const audioEndpoint = `${apiUrl}/message/sendWhatsAppAudio/${instance.instance_name}`;
-            const audioPayload = {
-              number: targetNumber,
-              audio: cleanedAudioBase64,  // RAW base64, NOT Data URI (data:audio/...;base64,XXX)
-              delay: 500,
-            };
-
-            console.log(`[Evolution API] Sending audio via sendWhatsAppAudio to ${targetNumber}`, {
-              endpoint: audioEndpoint,
-              audioBase64Length: cleanedAudioBase64.length,
-              estimatedKB: Math.round((cleanedAudioBase64.length * 3) / 4 / 1024),
-              pureMime: audioPureMime,
-            });
-
-            // Try the dedicated audio endpoint first
-            let audioSendResponse = await fetchWithTimeout(audioEndpoint, {
-              method: "POST",
-              headers: {
-                apikey: instance.api_key || "",
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(audioPayload),
-            });
-
-            // If sendWhatsAppAudio fails, fallback to sendMedia
-            if (!audioSendResponse.ok) {
-              const audioErrorText = await safeReadResponseText(audioSendResponse);
-              console.warn(`[Evolution API] sendWhatsAppAudio failed (${audioSendResponse.status}), falling back to sendMedia`, {
-                error: audioErrorText.slice(0, 300),
-              });
-
-              // Fallback to sendMedia with mediatype audio
-              const fallbackEndpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-              const fallbackPayload = {
-                number: targetNumber,
-                mediatype: "audio",
-                mimetype: body.mimeType || "audio/ogg;codecs=opus",
-                fileName: body.fileName || "audio.ogg",
-                media: audioBase64,
-              };
-
-              console.log(`[Evolution API] Fallback: sending audio via sendMedia`);
-              
-              audioSendResponse = await fetchWithTimeout(fallbackEndpoint, {
-                method: "POST",
-                headers: {
-                  apikey: instance.api_key || "",
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify(fallbackPayload),
-              });
-            }
-
-            console.log(`[Evolution API] Audio send response status: ${audioSendResponse.status}`);
-
-            if (!audioSendResponse.ok) {
-              const errorText = await safeReadResponseText(audioSendResponse);
-              console.error(`[Evolution API] Audio send failed:`, errorText);
-              throw new Error(simplifyEvolutionError(audioSendResponse.status, errorText));
-            }
-
-            const audioSendData = await audioSendResponse.json();
-            console.log(`[Evolution API] Audio sent successfully:`, JSON.stringify(audioSendData));
-
-            const audioWhatsappMessageId = audioSendData.key?.id || audioSendData.messageId || audioSendData.id || crypto.randomUUID();
-
-            // Extract mimetype from response (may differ from request)
-            let audioExtractedMimeType =
-              audioSendData.message?.audioMessage?.mimetype ||
-              body.mimeType ||
-              "audio/ogg";
-
-            // Normalize provider quirk: audioMessage mimetype may come as video/webm
-            if (typeof audioExtractedMimeType === "string") {
-              const mt = audioExtractedMimeType.toLowerCase();
-              if (mt === "video/webm") audioExtractedMimeType = "audio/webm";
-            }
-
-            // Extract media URL from response
-            const audioExtractedMediaUrl = 
-              audioSendData.message?.audioMessage?.url ||
-              body.mediaUrl || 
-              null;
-
-            console.log(`[Evolution API] Audio extracted: messageId=${audioWhatsappMessageId}, mimeType=${audioExtractedMimeType}, url=${audioExtractedMediaUrl ? 'present' : 'null'}`);
-
-            // Save audio message to database
-            if (conversationId) {
-              const { data: savedAudioMessage, error: audioMsgError } = await supabaseClient
-                .from("messages")
-                .insert({
-                  conversation_id: conversationId,
-                  whatsapp_message_id: audioWhatsappMessageId,
-                  content: "[Áudio]",
-                  message_type: "audio",
-                  media_url: audioExtractedMediaUrl,
-                  media_mime_type: audioExtractedMimeType,
-                  is_from_me: true,
-                  sender_type: "human",
-                  ai_generated: false,
-                })
-                .select()
-                .single();
-
-              if (audioMsgError) {
-                console.error("[Evolution API] Failed to save audio message to DB:", audioMsgError);
-              } else {
-                console.log(`[Evolution API] Audio message saved to DB with ID: ${savedAudioMessage.id}`);
-              }
-
-              await supabaseClient
-                .from("conversations")
-                .update({
-                  last_message_at: new Date().toISOString(),
-                  archived_at: null,
-                  archived_reason: null,
-                  archived_next_responsible_type: null,
-                  archived_next_responsible_id: null,
-                })
-                .eq("id", conversationId);
-            }
-
-            return new Response(
-              JSON.stringify({
-                success: true,
-                messageId: audioWhatsappMessageId,
-                message: "Audio sent successfully",
-              }),
-              { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-            );
+        if (body.mediaType === "audio") {
+          // Audio: use provider sendAudio
+          const audioBase64 = body.mediaBase64 || "";
+          if (!audioBase64 || audioBase64.length < 1000) {
+            throw new Error("Áudio inválido/muito pequeno para enviar.");
           }
-          case "video":
-            endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-            payload = {
-              ...payload,
-              mediatype: "video",
-              mimetype: body.mimeType || "video/mp4",
-              caption: body.caption || "",
-              media: body.mediaBase64 || body.mediaUrl,
-            };
-            break;
-          case "document":
-            endpoint = `${apiUrl}/message/sendMedia/${instance.instance_name}`;
-            payload = {
-              ...payload,
-              mediatype: "document",
-              mimetype: body.mimeType || "application/octet-stream",
-              fileName: body.fileName || "document",
-              media: body.mediaBase64 || body.mediaUrl,
-            };
-            break;
-        }
+          const cleanedAudioBase64 = audioBase64.trim().replace(/\s+/g, "");
 
-        console.log(`[Evolution API] Sending to endpoint: ${endpoint}`);
+          const audioResult = await providerSendAudio(instance, {
+            number: targetNumber,
+            audioBase64: cleanedAudioBase64,
+            mimeType: body.mimeType,
+          });
 
-        const sendResponse = await fetchWithTimeout(endpoint, {
-          method: "POST",
-          headers: {
-            apikey: instance.api_key || "",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        });
+          whatsappMessageId = audioResult.whatsappMessageId || crypto.randomUUID();
+          const audioRaw = audioResult.raw as any;
+          extractedMediaUrl = audioRaw?.message?.audioMessage?.url || body.mediaUrl || null;
+          extractedMimeType = audioRaw?.message?.audioMessage?.mimetype || body.mimeType || "audio/ogg";
+          if (extractedMimeType === "video/webm") extractedMimeType = "audio/webm";
 
-        console.log(`[Evolution API] Send media response status: ${sendResponse.status}`);
-
-        if (!sendResponse.ok) {
-          const errorText = await safeReadResponseText(sendResponse);
-          console.error(`[Evolution API] Send media failed:`, errorText);
-          throw new Error(simplifyEvolutionError(sendResponse.status, errorText));
-        }
-
-        const sendData = await sendResponse.json();
-        console.log(`[Evolution API] Media sent successfully:`, JSON.stringify(sendData));
-
-        const whatsappMessageId = sendData.key?.id || sendData.messageId || sendData.id || crypto.randomUUID();
-
-        // Prefer mimetype returned by provider; fallback to requested.
-        let extractedMimeType =
-          sendData.message?.imageMessage?.mimetype ||
-          sendData.message?.videoMessage?.mimetype ||
-          sendData.message?.documentMessage?.mimetype ||
-          sendData.message?.documentWithCaptionMessage?.message?.documentMessage?.mimetype ||
-          body.mimeType ||
-          null;
-
-        // Extract media URL from Evolution API response
-        // The API returns the uploaded media URL in message.[mediaType]Message.url
-        // Extract media URL from Evolution API response
-        // The API returns the uploaded media URL in message.[mediaType]Message.url
-        // Note: audio is handled separately now, but we keep audioMessage.url for legacy/fallback
-        const extractedMediaUrl = 
-          sendData.message?.imageMessage?.url ||
-          sendData.message?.videoMessage?.url ||
-          sendData.message?.documentMessage?.url ||
-          sendData.message?.documentWithCaptionMessage?.message?.documentMessage?.url ||
-          sendData.message?.stickerMessage?.url ||
-          body.mediaUrl || 
-          null;
-
-        console.log(`[Evolution API] Extracted media URL: ${extractedMediaUrl ? 'present' : 'null'}`);
-
-        // Save message to database
-        if (conversationId) {
-          const { data: savedMessage, error: msgError } = await supabaseClient
-            .from("messages")
-            .insert({
+          // Save audio message to DB
+          if (conversationId) {
+            await supabaseClient.from("messages").insert({
               conversation_id: conversationId,
               whatsapp_message_id: whatsappMessageId,
-              content: body.caption || body.fileName || `[${body.mediaType}]`,
-              message_type: body.mediaType,
+              content: "[Áudio]",
+              message_type: "audio",
               media_url: extractedMediaUrl,
               media_mime_type: extractedMimeType,
               is_from_me: true,
               sender_type: "human",
               ai_generated: false,
-            })
-            .select()
-            .single();
+            });
 
-          if (msgError) {
-            console.error("[Evolution API] Failed to save media message to DB:", msgError);
-          } else {
-            console.log(`[Evolution API] Media message saved to DB with ID: ${savedMessage.id}`);
+            await supabaseClient.from("conversations").update({
+              last_message_at: new Date().toISOString(),
+              archived_at: null, archived_reason: null,
+              archived_next_responsible_type: null, archived_next_responsible_id: null,
+            }).eq("id", conversationId);
           }
 
-          await supabaseClient
-            .from("conversations")
-            .update({
-              last_message_at: new Date().toISOString(),
-              archived_at: null,
-              archived_reason: null,
-              archived_next_responsible_type: null,
-              archived_next_responsible_id: null,
-            })
-            .eq("id", conversationId);
-        }
-
-        return new Response(
-          JSON.stringify({
+          return new Response(JSON.stringify({
             success: true,
             messageId: whatsappMessageId,
-            message: "Media sent successfully",
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } },
-        );
+            message: "Audio sent successfully",
+          }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+
+        // IMAGE, VIDEO, DOCUMENT: use provider sendMedia
+        const mediaResult = await providerSendMedia(instance, {
+          number: targetNumber,
+          mediaType: body.mediaType,
+          mediaBase64: body.mediaBase64,
+          mediaUrl: body.mediaUrl,
+          fileName: body.fileName,
+          caption: body.caption,
+          mimeType: body.mimeType,
+        });
+
+        whatsappMessageId = mediaResult.whatsappMessageId || crypto.randomUUID();
+        const mediaRaw = mediaResult.raw as any;
+        extractedMimeType =
+          mediaRaw?.message?.imageMessage?.mimetype ||
+          mediaRaw?.message?.videoMessage?.mimetype ||
+          mediaRaw?.message?.documentMessage?.mimetype ||
+          body.mimeType || null;
+        extractedMediaUrl =
+          mediaRaw?.message?.imageMessage?.url ||
+          mediaRaw?.message?.videoMessage?.url ||
+          mediaRaw?.message?.documentMessage?.url ||
+          body.mediaUrl || null;
+
+        if (conversationId) {
+          await supabaseClient.from("messages").insert({
+            conversation_id: conversationId,
+            whatsapp_message_id: whatsappMessageId,
+            content: body.caption || body.fileName || `[${body.mediaType}]`,
+            message_type: body.mediaType,
+            media_url: extractedMediaUrl,
+            media_mime_type: extractedMimeType,
+            is_from_me: true,
+            sender_type: "human",
+            ai_generated: false,
+          });
+
+          await supabaseClient.from("conversations").update({
+            last_message_at: new Date().toISOString(),
+            archived_at: null, archived_reason: null,
+            archived_next_responsible_type: null, archived_next_responsible_id: null,
+          }).eq("id", conversationId);
+        }
+
+        return new Response(JSON.stringify({
+          success: true,
+          messageId: whatsappMessageId,
+          message: "Media sent successfully",
+        }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
       // =========================
@@ -4961,39 +4512,8 @@ serve(async (req) => {
           throw new Error("No WhatsApp instance associated with conversation");
         }
 
-        // Use instance's api_url and api_key (same pattern as other actions)
-        const deleteApiUrl = normalizeUrl(deleteInstance.api_url || "");
-        const deleteApiKey = deleteInstance.api_key || "";
-
-        if (!deleteApiUrl || !deleteApiKey) {
-          throw new Error("Evolution API not configured for this instance");
-        }
-
-        // Call Evolution API to delete message for everyone
-        const deleteResponse = await fetchWithTimeout(
-          `${deleteApiUrl}/chat/deleteMessageForEveryone/${deleteInstance.instance_name}`,
-          {
-            method: "DELETE",
-            headers: {
-              apikey: deleteApiKey,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              id: body.whatsappMessageId,
-              remoteJid: body.remoteJid,
-              fromMe: true,
-            }),
-          },
-          DEFAULT_TIMEOUT_MS
-        );
-
-        if (!deleteResponse.ok) {
-          const errorText = await safeReadResponseText(deleteResponse);
-          console.error("[delete_message] Evolution API error:", errorText);
-          throw new Error(
-            `Failed to delete message: ${simplifyEvolutionError(deleteResponse.status, errorText)}`
-          );
-        }
+        // Use provider abstraction for delete
+        await providerDeleteMessage(deleteInstance, body.remoteJid, body.whatsappMessageId, true);
 
         // Mark message as revoked in database
         const { error: revokeUpdateError } = await supabaseClient
@@ -5052,42 +4572,8 @@ serve(async (req) => {
           throw new Error("No WhatsApp instance associated with conversation");
         }
 
-        // Use instance's api_url and api_key
-        const reactionApiUrl = normalizeUrl(reactionInstance.api_url || "");
-        const reactionApiKey = reactionInstance.api_key || "";
-
-        if (!reactionApiUrl || !reactionApiKey) {
-          throw new Error("Evolution API not configured for this instance");
-        }
-
-        // Call Evolution API to send reaction
-        const reactionResponse = await fetchWithTimeout(
-          `${reactionApiUrl}/message/sendReaction/${reactionInstance.instance_name}`,
-          {
-            method: "POST",
-            headers: {
-              apikey: reactionApiKey,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              key: {
-                remoteJid: body.remoteJid,
-                fromMe: body.isFromMe ?? false, // Whether reacting to own message or received message
-                id: body.whatsappMessageId,
-              },
-              reaction: body.reaction, // Emoji or empty string to remove
-            }),
-          },
-          DEFAULT_TIMEOUT_MS
-        );
-
-        if (!reactionResponse.ok) {
-          const errorText = await safeReadResponseText(reactionResponse);
-          console.error("[send_reaction] Evolution API error:", errorText);
-          throw new Error(
-            `Failed to send reaction: ${simplifyEvolutionError(reactionResponse.status, errorText)}`
-          );
-        }
+        // Use provider abstraction for reaction
+        await providerSendReaction(reactionInstance, body.remoteJid, body.whatsappMessageId, body.reaction, body.isFromMe ?? false);
 
         return new Response(
           JSON.stringify({
