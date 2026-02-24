@@ -1622,6 +1622,10 @@ serve(async (req) => {
                         if (ttsResponse.ok) {
                           const ttsData = await ttsResponse.json();
                           if (ttsData.success && ttsData.audioContent) {
+                            // Use correct MIME type from TTS response (ElevenLabs returns OGG/Opus)
+                            const audioMime = (ttsData.mimeType || "audio/mpeg").split(";")[0].trim();
+                            console.log("[UAZAPI_WEBHOOK] TTS audio MIME:", audioMime, "contentLen:", ttsData.audioContent?.length);
+                            
                             // Send audio via uazapi /send/audio (PTT)
                             const audioSendRes = await fetch(`${apiUrl}/send/audio`, {
                               method: "POST",
@@ -1631,12 +1635,38 @@ serve(async (req) => {
                               },
                               body: JSON.stringify({
                                 number: targetNumber,
-                                audio: `data:audio/mpeg;base64,${ttsData.audioContent}`,
+                                audio: `data:${audioMime};base64,${ttsData.audioContent}`,
                                 ptt: true,
                               }),
                             });
                             
-                            const audioSendData = await audioSendRes.json().catch(() => ({}));
+                            console.log("[UAZAPI_WEBHOOK] /send/audio response:", { status: audioSendRes.status, ok: audioSendRes.ok });
+                            let audioSendData = await audioSendRes.json().catch(() => ({}));
+                            console.log("[UAZAPI_WEBHOOK] /send/audio data:", JSON.stringify(audioSendData).slice(0, 500));
+                            
+                            // Fallback: if first attempt failed, retry with pure base64 (no data URI prefix)
+                            if (!audioSendRes.ok) {
+                              console.log("[UAZAPI_WEBHOOK] /send/audio failed, retrying with pure base64...");
+                              const retryRes = await fetch(`${apiUrl}/send/audio`, {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                  token: instance.api_key,
+                                },
+                                body: JSON.stringify({
+                                  number: targetNumber,
+                                  audio: ttsData.audioContent,
+                                  ptt: true,
+                                }),
+                              });
+                              console.log("[UAZAPI_WEBHOOK] /send/audio retry response:", { status: retryRes.status, ok: retryRes.ok });
+                              const retryData = await retryRes.json().catch(() => ({}));
+                              console.log("[UAZAPI_WEBHOOK] /send/audio retry data:", JSON.stringify(retryData).slice(0, 500));
+                              if (retryRes.ok) {
+                                audioSendData = retryData;
+                              }
+                            }
+                            
                             const audioMsgId = audioSendData?.key?.id || audioSendData?.id || crypto.randomUUID();
                             
                             // Persist audio to storage (using safe base64 decoding)
