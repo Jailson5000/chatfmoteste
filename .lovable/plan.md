@@ -1,66 +1,99 @@
 
 
-# Implementar Audio Mode State Machine no uazapi-webhook
+# Correção do Alerta Sonoro + Recepção de Templates WhatsApp
 
-## Problema
+## Problema 1: Alerta Sonoro Não Funciona
 
-O uazapi-webhook tem o codigo de TTS (gerar e enviar audio) mas **nao tem a logica de detectar quando o cliente pede audio**. O campo `ai_audio_enabled` fica sempre `false` porque ninguem o ativa.
+### Causa Raiz
 
-Na imagem, o cliente diz "Me envie em audio, porque eu nao sei ler" e a IA responde com texto dizendo "nao consigo enviar mensagens em audio" — porque:
-1. `ai_audio_enabled = false` na conversa (confirmado no banco)
-2. O uazapi-webhook nao tem as funcoes `isAudioRequestedFromText`, `isAudioDeactivationRequest` e `shouldRespondWithAudio` que existem no evolution-webhook
-3. O uazapi-webhook tambem nao processa os comandos `@Ativar audio` / `@Desativar audio` que a IA pode incluir na resposta
+Bug de arquitetura no `AppLayout.tsx`. O `useMessageNotifications` é chamado **fora** do `RealtimeSyncProvider`:
 
-## Correcoes
-
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
-
-**Adicao 1: Funcoes de deteccao de audio (copiar do evolution-webhook)**
-
-Adicionar antes do bloco de AI processing (~linha 1259):
-
-- `isAudioRequestedFromText(text)` — detecta frases como "manda audio", "responde por audio", "nao sei ler", "nao consigo ler"
-- `isAudioDeactivationRequest(text)` — detecta frases como "prefiro texto", "sem audio", "volta pro texto"
-- `updateAudioModeState(client, conversationId, enabled, reason)` — persiste a mudanca no banco
-- `shouldRespondWithAudio(client, conversationId, messageText, messageType)` — state machine completa:
-  - Cliente pede audio → ativa
-  - Cliente manda texto (quando audio esta ativo) → desativa
-  - Cliente manda audio (quando audio esta ativo) → mantem
-
-**Adicao 2: Chamar `shouldRespondWithAudio` antes de responder**
-
-Substituir a logica atual (linha 1320):
-```
-const audioEnabled = conv?.ai_audio_enabled === true;
+```text
+AppLayout() {
+  useMessageNotifications();   ← FORA do Provider!
+  
+  return (
+    <RealtimeSyncProvider>     ← Provider está AQUI
+      ...
+    </RealtimeSyncProvider>
+  );
+}
 ```
 
-Por:
+O hook `useMessageNotifications` usa `useRealtimeSyncOptional()` para registrar callbacks de mensagem e conversa. Como ele roda fora do provider, `realtimeSync` é `null`, e os callbacks nunca são registrados. Nenhuma notificação sonora dispara.
+
+### Correção
+
+Mover o `useMessageNotifications` para dentro do `RealtimeSyncProvider` criando um componente wrapper interno:
+
+**Arquivo: `src/components/layout/AppLayout.tsx`**
+
+```tsx
+function AppLayoutInner() {
+  useMessageNotifications({ enabled: true });
+  usePresenceTracking();
+  // ... resto do layout
+}
+
+export function AppLayout() {
+  return (
+    <RealtimeSyncProvider>
+      <AppLayoutInner />
+    </RealtimeSyncProvider>
+  );
+}
 ```
-const audioEnabled = await shouldRespondWithAudio(
-  supabaseClient, conversationId, contentForAI || '', messageType
-);
+
+Isso garante que o hook rode dentro do contexto Realtime e consiga registrar os callbacks de som.
+
+---
+
+## Problema 2: Templates WhatsApp Não São Recebidos Corretamente
+
+### Causa
+
+O `uazapi-webhook` usa `extractContent()` que só extrai texto básico (`text`, `caption`, `conversation`). Ele não trata os tipos especiais de mensagem do WhatsApp:
+
+| Tipo | Descrição | Status no uazapi-webhook |
+|---|---|---|
+| `buttonsResponseMessage` | Resposta a botão quick reply | NÃO tratado |
+| `listResponseMessage` | Seleção de item de lista | NÃO tratado |
+| `templateButtonReplyMessage` | Clique em botão de template | NÃO tratado |
+| `interactiveResponseMessage` | Resposta interativa genérica | NÃO tratado |
+| `templateMessage` | Template de marketing/utilidade | NÃO tratado |
+
+Todos esses tipos já são tratados no `evolution-webhook` (linhas 5310-5420).
+
+### Correção
+
+**Arquivo: `supabase/functions/uazapi-webhook/index.ts`**
+
+Adicionar tratamento para mensagens interativas/template na função de detecção de tipo e na extração de conteúdo. Especificamente:
+
+1. **Na detecção de tipo (`detectMessageType`)**: Reconhecer tipos como `buttonsresponsemessage`, `listresponsemessage`, `templatebuttonreplymessage`, `interactiveresponsemessage`, `templatemessage` e retornar `"text"` (são tratados como texto com metadados).
+
+2. **Na extração de conteúdo (`extractContent`)**: Adicionar blocos antes do fallback para extrair texto dos payloads estruturados:
+
+```typescript
+// buttonsResponseMessage → selectedDisplayText
+// listResponseMessage → title ou description
+// templateButtonReplyMessage → selectedDisplayText
+// interactiveResponseMessage → body.text
+// templateMessage → hydratedTemplate.hydratedContentText + botões
 ```
 
-**Adicao 3: Processar comandos `@Ativar audio` / `@Desativar audio` na resposta da IA**
+3. **Para templateMessage com mídia**: Detectar `hydratedTemplate.imageMessage`, `videoMessage`, `documentMessage` e ajustar o `messageType` e `mediaUrl` apropriadamente.
 
-Apos receber `aiText` da IA (linha 1312), processar comandos de audio:
-- Detectar `@Ativar áudio` → ativar `ai_audio_enabled = true` + remover do texto
-- Detectar `@Desativar áudio` → desativar `ai_audio_enabled = false` + remover do texto
+4. **Botões de template**: Extrair botões e formatar como `[Opções: Botão1 | Botão2 | Botão3]` no final do conteúdo (mesmo formato do evolution-webhook).
 
-Isso permite que a IA autonomamente ative o modo audio quando detecta que o cliente precisa (ex: "nao sei ler").
+A lógica será portada diretamente do `evolution-webhook` (linhas 5310-5420) adaptada para o formato de payload do uazapi (onde os dados podem estar em `msg.content` ao invés de `messageData`).
 
-## Resultado Esperado
-
-Quando o cliente enviar "Me envie em audio, porque eu nao sei ler":
-1. `isAudioRequestedFromText` detecta o padrao "nao sei ler" → pattern de acessibilidade
-2. `shouldRespondWithAudio` retorna `true` e persiste `ai_audio_enabled = true`
-3. O TTS gera o audio e envia via `/send/audio` como PTT
-4. Proximas mensagens de audio do cliente continuam recebendo audio
-5. Se o cliente mandar texto, auto-desativa o modo audio
+---
 
 ## Arquivos Afetados
 
-| Arquivo | Mudanca |
+| Arquivo | Mudança |
 |---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Adicionar state machine de audio mode (4 funcoes + integracao no fluxo) |
+| `src/components/layout/AppLayout.tsx` | Mover hooks para dentro do RealtimeSyncProvider |
+| `supabase/functions/uazapi-webhook/index.ts` | Adicionar tratamento de templates, botões e mensagens interativas |
 
