@@ -168,7 +168,7 @@ Isso corrigira o problema cosmético de todas as 9 empresas aparecerem como "deg
 | UAZAPI: transcricao de audio | OK | Implementado recentemente |
 | Admin Global | OK | Nenhuma |
 | Cliente (conversas, kanban, tarefas) | OK | Nenhuma |
-| Health check mostra tudo "degraded" | BUG COSMÉTICO | Corrigir tenant-health-check |
+| Health check mostra tudo "degraded" | CORRIGIDO | 8/9 healthy, 1 pending (PNH) |
 | Capacidade do sistema | 20-30 empresas | Monitorar, planejar upgrade |
 | Credenciais N8N | Expiradas/incorretas | Atualizar ou desabilitar N8N |
 
