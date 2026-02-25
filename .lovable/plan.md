@@ -1,64 +1,52 @@
 
 
-# Correção: Steps 3 e 4 do uazapi-webhook estão ROUBANDO conversas de outras instâncias
+# Análise: Jitter de Resposta da IA
 
-## Diagnóstico Confirmado nos Logs
+## Status Atual
 
-Acabei de capturar nos logs o bug acontecendo em tempo real com o "Jailson Ferreira":
+| Webhook | Jitter Implementado | Delay Antes da 1a Msg | Delay Entre Partes |
+|---|---|---|---|
+| `evolution-webhook` | Sim | 1-3s + delay configurado por agente | 3-7s (`messageSplitDelay`) |
+| `uazapi-webhook` | **Não** | **0s (instantâneo)** | 1-3s (inline básico) |
 
-```
-13:49:09 - Found orphan conversation 0e08e890, reassigning from instance fc9dbbd6 to 10b70877
-13:49:09 - Conversation resolved: 0e08e890 (via: orphan_jid)  ← ROUBOU a conversa!
-```
+## O Que Funciona (evolution-webhook)
 
-O Jailson já tem 2 registros de cliente separados (a correção anterior funcionou para isso):
-- `9fb2ade8` → instância `10b70877` (FMOANTIGO)
-- `ebcea5c6` → instância `fc9dbbd6`
+O `evolution-webhook` importa e usa corretamente o `human-delay.ts`:
+- Primeira mensagem: `humanDelay(AI_RESPONSE.min + clientDelayMs, AI_RESPONSE.max + clientDelayMs)` = **1-3s base + delay configurado no agente**
+- Partes subsequentes: `messageSplitDelay()` = **3-7s**
+- Áudio TTS: delay antes do primeiro chunk, 0.5-1s entre chunks
+- Mídia: delay antes de enviar imagem/vídeo
 
-Mas a **conversa** é uma só (`0e08e890`) e fica sendo MOVIDA de uma instância para outra a cada mensagem.
+## O Que Não Funciona (uazapi-webhook)
 
-## Causa Raiz
+O `uazapi-webhook` (linhas 1808-1830):
+- **Não importa** `human-delay.ts`
+- Primeira mensagem enviada **instantaneamente** após receber resposta da IA
+- Entre partes: `1000 + Math.random() * 2000` (1-3s hardcoded, sem usar DELAY_CONFIG)
+- Áudio TTS: **nenhum delay**
 
-Os Steps 3 e 4 (linhas 754-811) buscam conversas **SEM filtrar por `whatsapp_instance_id IS NULL`**. Ou seja, eles encontram conversas que JA PERTENCEM a outra instância ativa e as ROUBAM para a instância atual.
-
-```text
-Fluxo do bug:
-1. Jailson manda msg na instância A
-2. Step 1 (jid + instância A) → encontra conversa → OK
-3. Jailson manda msg na instância B
-4. Step 1 (jid + instância B) → NÃO encontra
-5. Step 2 (phone + instância B) → NÃO encontra
-6. Step 3 (jid, QUALQUER instância) → ENCONTRA a conversa da instância A → MOVE para B!
-7. Agora a conversa pertence a B, o cliente da A fica "solto"
-```
-
-O Step 3 deveria buscar APENAS conversas verdadeiramente órfãs (`whatsapp_instance_id IS NULL`), não conversas de outras instâncias.
-
-## Correção
+## Correção Proposta
 
 ### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
 
-**Step 3 (linhas 754-781):** Adicionar `.is("whatsapp_instance_id", null)` na query. Se a conversa já pertence a outra instância, ela NÃO é órfã — é uma conversa separada e deve ser respeitada.
+1. **Importar** `humanDelay`, `messageSplitDelay`, `DELAY_CONFIG` do `_shared/human-delay.ts`
 
-**Step 4 (linhas 783-811):** Mesma correção — adicionar `.is("whatsapp_instance_id", null)`.
+2. **Antes da primeira mensagem de texto** (linha ~1810): Adicionar `humanDelay(DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, '[UAZAPI_AI]')` — onde `clientDelayMs` vem do `response_delay_seconds` configurado no agente (já disponível na variável `conv`)
 
-Com isso, quando não encontra conversa nos Steps 1-4, o Step 5 (criar nova conversa) será executado corretamente, criando uma conversa separada para a instância B.
+3. **Entre partes de mensagem** (linha ~1812): Substituir o delay hardcoded por `messageSplitDelay(i, parts.length, '[UAZAPI_AI]')`
 
-### Migration SQL: Corrigir o caso do Jailson Ferreira
+4. **Antes do primeiro chunk de áudio TTS** (na seção de áudio ~linha 1550): Adicionar `humanDelay(DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, '[UAZAPI_TTS]')`
 
-A conversa `0e08e890` foi movida para a instância `10b70877`, mas deveria ter ficado na instância original `fc9dbbd6`. Precisamos:
-1. Restaurar a conversa `0e08e890` para a instância `fc9dbbd6` e vincular ao cliente `ebcea5c6`
-2. Criar uma nova conversa para a instância `10b70877` vinculada ao cliente `9fb2ade8`
-3. Mover as mensagens recentes (da instância errada) para a conversa correta
+5. **Entre chunks de áudio** (dentro do loop de TTS): Adicionar `humanDelay(DELAY_CONFIG.AUDIO_CHUNK.min, DELAY_CONFIG.AUDIO_CHUNK.max, '[UAZAPI_TTS_CHUNK]')`
 
-### Auditoria adicional
+### Obter `response_delay_seconds` do Agente
 
-Verificar se existem outros casos de conversas com `last_whatsapp_instance_id` preenchido (indicando que foram movidas) e corrigir em lote.
+Preciso verificar se o uazapi-webhook já lê o `response_delay_seconds` da automação. Se não, buscar esse valor para usar como `clientDelayMs` adicional.
 
-## Resumo das mudanças
+## Resultado Esperado
 
-| Arquivo | Mudança |
-|---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Steps 3 e 4: adicionar `.is("whatsapp_instance_id", null)` para só pegar conversas verdadeiramente órfãs |
-| Migration SQL | Restaurar conversa do Jailson e criar conversa separada na instância correta |
+Após a correção, ambos os webhooks terão comportamento idêntico:
+- 1-3s de jitter base + delay configurado no agente antes da primeira mensagem
+- 3-7s entre partes de mensagem split
+- Delays adequados para chunks de áudio TTS
 
