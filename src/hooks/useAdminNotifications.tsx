@@ -35,7 +35,7 @@ export function useAdminNotifications() {
       return data as Notification[];
     },
     enabled: !!user,
-    refetchInterval: 120000, // 2 min - admin notifications aren't urgent
+    refetchInterval: 43200000, // 12h - admin notifications rarely needed in realtime
   });
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
