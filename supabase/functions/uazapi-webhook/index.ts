@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { humanDelay, messageSplitDelay, DELAY_CONFIG } from "../_shared/human-delay.ts";
 
 /**
  * uazapi Webhook Handler
@@ -1457,15 +1458,17 @@ serve(async (req) => {
           if (conv?.current_handler === "ai" && conv?.current_automation_id) {
             console.log("[UAZAPI_WEBHOOK] Triggering AI processing for conversation:", conversationId, "message:", contentForAI?.substring(0, 50));
             
-            // Fetch automation name for ai_agent_name
+            // Fetch automation name and delay config for ai_agent_name
             let automationName: string | null = null;
+            let agentResponseDelayMs = 0;
             try {
               const { data: automation } = await supabaseClient
                 .from("automations")
-                .select("name")
+                .select("name, response_delay_seconds")
                 .eq("id", conv.current_automation_id)
                 .single();
               automationName = automation?.name || null;
+              agentResponseDelayMs = ((automation?.response_delay_seconds) || 0) * 1000;
             } catch (e) {
               console.warn("[UAZAPI_WEBHOOK] Failed to fetch automation name:", e);
             }
@@ -1558,7 +1561,7 @@ serve(async (req) => {
                       // Check agent-level voice config
                       const { data: automation } = await supabaseClient
                         .from("automations")
-                        .select("ai_voice_id")
+                        .select("ai_voice_id, response_delay_seconds")
                         .eq("id", conv.current_automation_id)
                         .single();
                       
@@ -1609,12 +1612,15 @@ serve(async (req) => {
                         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
                       })();
                       
+
                       for (let ci = 0; ci < ttsChunks.length; ci++) {
                         const chunkText = ttsChunks[ci];
                         
-                        // Delay between chunks
-                        if (ci > 0) {
-                          await new Promise(r => setTimeout(r, 1500 + Math.random() * 1500));
+                        // Delay before first chunk (human-like jitter + agent delay) or between chunks
+                        if (ci === 0) {
+                          await humanDelay(DELAY_CONFIG.AI_RESPONSE.min + agentResponseDelayMs, DELAY_CONFIG.AI_RESPONSE.max + agentResponseDelayMs, '[UAZAPI_TTS]');
+                        } else {
+                          await humanDelay(DELAY_CONFIG.AUDIO_CHUNK.min, DELAY_CONFIG.AUDIO_CHUNK.max, '[UAZAPI_TTS_CHUNK]');
                         }
                         
                         const ttsResponse = await fetch(`${supabaseUrl}/functions/v1/ai-text-to-speech`, {
@@ -1807,10 +1813,14 @@ serve(async (req) => {
 
                     const allMsgIds: string[] = [];
 
+
                     for (let i = 0; i < parts.length; i++) {
-                      if (i > 0) {
-                        const delay = 1000 + Math.random() * 2000;
-                        await new Promise(r => setTimeout(r, delay));
+                      if (i === 0) {
+                        // Human-like jitter before first message + agent-configured delay
+                        await humanDelay(DELAY_CONFIG.AI_RESPONSE.min + agentResponseDelayMs, DELAY_CONFIG.AI_RESPONSE.max + agentResponseDelayMs, '[UAZAPI_AI]');
+                      } else {
+                        // Delay between split parts (3-7s)
+                        await messageSplitDelay(i, parts.length, '[UAZAPI_AI]');
                       }
 
                       const sendRes = await fetch(`${apiUrl}/send/text`, {
