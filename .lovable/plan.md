@@ -1,75 +1,56 @@
 
 
-# Correção: Mensagens duplicadas da IA no uazapi-webhook (falta debounce)
+# Respostas e Plano de Migração Self-Hosted
 
-## Diagnóstico Confirmado nos Logs
+## 1. WhatsApp Cloud API reduz requisições?
 
-O cliente Mario Ricardo Almeida enviou **3 documentos** simultaneamente às 14:30:40. Os logs de `ai-chat` mostram:
+**Não significativamente.** O número de invocações de Edge Functions é proporcional ao volume de **mensagens recebidas**, não ao provedor. Comparação:
 
-```
-14:30:49 - Request validated (31 chars)     ← doc 1
-14:30:51 - Request validated (13 chars)     ← doc 2
-14:30:51 - EXECUTION START                  ← doc 2 executou
-14:30:52 - EXECUTION START                  ← doc 1 executou
-14:30:56 - Request validated (24 chars)     ← doc 3
-14:31:09 - EXECUTION START                  ← doc 3 executou
-```
-
-Resultado: **2 respostas da IA** enviadas (14:31:14 e 14:31:20) com conteúdos diferentes.
-
-## Causa Raiz
-
-O `uazapi-webhook` chama `ai-chat` **diretamente** para cada mensagem recebida (linha 1490), sem nenhum mecanismo de debounce ou fila. Quando o cliente envia múltiplas mensagens em sequência (documentos, textos rápidos), cada uma dispara uma chamada independente à IA.
-
-O `evolution-webhook` resolve isso com a `ai_processing_queue` — uma fila com debounce de 10 segundos que agrupa mensagens, usa lock atômico no banco, e só chama a IA uma vez com o conteúdo combinado.
-
-**O `uazapi-webhook` simplesmente nunca implementou esse sistema de fila.**
-
-## Correção
-
-### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
-
-Substituir a chamada direta a `ai-chat` pelo mesmo sistema de fila com debounce usado no `evolution-webhook`:
-
-1. **Adicionar função `queueMessageForAIProcessing`**: Insere/atualiza um item na tabela `ai_processing_queue` com status `pending`, agrupando mensagens que chegam dentro da janela de debounce (10s). Lida com race conditions via captura do erro 23505 (unique constraint).
-
-2. **Adicionar função `scheduleQueueProcessing`**: Agenda o processamento da fila em background via `EdgeRuntime.waitUntil`. Re-lê o `process_after` do banco a cada tentativa (pode ter sido estendido por novas mensagens).
-
-3. **Adicionar função `processQueuedMessages`**: Faz lock atômico (update de `pending` → `processing` com `.lte('process_after', now)`), combina as mensagens, chama `ai-chat` uma única vez, e verifica se há novos itens pendentes após a conclusão.
-
-4. **Substituir a chamada direta** (linhas 1486-1510) por:
-   ```typescript
-   await queueMessageForAIProcessing(supabaseClient, {
-     conversationId,
-     lawFirmId,
-     messageContent: contentForAI || '',
-     messageType,
-     contactName,
-     contactPhone: phoneNumber,
-     remoteJid,
-     instanceId: instance.id,
-     instanceName: instance.instance_name,
-     clientId: resolvedClientId,
-     automationId: conv.current_automation_id,
-     audioRequested: audioRequestedForThisMessage,
-   }, 10, requestId);
-   ```
-
-5. **A lógica de envio** (TTS, split de mensagens, jitter) se move para dentro de `processQueuedMessages`, executando apenas uma vez após o debounce.
-
-### O que NÃO muda
-
-- A tabela `ai_processing_queue` já existe e funciona corretamente (usada pelo evolution-webhook)
-- Os índices únicos de proteção contra duplicidade já estão criados
-- A função `ai-chat` continua sendo chamada da mesma forma, apenas de um único ponto após o debounce
-
-## Resultado Esperado
-
-| Cenário | Antes | Depois |
+| Provedor | Webhook | Invocações por msg recebida |
 |---|---|---|
-| Cliente envia 3 docs simultâneos | 3 chamadas à IA → 2-3 respostas | 1 chamada com conteúdo combinado → 1 resposta |
-| Cliente envia texto + texto rápido | 2 chamadas à IA → respostas separadas | Agrupado em 1 chamada → 1 resposta coerente |
-| Cliente envia 1 mensagem isolada | 1 chamada à IA (imediata) | 1 chamada à IA (após 10s debounce) |
+| Evolution API | `evolution-webhook` | 1 |
+| UazAPI | `uazapi-webhook` | 1 |
+| WhatsApp Cloud (Meta) | `meta-webhook` | 1 |
 
-O debounce de 10s é o mesmo valor usado no evolution-webhook e representa o tempo que o sistema espera por mensagens adicionais antes de processar o lote.
+Todos os provedores disparam **1 chamada de Edge Function por evento de webhook**. A diferença é que a Evolution API e UazAPI enviam eventos extras (CONNECTION_UPDATE, QRCODE_UPDATED, status ticks) que são filtrados no fast-filter, mas esses são bloqueados antes de executar lógica pesada. O WhatsApp Cloud API da Meta também envia eventos de status (delivered, read) que passam pelo `meta-webhook`.
+
+**O que realmente reduz custos:** migrar para Supabase self-hosted, onde Edge Functions rodam no seu Deno Deploy/Docker sem cobrança por invocação.
+
+## 2. É possível migrar saindo do Lovable Cloud?
+
+**Sim.** O Lovable Cloud usa Supabase por baixo. Você pode:
+- Exportar o schema completo (DDL) + dados via `pg_dump`
+- Instalar Supabase self-hosted em uma VPS
+- Restaurar o banco, configurar secrets, e deployar as Edge Functions
+- O frontend continua sendo servido do VPS (já documentado em `VPS-DEPLOY-GUIDE.md`)
+
+O projeto Lovable continua existindo (não pode ser desconectado do Cloud), mas você simplesmente aponta o frontend para a nova instância Supabase.
+
+## 3. Plano: Gerar arquivo de migração completo
+
+### Arquivo a criar: `docs/MIGRATION-SELF-HOSTED.md`
+
+Conteúdo abrangendo:
+
+1. **Pré-requisitos** — VPS specs (8GB RAM, 4 vCPU), Docker, domínio
+2. **Exportação do banco** — Comandos pg_dump para schema + dados, lista das 90+ tabelas
+3. **Instalação Supabase Self-Hosted** — docker-compose, configuração JWT, dashboard
+4. **Restauração do banco** — pg_restore, criação de funções, triggers, views, RLS policies
+5. **Migração dos 27 secrets** — Lista completa com onde obter cada um
+6. **Deploy das 65+ Edge Functions** — supabase functions deploy, configuração do config.toml
+7. **Configuração de Cron Jobs** — pg_cron para as 8+ funções agendadas (birthday, follow-ups, reminders, etc.)
+8. **Atualização do Frontend** — Trocar VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY
+9. **Webhooks** — Atualizar URLs de callback na Evolution API, UazAPI, Meta, Stripe
+10. **Storage** — Migrar buckets (chat-media, etc.)
+11. **Auth** — Migrar configurações de email, redirect URLs, Google OAuth
+12. **Verificação pós-migração** — Checklist de testes
+13. **Rollback** — Como voltar ao Cloud se algo falhar
+
+### Dados técnicos incluídos
+
+- Lista completa das Edge Functions (65+) com dependências
+- Mapa de secrets → funções que os utilizam
+- Tabelas críticas com ordem de restauração (respeitar FKs)
+- Cron jobs com schedule exato
+- Configurações de webhook por provedor
 
