@@ -67,7 +67,7 @@ export function useScheduledFollowUps(conversationId?: string) {
       return data as Array<{ conversation_id: string; scheduled_at: string }>;
     },
     enabled: !!lawFirm?.id,
-    refetchInterval: 60000, // Refresh every minute
+    refetchInterval: 300000, // 5 min - Realtime handles live updates
   });
 
   // Real-time subscription removed - now handled by centralized useRealtimeSync

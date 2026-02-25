@@ -35,7 +35,7 @@ export function useAdminNotifications() {
       return data as Notification[];
     },
     enabled: !!user,
-    refetchInterval: 30000, // Poll every 30 seconds for new notifications
+    refetchInterval: 120000, // 2 min - admin notifications aren't urgent
   });
 
   const unreadCount = notifications.filter((n) => !n.is_read).length;
