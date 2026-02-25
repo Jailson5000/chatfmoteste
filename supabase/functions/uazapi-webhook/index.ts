@@ -776,16 +776,7 @@ serve(async (req) => {
               })
               .eq("id", orphanConv.id);
 
-            if (orphanConv.client_id) {
-              await supabaseClient
-                .from("clients")
-                .update({
-                  whatsapp_instance_id: instance.id,
-                  last_whatsapp_instance_id: orphanConv.whatsapp_instance_id,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", orphanConv.client_id);
-            }
+            // DO NOT reassociate the client to the new instance — create a new one later in FIND OR CREATE CLIENT
           }
         }
 
@@ -815,16 +806,7 @@ serve(async (req) => {
               })
               .eq("id", phoneOrphan.id);
 
-            if (phoneOrphan.client_id) {
-              await supabaseClient
-                .from("clients")
-                .update({
-                  whatsapp_instance_id: instance.id,
-                  last_whatsapp_instance_id: phoneOrphan.whatsapp_instance_id,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq("id", phoneOrphan.client_id);
-            }
+            // DO NOT reassociate the client to the new instance — create a new one later in FIND OR CREATE CLIENT
           }
         }
 
@@ -896,10 +878,12 @@ serve(async (req) => {
         let resolvedClientId: string | null = null;
         if (!isFromMe) {
           const normalizedPhone = phoneNumber.replace(/\D/g, "");
+          // FIXED: Filter by whatsapp_instance_id to prevent cross-instance client sharing
           const { data: existingClient } = await supabaseClient
             .from("clients")
             .select("id, avatar_url")
             .eq("law_firm_id", lawFirmId)
+            .eq("whatsapp_instance_id", instance.id)
             .or(`phone.eq.${normalizedPhone},phone.eq.+${normalizedPhone}`)
             .limit(1)
             .maybeSingle();
