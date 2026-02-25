@@ -25,7 +25,7 @@ export function useSystemAlert() {
 
       return { enabled, message };
     },
-    refetchInterval: 30000, // Refetch every 30 seconds to catch updates
+    refetchInterval: 300000, // 5 min - alerts rarely change
     staleTime: 10000,
   });
 

@@ -50,8 +50,8 @@ export function useConversationCounts() {
       } as TabCounts;
     },
     enabled: !!lawFirm?.id,
-    staleTime: 5000, // Consider data stale after 5 seconds
-    refetchInterval: 30000, // Refetch every 30 seconds as fallback
+    staleTime: 30000, // Consider data stale after 30 seconds
+    refetchInterval: 120000, // 2 min fallback - Realtime handles live updates
   });
 
   // Real-time subscription removed - now handled by centralized useRealtimeSync
