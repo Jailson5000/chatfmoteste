@@ -15,7 +15,7 @@ export function useMaintenanceMode() {
       const val = data?.value;
       return val === true || val === "true";
     },
-    refetchInterval: 300000, // 5 min - data rarely changes
+    refetchInterval: 43200000, // 12h - data almost never changes
     staleTime: 10000,
   });
 
