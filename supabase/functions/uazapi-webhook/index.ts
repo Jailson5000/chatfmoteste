@@ -751,13 +751,14 @@ serve(async (req) => {
           }
         }
 
-        // Step 3: Orphan by remote_jid (any instance)
+        // Step 3: Orphan by remote_jid (ONLY truly orphan conversations with NO instance)
         if (!conversationId) {
           const { data: orphanConv } = await supabaseClient
             .from("conversations")
             .select("id, whatsapp_instance_id, client_id, remote_jid")
             .eq("law_firm_id", lawFirmId)
             .eq("remote_jid", remoteJid)
+            .is("whatsapp_instance_id", null)
             .order("last_message_at", { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -765,7 +766,7 @@ serve(async (req) => {
           if (orphanConv) {
             conversationId = orphanConv.id;
             conversationFoundVia = "orphan_jid";
-            console.log(`[UAZAPI_WEBHOOK] Found orphan conversation ${orphanConv.id}, reassigning from instance ${orphanConv.whatsapp_instance_id} to ${instance.id}`);
+            console.log(`[UAZAPI_WEBHOOK] Found truly orphan conversation ${orphanConv.id} (no instance), assigning to ${instance.id}`);
             
             await supabaseClient
               .from("conversations")
@@ -775,18 +776,17 @@ serve(async (req) => {
                 updated_at: new Date().toISOString(),
               })
               .eq("id", orphanConv.id);
-
-            // DO NOT reassociate the client to the new instance — create a new one later in FIND OR CREATE CLIENT
           }
         }
 
-        // Step 4: Orphan by contact_phone (any instance) 
+        // Step 4: Orphan by contact_phone (ONLY truly orphan conversations with NO instance)
         if (!conversationId && phoneNumber && phoneNumber.length >= 10) {
           const { data: phoneOrphan } = await supabaseClient
             .from("conversations")
             .select("id, whatsapp_instance_id, client_id, remote_jid")
             .eq("law_firm_id", lawFirmId)
             .eq("contact_phone", phoneNumber)
+            .is("whatsapp_instance_id", null)
             .order("last_message_at", { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -794,7 +794,7 @@ serve(async (req) => {
           if (phoneOrphan) {
             conversationId = phoneOrphan.id;
             conversationFoundVia = "orphan_phone";
-            console.log(`[UAZAPI_WEBHOOK] 📱 Found orphan via phone ${phoneNumber}: ${phoneOrphan.id}, reassigning from ${phoneOrphan.whatsapp_instance_id} to ${instance.id}`);
+            console.log(`[UAZAPI_WEBHOOK] 📱 Found truly orphan via phone ${phoneNumber}: ${phoneOrphan.id} (no instance), assigning to ${instance.id}`);
             
             await supabaseClient
               .from("conversations")
@@ -805,8 +805,6 @@ serve(async (req) => {
                 updated_at: new Date().toISOString(),
               })
               .eq("id", phoneOrphan.id);
-
-            // DO NOT reassociate the client to the new instance — create a new one later in FIND OR CREATE CLIENT
           }
         }
 
