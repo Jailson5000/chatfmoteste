@@ -346,6 +346,240 @@ async function persistProfilePicture(
   }
 }
 
+// =============================================================================
+// MESSAGE DEBOUNCE QUEUE - Batches messages before AI processing
+// =============================================================================
+
+async function queueMessageForAIProcessing(
+  supabaseClient: any,
+  context: {
+    conversationId: string; lawFirmId: string; messageContent: string; messageType: string;
+    contactName: string; contactPhone: string; remoteJid: string; instanceId: string;
+    instanceName: string; clientId?: string; audioRequested: boolean; automationId: string;
+    automationName: string | null; agentResponseDelayMs: number; apiUrl: string; apiKey: string;
+  },
+  debounceSeconds: number,
+  requestId: string
+): Promise<void> {
+  const processAfter = new Date(Date.now() + debounceSeconds * 1000).toISOString();
+  const messageData = { content: context.messageContent, type: context.messageType, timestamp: new Date().toISOString() };
+
+  console.log(`[UAZAPI_DEBOUNCE] [${requestId}] Queueing message, debounce=${debounceSeconds}s`);
+
+  const metadataPayload = {
+    contact_name: context.contactName, contact_phone: context.contactPhone, remote_jid: context.remoteJid,
+    instance_id: context.instanceId, instance_name: context.instanceName, client_id: context.clientId,
+    audio_requested: context.audioRequested, automation_id: context.automationId, automation_name: context.automationName,
+    agent_response_delay_ms: context.agentResponseDelayMs, api_url: context.apiUrl, api_key: context.apiKey, provider: 'uazapi',
+  };
+
+  const { data: existingQueue, error: fetchError } = await supabaseClient
+    .from('ai_processing_queue').select('id, messages, message_count, metadata')
+    .eq('conversation_id', context.conversationId).eq('status', 'pending').maybeSingle();
+
+  if (existingQueue) {
+    const updatedMessages = [...(existingQueue.messages || []), messageData];
+    await supabaseClient.from('ai_processing_queue').update({
+      messages: updatedMessages, message_count: existingQueue.message_count + 1,
+      last_message_at: new Date().toISOString(), process_after: processAfter,
+      metadata: { ...(existingQueue.metadata as Record<string, any> || {}), ...metadataPayload,
+        audio_requested: context.audioRequested || !!(existingQueue.metadata as any)?.audio_requested },
+    }).eq('id', existingQueue.id);
+    console.log(`[UAZAPI_DEBOUNCE] [${requestId}] Added to existing queue (${updatedMessages.length} msgs)`);
+  } else {
+    const { data: processingItem } = await supabaseClient.from('ai_processing_queue').select('id')
+      .eq('conversation_id', context.conversationId).eq('status', 'processing').maybeSingle();
+    let effectiveProcessAfter = processAfter;
+    if (processingItem) {
+      effectiveProcessAfter = new Date(Date.now() + Math.max(debounceSeconds, 15) * 1000).toISOString();
+    }
+
+    const { error: insertError } = await supabaseClient.from('ai_processing_queue').insert({
+      conversation_id: context.conversationId, law_firm_id: context.lawFirmId,
+      messages: [messageData], message_count: 1, process_after: effectiveProcessAfter, metadata: metadataPayload,
+    }).select('id').single();
+
+    if (insertError?.code === '23505') {
+      const { data: ep } = await supabaseClient.from('ai_processing_queue').select('id, messages, message_count')
+        .eq('conversation_id', context.conversationId).eq('status', 'pending').maybeSingle();
+      if (ep) {
+        const msgs = Array.isArray(ep.messages) ? ep.messages : [];
+        await supabaseClient.from('ai_processing_queue').update({
+          messages: [...msgs, messageData], message_count: msgs.length + 1,
+          last_message_at: new Date().toISOString(), process_after: effectiveProcessAfter,
+        }).eq('id', ep.id);
+      }
+    } else if (!insertError) {
+      console.log(`[UAZAPI_DEBOUNCE] [${requestId}] Created new queue item`);
+    }
+  }
+
+  scheduleUazapiQueueProcessing(supabaseClient, context.conversationId, debounceSeconds, requestId);
+}
+
+function scheduleUazapiQueueProcessing(supabaseClient: any, conversationId: string, _ds: number, requestId: string): void {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const runTask = async () => {
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      try {
+        const { data: qi } = await supabaseClient.from('ai_processing_queue').select('id, process_after')
+          .eq('conversation_id', conversationId).eq('status', 'pending').maybeSingle();
+        if (!qi) return;
+        const delayMs = Math.max(0, new Date(qi.process_after).getTime() - Date.now()) + 500;
+        await sleep(delayMs);
+        await processUazapiQueuedMessages(supabaseClient, conversationId, requestId);
+      } catch (e) { await sleep(1000); }
+    }
+  };
+  const er = (globalThis as any).EdgeRuntime;
+  if (er?.waitUntil) { er.waitUntil(runTask()); return; }
+  try { setTimeout(() => { void runTask(); }, 0); } catch (_) { /* noop */ }
+}
+
+async function processUazapiQueuedMessages(supabaseClient: any, conversationId: string, requestId: string): Promise<void> {
+  const now = new Date().toISOString();
+
+  await supabaseClient.from('ai_processing_queue').update({ status: 'failed', error_message: 'Timeout: stuck >2min', completed_at: now })
+    .eq('conversation_id', conversationId).eq('status', 'processing').lt('processing_started_at', new Date(Date.now() - 120000).toISOString());
+
+  const { data: lockedItem, error: lockError } = await supabaseClient.from('ai_processing_queue')
+    .update({ status: 'processing', processing_started_at: now })
+    .eq('conversation_id', conversationId).eq('status', 'pending').lte('process_after', now).select().maybeSingle();
+
+  if (lockError || !lockedItem) return;
+
+  const queueItem = lockedItem;
+  console.log(`[UAZAPI_DEBOUNCE] [${requestId}] Processing ${queueItem.message_count} batched messages`);
+
+  try {
+    const messages = queueItem.messages as Array<{ content: string; type: string }>;
+    const combinedContent = messages.length > 1 ? messages.map(m => m.content).join('\n\n') : messages[0]?.content || '';
+    const metadata = queueItem.metadata as Record<string, any>;
+    const lawFirmId = queueItem.law_firm_id;
+    const automationId = metadata.automation_id;
+    const automationName = metadata.automation_name;
+    const agentResponseDelayMs = metadata.agent_response_delay_ms || 0;
+    const audioRequested = !!metadata.audio_requested;
+    const remoteJid = metadata.remote_jid || '';
+    const apiUrl = (metadata.api_url || '').replace(/\/+$/, '');
+    const apiKey = metadata.api_key || '';
+    const targetNumber = remoteJid.replace('@s.whatsapp.net', '');
+
+    if (!automationId || !apiUrl || !apiKey) {
+      await supabaseClient.from('ai_processing_queue').update({ status: 'failed', completed_at: new Date().toISOString(), error_message: 'Missing config' }).eq('id', queueItem.id);
+      return;
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+    const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+
+    const aiResponse = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+      body: JSON.stringify({ conversationId, message: combinedContent, automationId, source: 'whatsapp',
+        context: { clientName: metadata.contact_name, clientPhone: metadata.contact_phone, lawFirmId,
+          clientId: metadata.client_id, skipSaveUserMessage: true, skipSaveAIResponse: true, audioRequested } }),
+    });
+
+    if (!aiResponse.ok) { throw new Error(`AI chat returned ${aiResponse.status}`); }
+
+    const result = await aiResponse.json();
+    let aiText = result.response;
+
+    if (aiText) {
+      if (/@[Aa]tivar\s*[aáAÁ]udio/g.test(aiText)) {
+        aiText = aiText.replace(/@[Aa]tivar\s*[aáAÁ]udio/gi, '');
+        await supabaseClient.from('conversations').update({ ai_audio_enabled: true, ai_audio_enabled_by: 'user_request', ai_audio_last_enabled_at: new Date().toISOString() }).eq('id', conversationId);
+      }
+      if (/@[Dd]esativar\s*[aáAÁ]udio/g.test(aiText)) {
+        aiText = aiText.replace(/@[Dd]esativar\s*[aáAÁ]udio/gi, '');
+        await supabaseClient.from('conversations').update({ ai_audio_enabled: false, ai_audio_enabled_by: 'user_request', ai_audio_last_disabled_at: new Date().toISOString() }).eq('id', conversationId);
+      }
+      aiText = aiText.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
+    if (aiText && apiUrl && apiKey) {
+      let sentAsAudio = false;
+
+      if (audioRequested) {
+        try {
+          let voiceId = 'el_laura'; let voiceSource = 'default';
+          const { data: autom } = await supabaseClient.from('automations').select('ai_voice_id').eq('id', automationId).single();
+          if (autom?.ai_voice_id) { voiceId = autom.ai_voice_id; voiceSource = 'agent'; }
+          else { const { data: s } = await supabaseClient.from('law_firm_settings').select('ai_voice_id').eq('law_firm_id', lawFirmId).maybeSingle(); if (s?.ai_voice_id) { voiceId = s.ai_voice_id; voiceSource = 'company'; } }
+
+          const ttsChunks: string[] = [];
+          if (aiText.trim().length <= 3500) { ttsChunks.push(aiText.trim()); }
+          else { const pars = aiText.trim().split(/\n\n+/).filter((p: string) => p.trim()); let cur = ''; for (const p of pars) { if (cur && cur.length + p.length > 3500) { ttsChunks.push(cur.trim()); cur = p; } else { cur = cur ? `${cur}\n\n${p}` : p; } } if (cur.trim()) ttsChunks.push(cur.trim()); }
+
+          const CHARS_PER_SECOND = 12.5;
+          const bp = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })();
+
+          for (let ci = 0; ci < ttsChunks.length; ci++) {
+            const chunk = ttsChunks[ci];
+            if (ci === 0) await humanDelay(DELAY_CONFIG.AI_RESPONSE.min + agentResponseDelayMs, DELAY_CONFIG.AI_RESPONSE.max + agentResponseDelayMs, '[UAZAPI_TTS]');
+            else await humanDelay(DELAY_CONFIG.AUDIO_CHUNK.min, DELAY_CONFIG.AUDIO_CHUNK.max, '[UAZAPI_TTS_CHUNK]');
+
+            const ttsRes = await fetch(`${supabaseUrl}/functions/v1/ai-text-to-speech`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` }, body: JSON.stringify({ text: chunk.substring(0, 3900), voiceId, lawFirmId, skipUsageTracking: true }) });
+            if (ttsRes.ok) {
+              const td = await ttsRes.json();
+              if (td.success && td.audioContent) {
+                const am = (td.mimeType || 'audio/mpeg').split(';')[0].trim();
+                let sr = await fetch(`${apiUrl}/send/media`, { method: 'POST', headers: { 'Content-Type': 'application/json', token: apiKey }, body: JSON.stringify({ number: targetNumber, type: 'ptt', file: `data:${am};base64,${td.audioContent}`, mimetype: am }) });
+                let sd = await sr.json().catch(() => ({}));
+                if (!sr.ok) { const rr = await fetch(`${apiUrl}/send/media`, { method: 'POST', headers: { 'Content-Type': 'application/json', token: apiKey }, body: JSON.stringify({ number: targetNumber, type: 'audio', file: `data:${am};base64,${td.audioContent}`, mimetype: am }) }); if (rr.ok) sd = await rr.json().catch(() => ({})); }
+                const mid = sd?.key?.id || sd?.id || crypto.randomUUID();
+
+                let audioUrl: string | null = null;
+                try {
+                  const bs = atob(td.audioContent as string); const ab = new Uint8Array(bs.length); for (let j = 0; j < bs.length; j++) ab[j] = bs.charCodeAt(j);
+                  const isOgg = (td.mimeType || '').includes('ogg'); const sp = `${lawFirmId}/ai-audio/${mid}${isOgg ? '.ogg' : '.mp3'}`;
+                  const { error: ue } = await supabaseClient.storage.from('chat-media').upload(sp, ab, { contentType: isOgg ? 'audio/ogg' : 'audio/mpeg', cacheControl: '31536000', upsert: true });
+                  if (!ue) { const { data: ud } = await supabaseClient.storage.from('chat-media').createSignedUrl(sp, 31536000); audioUrl = ud?.signedUrl || null; }
+                } catch (_) {}
+
+                const isOgg = (td.mimeType || '').includes('ogg');
+                await supabaseClient.from('messages').insert({ conversation_id: conversationId, whatsapp_message_id: mid, content: chunk, message_type: 'audio', is_from_me: true, sender_type: 'system', ai_generated: true, media_mime_type: isOgg ? 'audio/ogg' : 'audio/mpeg', media_url: audioUrl, law_firm_id: lawFirmId, ai_agent_id: automationId, ai_agent_name: automationName });
+                await supabaseClient.from('usage_records').insert({ law_firm_id: lawFirmId, usage_type: 'tts_audio', count: 1, duration_seconds: Math.ceil(chunk.length / CHARS_PER_SECOND), billing_period: bp, metadata: { conversation_id: conversationId, text_length: chunk.length, voice_id: voiceId, voice_source: voiceSource, provider: 'uazapi' } });
+                sentAsAudio = true;
+              }
+            }
+          }
+        } catch (ttsErr) { console.warn('[UAZAPI_DEBOUNCE] TTS error:', ttsErr); }
+      }
+
+      if (!sentAsAudio) {
+        const MAX_PARTS = 5; let parts: string[] = [];
+        if (result.responseParts?.length > 1) { parts = result.responseParts.filter((p: string) => p?.trim()).slice(0, MAX_PARTS); }
+        else if (aiText.length > 400) { const rp = aiText.split(/\n\n+/).map((p: string) => p.trim()).filter((p: string) => p); if (rp.length > 1) { let c = ''; for (const p of rp) { if (c && (c.length + p.length > 500 || parts.length >= MAX_PARTS - 1)) { parts.push(c.trim()); c = p; } else { c = c ? `${c}\n\n${p}` : p; } } if (c.trim()) parts.push(c.trim()); parts = parts.slice(0, MAX_PARTS); } else parts = [aiText]; }
+        else parts = [aiText];
+
+        const ids: string[] = [];
+        for (let i = 0; i < parts.length; i++) {
+          if (i === 0) await humanDelay(DELAY_CONFIG.AI_RESPONSE.min + agentResponseDelayMs, DELAY_CONFIG.AI_RESPONSE.max + agentResponseDelayMs, '[UAZAPI_AI]');
+          else await messageSplitDelay(i, parts.length, '[UAZAPI_AI]');
+          const r = await fetch(`${apiUrl}/send/text`, { method: 'POST', headers: { 'Content-Type': 'application/json', token: apiKey }, body: JSON.stringify({ number: targetNumber, text: parts[i] }) });
+          const d = await r.json().catch(() => ({})); ids.push(d?.key?.id || d?.id || crypto.randomUUID());
+        }
+        await supabaseClient.from('messages').insert({ conversation_id: conversationId, whatsapp_message_id: ids[0], content: aiText, message_type: 'text', is_from_me: true, sender_type: 'ai', ai_generated: true, law_firm_id: lawFirmId, ai_agent_id: automationId, ai_agent_name: automationName });
+      }
+
+      await supabaseClient.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
+    }
+
+    await supabaseClient.from('ai_processing_queue').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', queueItem.id);
+
+    const { data: np } = await supabaseClient.from('ai_processing_queue').select('id, process_after').eq('conversation_id', conversationId).eq('status', 'pending').maybeSingle();
+    if (np) {
+      const w = Math.max(0, new Date(np.process_after).getTime() - Date.now());
+      if (w > 0) await new Promise(r => setTimeout(r, w));
+      await processUazapiQueuedMessages(supabaseClient, conversationId, requestId);
+    }
+  } catch (error) {
+    console.error(`[UAZAPI_DEBOUNCE] [${requestId}] Error:`, error);
+    await supabaseClient.from('ai_processing_queue').update({ status: 'failed', completed_at: new Date().toISOString(), error_message: error instanceof Error ? error.message : String(error) }).eq('id', queueItem.id);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -1483,392 +1717,27 @@ serve(async (req) => {
               console.log("[UAZAPI_WEBHOOK] 🔊 Audio mode pre-detected, will pass audioRequested=true to ai-chat");
             }
 
-            try {
-              const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-              const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-              
-              const aiResponse = await fetch(`${supabaseUrl}/functions/v1/ai-chat`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer ${serviceKey}`,
-                },
-                body: JSON.stringify({
-                  conversationId,
-                  message: contentForAI,
-                  automationId: conv.current_automation_id,
-                  source: "whatsapp",
-                  context: {
-                    clientName: contactName,
-                    clientPhone: phoneNumber,
-                    lawFirmId,
-                    clientId: resolvedClientId,
-                    skipSaveUserMessage: true,
-                    skipSaveAIResponse: true,
-                    audioRequested: audioRequestedForThisMessage,
-                  },
-                }),
-              });
+            const DEBOUNCE_SECONDS = 10;
+            const requestId = crypto.randomUUID().substring(0, 8);
 
-              if (aiResponse.ok) {
-                const result = await aiResponse.json();
-                let aiText = result.response;
-                console.log("[UAZAPI_WEBHOOK] AI response received:", aiText?.substring(0, 80));
-
-                // ---- Process AI audio commands (@Ativar áudio / @Desativar áudio) ----
-                if (aiText) {
-                  let shouldEnableAudio = false;
-                  let shouldDisableAudio = false;
-
-                  const enablePattern = /@[Aa]tivar\s*[aáAÁ]udio/g;
-                  if (enablePattern.test(aiText)) {
-                    shouldEnableAudio = true;
-                    aiText = aiText.replace(/@[Aa]tivar\s*[aáAÁ]udio/gi, '');
-                    console.log("[UAZAPI_WEBHOOK] 🔊 Detected @Ativar áudio command in AI response");
-                  }
-
-                  const disablePattern = /@[Dd]esativar\s*[aáAÁ]udio/g;
-                  if (disablePattern.test(aiText)) {
-                    shouldDisableAudio = true;
-                    aiText = aiText.replace(/@[Dd]esativar\s*[aáAÁ]udio/gi, '');
-                    console.log("[UAZAPI_WEBHOOK] 🔊 Detected @Desativar áudio command in AI response");
-                  }
-
-                  aiText = aiText.replace(/\n{3,}/g, '\n\n').trim();
-
-                  if (shouldEnableAudio) {
-                    await updateAudioModeState(supabaseClient, conversationId, true, 'user_request');
-                  }
-                  if (shouldDisableAudio) {
-                    await updateAudioModeState(supabaseClient, conversationId, false, 'user_request');
-                  }
-                }
-
-                if (aiText && instance.api_url && instance.api_key) {
-                  const apiUrl = instance.api_url.replace(/\/+$/, "");
-                  const targetNumber = remoteJid.replace("@s.whatsapp.net", "");
-
-                  // ---- CHECK IF AUDIO RESPONSE IS ENABLED (already pre-computed) ----
-                  const audioEnabled = audioRequestedForThisMessage;
-                  let sentAsAudio = false;
-
-                  if (audioEnabled) {
-                    try {
-                      console.log("[UAZAPI_WEBHOOK] 🔊 Audio mode enabled, generating TTS...");
-                      
-                      // Resolve voice config: agent → company → default
-                      let voiceId = "el_laura"; // default
-                      let voiceSource = "default";
-                      
-                      // Check agent-level voice config
-                      const { data: automation } = await supabaseClient
-                        .from("automations")
-                        .select("ai_voice_id, response_delay_seconds")
-                        .eq("id", conv.current_automation_id)
-                        .single();
-                      
-                      if (automation?.ai_voice_id) {
-                        voiceId = automation.ai_voice_id;
-                        voiceSource = "agent";
-                      } else {
-                        // Check company-level voice config
-                        const { data: settings } = await supabaseClient
-                          .from("law_firm_settings")
-                          .select("ai_voice_id, ai_voice_enabled")
-                          .eq("law_firm_id", lawFirmId)
-                          .maybeSingle();
-                        
-                        if (settings?.ai_voice_id) {
-                          voiceId = settings.ai_voice_id;
-                          voiceSource = "company";
-                        }
-                      }
-                      
-                      // Generate TTS audio via ai-text-to-speech
-                      const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-                      const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-                      
-                      // Split text into chunks for TTS (max 3500 chars)
-                      const ttsChunks: string[] = [];
-                      const fullText = aiText.trim();
-                      if (fullText.length <= 3500) {
-                        ttsChunks.push(fullText);
-                      } else {
-                        // Split by paragraphs, merge into chunks ≤3500
-                        const paragraphs = fullText.split(/\n\n+/).filter((p: string) => p.trim());
-                        let current = "";
-                        for (const p of paragraphs) {
-                          if (current && current.length + p.length > 3500) {
-                            ttsChunks.push(current.trim());
-                            current = p;
-                          } else {
-                            current = current ? `${current}\n\n${p}` : p;
-                          }
-                        }
-                        if (current.trim()) ttsChunks.push(current.trim());
-                      }
-                      
-                      const CHARS_PER_SECOND = 12.5;
-                      const billingPeriod = (() => {
-                        const now = new Date();
-                        return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-                      })();
-                      
-
-                      for (let ci = 0; ci < ttsChunks.length; ci++) {
-                        const chunkText = ttsChunks[ci];
-                        
-                        // Delay before first chunk (human-like jitter + agent delay) or between chunks
-                        if (ci === 0) {
-                          await humanDelay(DELAY_CONFIG.AI_RESPONSE.min + agentResponseDelayMs, DELAY_CONFIG.AI_RESPONSE.max + agentResponseDelayMs, '[UAZAPI_TTS]');
-                        } else {
-                          await humanDelay(DELAY_CONFIG.AUDIO_CHUNK.min, DELAY_CONFIG.AUDIO_CHUNK.max, '[UAZAPI_TTS_CHUNK]');
-                        }
-                        
-                        const ttsResponse = await fetch(`${supabaseUrl}/functions/v1/ai-text-to-speech`, {
-                          method: "POST",
-                          headers: {
-                            "Content-Type": "application/json",
-                            "Authorization": `Bearer ${serviceKey}`,
-                          },
-                          body: JSON.stringify({
-                            text: chunkText.substring(0, 3900),
-                            voiceId: voiceId,
-                            lawFirmId: lawFirmId,
-                            skipUsageTracking: true,
-                          }),
-                        });
-                        
-                        if (ttsResponse.ok) {
-                          const ttsData = await ttsResponse.json();
-                          if (ttsData.success && ttsData.audioContent) {
-                            // Use correct MIME type from TTS response (ElevenLabs returns OGG/Opus)
-                            const audioMime = (ttsData.mimeType || "audio/mpeg").split(";")[0].trim();
-                            console.log("[UAZAPI_WEBHOOK] TTS audio MIME:", audioMime, "contentLen:", ttsData.audioContent?.length);
-                            
-                            // Send audio via uazapi /send/media (PTT) - correct endpoint per UAZAPi docs
-                            const audioSendRes = await fetch(`${apiUrl}/send/media`, {
-                              method: "POST",
-                              headers: {
-                                "Content-Type": "application/json",
-                                token: instance.api_key,
-                              },
-                              body: JSON.stringify({
-                                number: targetNumber,
-                                type: "ptt",
-                                file: `data:${audioMime};base64,${ttsData.audioContent}`,
-                                mimetype: audioMime,
-                              }),
-                            });
-                            
-                            console.log("[UAZAPI_WEBHOOK] /send/media (ptt) response:", { status: audioSendRes.status, ok: audioSendRes.ok });
-                            let audioSendData = await audioSendRes.json().catch(() => ({}));
-                            console.log("[UAZAPI_WEBHOOK] /send/media (ptt) data:", JSON.stringify(audioSendData).slice(0, 500));
-                            
-                            // Fallback: if ptt failed, retry with type "audio"
-                            if (!audioSendRes.ok) {
-                              console.log("[UAZAPI_WEBHOOK] /send/media (ptt) failed, retrying with type audio...");
-                              const retryRes = await fetch(`${apiUrl}/send/media`, {
-                                method: "POST",
-                                headers: {
-                                  "Content-Type": "application/json",
-                                  token: instance.api_key,
-                                },
-                                body: JSON.stringify({
-                                  number: targetNumber,
-                                  type: "audio",
-                                  file: `data:${audioMime};base64,${ttsData.audioContent}`,
-                                  mimetype: audioMime,
-                                }),
-                              });
-                              console.log("[UAZAPI_WEBHOOK] /send/media (audio) retry response:", { status: retryRes.status, ok: retryRes.ok });
-                              const retryData = await retryRes.json().catch(() => ({}));
-                              console.log("[UAZAPI_WEBHOOK] /send/media (audio) retry data:", JSON.stringify(retryData).slice(0, 500));
-                              if (retryRes.ok) {
-                                audioSendData = retryData;
-                              }
-                            }
-                            
-                            const audioMsgId = audioSendData?.key?.id || audioSendData?.id || crypto.randomUUID();
-                            
-                            // Persist audio to storage (using safe base64 decoding)
-                            let audioStorageUrl: string | null = null;
-                            try {
-                              // Safe base64 decode using Uint8Array (avoids atob stack overflow on large strings)
-                              const raw = ttsData.audioContent as string;
-                              const binaryStr = atob(raw);
-                              const audioBytes = new Uint8Array(binaryStr.length);
-                              for (let j = 0; j < binaryStr.length; j++) {
-                                audioBytes[j] = binaryStr.charCodeAt(j);
-                              }
-                              const isOgg = (ttsData.mimeType || "").includes("ogg");
-                              const ext = isOgg ? ".ogg" : ".mp3";
-                              const storagePath = `${lawFirmId}/ai-audio/${audioMsgId}${ext}`;
-                              
-                              const { error: uploadErr } = await supabaseClient.storage
-                                .from("chat-media")
-                                .upload(storagePath, audioBytes, {
-                                  contentType: isOgg ? "audio/ogg" : "audio/mpeg",
-                                  cacheControl: "31536000",
-                                  upsert: true,
-                                });
-                              
-                              if (!uploadErr) {
-                                const { data: urlData } = await supabaseClient.storage
-                                  .from("chat-media")
-                                  .createSignedUrl(storagePath, 60 * 60 * 24 * 365);
-                                audioStorageUrl = urlData?.signedUrl || null;
-                                
-                                // Fallback to public URL if signed URL fails
-                                if (!audioStorageUrl) {
-                                  const { data: publicData } = supabaseClient.storage
-                                    .from("chat-media")
-                                    .getPublicUrl(storagePath);
-                                  audioStorageUrl = publicData?.publicUrl || null;
-                                  console.log("[UAZAPI_WEBHOOK] Using public URL fallback for audio:", !!audioStorageUrl);
-                                }
-                              } else {
-                                console.error("[UAZAPI_WEBHOOK] Audio upload error:", uploadErr.message, "path:", storagePath, "size:", audioBytes.length);
-                              }
-                            } catch (storageErr) {
-                              console.error("[UAZAPI_WEBHOOK] Audio storage EXCEPTION:", storageErr instanceof Error ? storageErr.message : storageErr, "audioContentLen:", ttsData.audioContent?.length);
-                            }
-                            
-                            // Save audio message to DB
-                            const isOgg = (ttsData.mimeType || "").includes("ogg");
-                            await supabaseClient.from("messages").insert({
-                              conversation_id: conversationId,
-                              whatsapp_message_id: audioMsgId,
-                              content: chunkText,
-                              message_type: "audio",
-                              is_from_me: true,
-                              sender_type: "system",
-                              ai_generated: true,
-                              media_mime_type: isOgg ? "audio/ogg" : "audio/mpeg",
-                              media_url: audioStorageUrl,
-                              law_firm_id: lawFirmId,
-                              ai_agent_id: conv.current_automation_id,
-                              ai_agent_name: automationName,
-                            });
-                            
-                            // Record TTS usage for billing
-                            const durationSeconds = Math.ceil(chunkText.length / CHARS_PER_SECOND);
-                            await supabaseClient.from("usage_records").insert({
-                              law_firm_id: lawFirmId,
-                              usage_type: "tts_audio",
-                              count: 1,
-                              duration_seconds: durationSeconds,
-                              billing_period: billingPeriod,
-                              metadata: {
-                                conversation_id: conversationId,
-                                text_length: chunkText.length,
-                                voice_id: voiceId,
-                                voice_source: voiceSource,
-                                provider: "uazapi",
-                                generated_at: new Date().toISOString(),
-                              },
-                            });
-                            
-                            sentAsAudio = true;
-                            console.log(`[UAZAPI_WEBHOOK] 🔊 Audio chunk ${ci + 1}/${ttsChunks.length} sent, id: ${audioMsgId}`);
-                          } else {
-                            console.warn("[UAZAPI_WEBHOOK] TTS generation failed, falling back to text");
-                          }
-                        } else {
-                          console.warn("[UAZAPI_WEBHOOK] TTS endpoint error:", ttsResponse.status);
-                        }
-                      }
-                    } catch (ttsErr) {
-                      console.warn("[UAZAPI_WEBHOOK] TTS processing error (falling back to text):", ttsErr);
-                    }
-                  }
-
-                  // ---- SEND AS TEXT (default or fallback) ----
-                  if (!sentAsAudio) {
-                    // Use responseParts from ai-chat if available (smarter split by paragraphs/sentences)
-                    // Fallback: split manually if text > 400 chars
-                    const MAX_PARTS = 5;
-                    let parts: string[] = [];
-                    
-                    if (result.responseParts && Array.isArray(result.responseParts) && result.responseParts.length > 1) {
-                      parts = result.responseParts.filter((p: string) => p && p.trim()).slice(0, MAX_PARTS);
-                    } else if (aiText.length > 400) {
-                      const rawParts = aiText.split(/\n\n+/).map((p: string) => p.trim()).filter((p: string) => p.length > 0);
-                      if (rawParts.length > 1) {
-                        let current = "";
-                        for (const part of rawParts) {
-                          if (current && (current.length + part.length > 500 || parts.length >= MAX_PARTS - 1)) {
-                            parts.push(current.trim());
-                            current = part;
-                          } else {
-                            current = current ? `${current}\n\n${part}` : part;
-                          }
-                        }
-                        if (current.trim()) parts.push(current.trim());
-                        if (parts.length > MAX_PARTS) parts = parts.slice(0, MAX_PARTS);
-                      } else {
-                        parts = [aiText];
-                      }
-                    } else {
-                      parts = [aiText];
-                    }
-
-                    const allMsgIds: string[] = [];
-
-
-                    for (let i = 0; i < parts.length; i++) {
-                      if (i === 0) {
-                        // Human-like jitter before first message + agent-configured delay
-                        await humanDelay(DELAY_CONFIG.AI_RESPONSE.min + agentResponseDelayMs, DELAY_CONFIG.AI_RESPONSE.max + agentResponseDelayMs, '[UAZAPI_AI]');
-                      } else {
-                        // Delay between split parts (3-7s)
-                        await messageSplitDelay(i, parts.length, '[UAZAPI_AI]');
-                      }
-
-                      const sendRes = await fetch(`${apiUrl}/send/text`, {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          token: instance.api_key,
-                        },
-                        body: JSON.stringify({ number: targetNumber, text: parts[i] }),
-                      });
-
-                      const sendData = await sendRes.json().catch(() => ({}));
-                      const msgId = sendData?.key?.id || sendData?.id || crypto.randomUUID();
-                      allMsgIds.push(msgId);
-                    }
-
-                    console.log(`[UAZAPI_WEBHOOK] AI response sent in ${parts.length} part(s), ids:`, allMsgIds);
-
-                    // Save full AI message to database
-                    await supabaseClient.from("messages").insert({
-                      conversation_id: conversationId,
-                      whatsapp_message_id: allMsgIds[0],
-                      content: aiText,
-                      message_type: "text",
-                      is_from_me: true,
-                      sender_type: "ai",
-                      ai_generated: true,
-                      law_firm_id: lawFirmId,
-                      ai_agent_id: conv.current_automation_id,
-                      ai_agent_name: automationName,
-                    });
-                  }
-
-                  // Update conversation timestamp
-                  await supabaseClient
-                    .from("conversations")
-                    .update({ last_message_at: new Date().toISOString() })
-                    .eq("id", conversationId);
-                }
-              } else {
-                const errText = await aiResponse.text().catch(() => "");
-                console.warn("[UAZAPI_WEBHOOK] AI chat returned error:", aiResponse.status, errText?.substring(0, 200));
-              }
-            } catch (aiErr) {
-              console.warn("[UAZAPI_WEBHOOK] AI processing error:", aiErr);
-            }
+            await queueMessageForAIProcessing(supabaseClient, {
+              conversationId,
+              lawFirmId,
+              messageContent: contentForAI || '',
+              messageType,
+              contactName,
+              contactPhone: phoneNumber,
+              remoteJid,
+              instanceId: instance.id,
+              instanceName: instance.instance_name,
+              clientId: resolvedClientId,
+              audioRequested: audioRequestedForThisMessage,
+              automationId: conv.current_automation_id,
+              automationName: automationName,
+              agentResponseDelayMs,
+              apiUrl: instance.api_url || '',
+              apiKey: instance.api_key || '',
+            }, DEBOUNCE_SECONDS, requestId);
           }
         }
 
