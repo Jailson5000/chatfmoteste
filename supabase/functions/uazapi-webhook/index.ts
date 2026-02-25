@@ -1190,7 +1190,9 @@ serve(async (req) => {
           last_message_at: timestamp,
           updated_at: new Date().toISOString(),
         };
-        if (!isFromMe && contactName) {
+        // Only update contact_name if no linked client exists (protects manual edits)
+        const shouldUpdateContactName = !isFromMe && !resolvedClientId && contactName && contactName !== phoneNumber;
+        if (shouldUpdateContactName) {
           convUpdate.contact_name = contactName;
         }
 
