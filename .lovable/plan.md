@@ -1,52 +1,66 @@
 
 
-# Análise: Jitter de Resposta da IA
+# Correção: Nome do cliente sendo sobrescrito a cada mensagem
 
-## Status Atual
+## Diagnóstico
 
-| Webhook | Jitter Implementado | Delay Antes da 1a Msg | Delay Entre Partes |
-|---|---|---|---|
-| `evolution-webhook` | Sim | 1-3s + delay configurado por agente | 3-7s (`messageSplitDelay`) |
-| `uazapi-webhook` | **Não** | **0s (instantâneo)** | 1-3s (inline básico) |
+O `uazapi-webhook` sobrescreve o `contact_name` da conversa **a cada mensagem recebida** (linha 1193-1194):
 
-## O Que Funciona (evolution-webhook)
+```text
+if (!isFromMe && contactName) {
+  convUpdate.contact_name = contactName;  // ← Sobrescreve SEMPRE
+}
+```
 
-O `evolution-webhook` importa e usa corretamente o `human-delay.ts`:
-- Primeira mensagem: `humanDelay(AI_RESPONSE.min + clientDelayMs, AI_RESPONSE.max + clientDelayMs)` = **1-3s base + delay configurado no agente**
-- Partes subsequentes: `messageSplitDelay()` = **3-7s**
-- Áudio TTS: delay antes do primeiro chunk, 0.5-1s entre chunks
-- Mídia: delay antes de enviar imagem/vídeo
+Já o `evolution-webhook` tem proteção correta (linha 5780):
 
-## O Que Não Funciona (uazapi-webhook)
+```text
+const shouldUpdateContactName = !isFromMe 
+  && !conversation.client_id    // ← Só atualiza se NÃO tem cliente vinculado
+  && extractedContactName !== phoneNumber;  // ← Só se for nome real
+```
 
-O `uazapi-webhook` (linhas 1808-1830):
-- **Não importa** `human-delay.ts`
-- Primeira mensagem enviada **instantaneamente** após receber resposta da IA
-- Entre partes: `1000 + Math.random() * 2000` (1-3s hardcoded, sem usar DELAY_CONFIG)
-- Áudio TTS: **nenhum delay**
+Ou seja: no `evolution-webhook`, quando o cliente já está vinculado à conversa (tem `client_id`), o nome da conversa **não é mais sobrescrito** — preservando edições manuais. No `uazapi-webhook`, essa proteção não existe.
 
-## Correção Proposta
+Além disso, o `evolution-webhook` só atualiza o nome do **cliente** (`clients.name`) quando ele ainda é igual ao número de telefone ou é `null` (linhas 6192-6211). Isso também protege edições manuais.
+
+## Correção
 
 ### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
 
-1. **Importar** `humanDelay`, `messageSplitDelay`, `DELAY_CONFIG` do `_shared/human-delay.ts`
+**Linha 1193-1194** — Aplicar a mesma lógica de proteção do evolution-webhook:
 
-2. **Antes da primeira mensagem de texto** (linha ~1810): Adicionar `humanDelay(DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, '[UAZAPI_AI]')` — onde `clientDelayMs` vem do `response_delay_seconds` configurado no agente (já disponível na variável `conv`)
+Antes:
+```typescript
+if (!isFromMe && contactName) {
+  convUpdate.contact_name = contactName;
+}
+```
 
-3. **Entre partes de mensagem** (linha ~1812): Substituir o delay hardcoded por `messageSplitDelay(i, parts.length, '[UAZAPI_AI]')`
+Depois:
+```typescript
+// Only update contact_name if:
+// 1. Message is from client (not from us)
+// 2. Conversation does NOT have a linked client (client_id is null)
+// 3. We found a valid name (not just the phone number)
+// This protects manual name edits made by users
+const shouldUpdateContactName = !isFromMe && !resolvedClientId && contactName && contactName !== phoneNumber;
+if (shouldUpdateContactName) {
+  convUpdate.contact_name = contactName;
+}
+```
 
-4. **Antes do primeiro chunk de áudio TTS** (na seção de áudio ~linha 1550): Adicionar `humanDelay(DELAY_CONFIG.AI_RESPONSE.min + clientDelayMs, DELAY_CONFIG.AI_RESPONSE.max + clientDelayMs, '[UAZAPI_TTS]')`
+Usa `resolvedClientId` (que é preenchido quando a conversa já tem um cliente vinculado) como proxy para `client_id`. Quando há cliente vinculado, o nome autoritativo vem da tabela `clients`, não do `pushName` do WhatsApp.
 
-5. **Entre chunks de áudio** (dentro do loop de TTS): Adicionar `humanDelay(DELAY_CONFIG.AUDIO_CHUNK.min, DELAY_CONFIG.AUDIO_CHUNK.max, '[UAZAPI_TTS_CHUNK]')`
+## Resultado
 
-### Obter `response_delay_seconds` do Agente
+- Nomes editados manualmente no sistema serão preservados
+- Nomes só serão preenchidos automaticamente para conversas novas sem cliente vinculado
+- Alinha o comportamento do `uazapi-webhook` com o `evolution-webhook`
 
-Preciso verificar se o uazapi-webhook já lê o `response_delay_seconds` da automação. Se não, buscar esse valor para usar como `clientDelayMs` adicional.
+## Resumo
 
-## Resultado Esperado
-
-Após a correção, ambos os webhooks terão comportamento idêntico:
-- 1-3s de jitter base + delay configurado no agente antes da primeira mensagem
-- 3-7s entre partes de mensagem split
-- Delays adequados para chunks de áudio TTS
+| Arquivo | Mudança |
+|---|---|
+| `supabase/functions/uazapi-webhook/index.ts` | Proteger `contact_name` contra sobrescrita quando já há cliente vinculado |
 
