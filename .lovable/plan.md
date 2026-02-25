@@ -1,67 +1,64 @@
 
 
-# Correção: Contatos Vinculados Entre Instâncias Diferentes
+# Correção: Steps 3 e 4 do uazapi-webhook estão ROUBANDO conversas de outras instâncias
 
-## Diagnóstico
+## Diagnóstico Confirmado nos Logs
 
-Confirmado no banco de dados: existe **1 único registro de cliente** (`44ccc92a`) para o telefone `5519983391406`, mas **2 conversas** apontando para ele em instâncias diferentes:
+Acabei de capturar nos logs o bug acontecendo em tempo real com o "Jailson Ferreira":
 
-| Conversa | Instância | Client ID |
-|---|---|---|
-| `c40d99be` | `inst_7tdqx6d8` (FMOANTIGO) | `44ccc92a` ← mesmo |
-| `2089163c` | `inst_cgo5wn6p` (outra) | `44ccc92a` ← mesmo |
+```
+13:49:09 - Found orphan conversation 0e08e890, reassigning from instance fc9dbbd6 to 10b70877
+13:49:09 - Conversation resolved: 0e08e890 (via: orphan_jid)  ← ROUBOU a conversa!
+```
 
-Como ambas as conversas referenciam o **mesmo client_id**, alterar status/nome/departamento em uma afeta a outra.
+O Jailson já tem 2 registros de cliente separados (a correção anterior funcionou para isso):
+- `9fb2ade8` → instância `10b70877` (FMOANTIGO)
+- `ebcea5c6` → instância `fc9dbbd6`
+
+Mas a **conversa** é uma só (`0e08e890`) e fica sendo MOVIDA de uma instância para outra a cada mensagem.
 
 ## Causa Raiz
 
-O bug está no `uazapi-webhook` (linhas 898-905). Ao buscar/criar o cliente, ele **não filtra por `whatsapp_instance_id`**:
+Os Steps 3 e 4 (linhas 754-811) buscam conversas **SEM filtrar por `whatsapp_instance_id IS NULL`**. Ou seja, eles encontram conversas que JA PERTENCEM a outra instância ativa e as ROUBAM para a instância atual.
 
 ```text
-// BUGADO (uazapi-webhook):
-.from("clients")
-.eq("law_firm_id", lawFirmId)
-.or(`phone.eq.${normalizedPhone},phone.eq.+${normalizedPhone}`)
-// ❌ Falta: .eq("whatsapp_instance_id", instance.id)
-
-// CORRETO (evolution-webhook, já implementado):
-.from("clients")
-.eq("law_firm_id", lawFirmId)
-.eq("whatsapp_instance_id", instance.id)  // ✅
-.or(`phone.eq.${phoneNumber},phone.ilike.%${phoneEnding}`)
+Fluxo do bug:
+1. Jailson manda msg na instância A
+2. Step 1 (jid + instância A) → encontra conversa → OK
+3. Jailson manda msg na instância B
+4. Step 1 (jid + instância B) → NÃO encontra
+5. Step 2 (phone + instância B) → NÃO encontra
+6. Step 3 (jid, QUALQUER instância) → ENCONTRA a conversa da instância A → MOVE para B!
+7. Agora a conversa pertence a B, o cliente da A fica "solto"
 ```
 
-Além disso, os Steps 3 e 4 da busca de conversa (linhas 760-828) são problemáticos: quando encontram uma conversa "órfã" de outra instância, eles **reassociam o cliente da instância antiga para a nova**, quebrando o vínculo original.
+O Step 3 deveria buscar APENAS conversas verdadeiramente órfãs (`whatsapp_instance_id IS NULL`), não conversas de outras instâncias.
 
-## Correção Proposta
+## Correção
 
-### 1. `supabase/functions/uazapi-webhook/index.ts` — Busca de cliente por instância
+### Arquivo: `supabase/functions/uazapi-webhook/index.ts`
 
-Alterar a seção "FIND OR CREATE CLIENT" (linhas ~898-934) para:
-- Buscar cliente filtrando por `whatsapp_instance_id = instance.id`
-- Se não encontrar, **criar um novo cliente** para esta instância (mesmo que exista cliente com mesmo telefone em outra instância)
+**Step 3 (linhas 754-781):** Adicionar `.is("whatsapp_instance_id", null)` na query. Se a conversa já pertence a outra instância, ela NÃO é órfã — é uma conversa separada e deve ser respeitada.
 
-### 2. `supabase/functions/uazapi-webhook/index.ts` — Orphan Steps 3 e 4
+**Step 4 (linhas 783-811):** Mesma correção — adicionar `.is("whatsapp_instance_id", null)`.
 
-Nos passos de busca de conversa órfã (linhas 760-828):
-- **Remover** a lógica que reassocia o `client.whatsapp_instance_id` ao encontrar órfãos
-- Em vez disso, quando uma conversa órfã é reassociada para uma nova instância, criar um **novo cliente** para a nova instância em vez de mover o existente
+Com isso, quando não encontra conversa nos Steps 1-4, o Step 5 (criar nova conversa) será executado corretamente, criando uma conversa separada para a instância B.
 
-### 3. Correção dos dados existentes (SQL migration)
+### Migration SQL: Corrigir o caso do Jailson Ferreira
 
-Criar migration para corrigir o caso específico do "Excluir laercio":
-- Criar um novo registro de cliente para a instância `inst_cgo5wn6p` com os mesmos dados
-- Atualizar a conversa `2089163c` para apontar para o novo cliente
-- Manter o cliente original vinculado à instância `inst_7tdqx6d8`
+A conversa `0e08e890` foi movida para a instância `10b70877`, mas deveria ter ficado na instância original `fc9dbbd6`. Precisamos:
+1. Restaurar a conversa `0e08e890` para a instância `fc9dbbd6` e vincular ao cliente `ebcea5c6`
+2. Criar uma nova conversa para a instância `10b70877` vinculada ao cliente `9fb2ade8`
+3. Mover as mensagens recentes (da instância errada) para a conversa correta
 
-## Arquivos Alterados
+### Auditoria adicional
+
+Verificar se existem outros casos de conversas com `last_whatsapp_instance_id` preenchido (indicando que foram movidas) e corrigir em lote.
+
+## Resumo das mudanças
 
 | Arquivo | Mudança |
 |---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Filtrar busca de cliente por `whatsapp_instance_id`; criar cliente separado por instância; corrigir lógica de órfãos |
-| Nova migration SQL | Desduplicar o caso existente no banco |
-
-## Detalhes Técnicos
-
-A correção alinha o `uazapi-webhook` com a lógica já correta do `evolution-webhook`, que desde janeiro implementa busca de cliente **por instância**. O índice único `idx_clients_phone_norm_law_firm_instance` já suporta múltiplos clientes com mesmo telefone em instâncias diferentes — o bug é apenas na lógica de busca do webhook uazapi.
+| `supabase/functions/uazapi-webhook/index.ts` | Steps 3 e 4: adicionar `.is("whatsapp_instance_id", null)` para só pegar conversas verdadeiramente órfãs |
+| Migration SQL | Restaurar conversa do Jailson e criar conversa separada na instância correta |
 
