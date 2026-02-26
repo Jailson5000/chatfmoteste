@@ -705,12 +705,18 @@ export function useMessagesWithPagination({
 
           // Resolve reply_to asynchronously and update the message
           if (rawMsg.reply_to_message_id && !rawMsg.reply_to) {
-            const resolvedMsg = await resolveReplyTo(rawMsg, []);
-            if (resolvedMsg.reply_to) {
-              setMessages(prev => prev.map(m => 
-                m.id === rawMsg.id ? { ...m, reply_to: resolvedMsg.reply_to } : m
-              ));
-            }
+            // Read current messages from state for local lookup
+            setMessages(currentMessages => {
+              // Fire async resolution without blocking state update
+              resolveReplyTo(rawMsg, currentMessages).then(resolvedMsg => {
+                if (resolvedMsg.reply_to) {
+                  setMessages(prev => prev.map(m => 
+                    m.id === rawMsg.id ? { ...m, reply_to: resolvedMsg.reply_to } : m
+                  ));
+                }
+              });
+              return currentMessages; // Return unchanged for now
+            });
           }
 
           // Callback for new message (e.g., play notification, show unseen indicator)

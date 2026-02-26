@@ -449,7 +449,20 @@ export default function Conversations() {
     return undefined;
   }, [conversations, selectedConversationId, newlyCreatedConversation]);
 
-  // Check if audio mode is enabled for the SELECTED CONVERSATION (SINGLE SOURCE OF TRUTH)
+  // Derive AI agent name fallback from the selected conversation's automation
+  const currentAgentName = useMemo(() => {
+    if (!selectedConversation) return undefined;
+    const automationName = (selectedConversation as any)?.current_automation?.name;
+    if (automationName?.trim()) return automationName;
+    // Fallback: look up from automations list
+    const automationId = selectedConversation.current_automation_id;
+    if (automationId) {
+      const automation = automations.find(a => a.id === automationId);
+      return automation?.name || undefined;
+    }
+    return undefined;
+  }, [selectedConversation, automations]);
+
   // This takes precedence over global voice config
   const conversationAudioEnabled = useMemo(() => {
     if (!selectedConversation) return false;
@@ -3401,7 +3414,7 @@ export default function Conversations() {
                                   replyTo={item.data.reply_to}
                                   isInternal={item.data.is_internal}
                                   isPontual={item.data.is_pontual}
-                                  aiAgentName={item.data.ai_agent_name}
+                                   aiAgentName={item.data.ai_agent_name || (item.data.ai_generated ? currentAgentName : undefined)}
                                   isRevoked={item.data.is_revoked}
                                   isStarred={item.data.is_starred}
                                   myReaction={item.data.my_reaction}
@@ -4373,7 +4386,7 @@ export default function Conversations() {
                                   replyTo={item.data.reply_to}
                                   isInternal={item.data.is_internal}
                                   isPontual={item.data.is_pontual}
-                                  aiAgentName={item.data.ai_agent_name}
+                                  aiAgentName={item.data.ai_agent_name || (item.data.ai_generated ? currentAgentName : undefined)}
                                   isRevoked={item.data.is_revoked}
                                   isStarred={item.data.is_starred}
                                   myReaction={item.data.my_reaction}
