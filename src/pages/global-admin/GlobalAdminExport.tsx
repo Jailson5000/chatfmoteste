@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Database, Download, Loader2, CheckCircle2, AlertCircle, Archive } from "lucide-react";
+import { Database, Download, Loader2, CheckCircle2, AlertCircle, Archive, Users, HardDrive } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import JSZip from "jszip";
@@ -15,14 +15,22 @@ interface TableInfo {
   status: "pending" | "exporting" | "done" | "error";
 }
 
+interface InternalInfo {
+  authUsersCount: number;
+  storageBuckets: { name: string; id: string; objectCount: number }[];
+}
+
 export default function GlobalAdminExport() {
   const [tables, setTables] = useState<TableInfo[]>([]);
+  const [internal, setInternal] = useState<InternalInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [currentTable, setCurrentTable] = useState("");
   const [zipBlob, setZipBlob] = useState<Blob | null>(null);
   const [totalRows, setTotalRows] = useState(0);
+  const [authStatus, setAuthStatus] = useState<"pending" | "exporting" | "done" | "error">("pending");
+  const [storageStatus, setStorageStatus] = useState<"pending" | "exporting" | "done" | "error">("pending");
 
   const loadTables = useCallback(async () => {
     setLoading(true);
@@ -39,10 +47,16 @@ export default function GlobalAdminExport() {
         status: "pending" as const,
       }));
 
-      // Sort by name
       tableList.sort((a, b) => a.name.localeCompare(b.name));
       setTables(tableList);
       setZipBlob(null);
+
+      if (data.internal) {
+        setInternal({
+          authUsersCount: data.internal.auth_users ?? 0,
+          storageBuckets: data.internal.storage_buckets ?? [],
+        });
+      }
     } catch (err: any) {
       toast.error("Erro ao listar tabelas: " + (err.message || "Erro desconhecido"));
     } finally {
@@ -57,14 +71,17 @@ export default function GlobalAdminExport() {
     setProgress(0);
     setZipBlob(null);
     setTotalRows(0);
+    setAuthStatus("pending");
+    setStorageStatus("pending");
 
     const zip = new JSZip();
     let completed = 0;
     let rowsTotal = 0;
+    const totalSteps = tables.length + (internal ? 2 : 0);
 
-    // Reset statuses
     setTables((prev) => prev.map((t) => ({ ...t, status: "pending" })));
 
+    // Export public tables
     for (const table of tables) {
       setCurrentTable(table.name);
       setTables((prev) =>
@@ -95,7 +112,47 @@ export default function GlobalAdminExport() {
       }
 
       completed++;
-      setProgress(Math.round((completed / tables.length) * 100));
+      setProgress(Math.round((completed / totalSteps) * 100));
+    }
+
+    // Export auth users
+    if (internal) {
+      setCurrentTable("auth.users");
+      setAuthStatus("exporting");
+      try {
+        const { data, error } = await supabase.functions.invoke("export-database", {
+          body: { action: "export-auth-users" },
+        });
+        if (error) throw error;
+        const rows = data.rows || [];
+        rowsTotal += rows.length;
+        zip.file("_auth_users.json", JSON.stringify(rows, null, 2));
+        setAuthStatus("done");
+      } catch (err: any) {
+        console.error("Error exporting auth users:", err);
+        setAuthStatus("error");
+      }
+      completed++;
+      setProgress(Math.round((completed / totalSteps) * 100));
+
+      // Export storage
+      setCurrentTable("storage");
+      setStorageStatus("exporting");
+      try {
+        const { data, error } = await supabase.functions.invoke("export-database", {
+          body: { action: "export-storage" },
+        });
+        if (error) throw error;
+        rowsTotal += data.count || 0;
+        zip.file("_storage_buckets.json", JSON.stringify(data.buckets || [], null, 2));
+        zip.file("_storage_objects.json", JSON.stringify(data.objects || {}, null, 2));
+        setStorageStatus("done");
+      } catch (err: any) {
+        console.error("Error exporting storage:", err);
+        setStorageStatus("error");
+      }
+      completed++;
+      setProgress(Math.round((completed / totalSteps) * 100));
     }
 
     // Generate ZIP
@@ -103,14 +160,14 @@ export default function GlobalAdminExport() {
       const blob = await zip.generateAsync({ type: "blob" });
       setZipBlob(blob);
       setTotalRows(rowsTotal);
-      toast.success(`Export concluído! ${rowsTotal.toLocaleString()} registros em ${tables.length} tabelas.`);
+      toast.success(`Export concluído! ${rowsTotal.toLocaleString()} registros em ${totalSteps} itens.`);
     } catch (err: any) {
       toast.error("Erro ao gerar ZIP: " + err.message);
     }
 
     setExporting(false);
     setCurrentTable("");
-  }, [tables]);
+  }, [tables, internal]);
 
   const downloadZip = useCallback(() => {
     if (!zipBlob) return;
@@ -122,7 +179,7 @@ export default function GlobalAdminExport() {
     URL.revokeObjectURL(url);
   }, [zipBlob]);
 
-  const statusIcon = (status: TableInfo["status"]) => {
+  const statusIcon = (status: "pending" | "exporting" | "done" | "error") => {
     switch (status) {
       case "exporting":
         return <Loader2 className="h-4 w-4 animate-spin text-blue-400" />;
@@ -162,7 +219,7 @@ export default function GlobalAdminExport() {
             Exportação Completa
           </CardTitle>
           <CardDescription className="text-white/50">
-            Exporta todas as tabelas públicas via API REST com paginação. Máximo de 100k registros por tabela.
+            Exporta tabelas públicas + auth.users + storage. Máximo de 100k registros por tabela.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -179,7 +236,7 @@ export default function GlobalAdminExport() {
                 ) : (
                   <Archive className="h-4 w-4 mr-2" />
                 )}
-                Exportar Tudo ({tables.length} tabelas)
+                Exportar Tudo ({tables.length} tabelas{internal ? " + auth + storage" : ""})
               </Button>
             )}
           </div>
@@ -201,7 +258,7 @@ export default function GlobalAdminExport() {
               <CheckCircle2 className="h-5 w-5 text-green-400" />
               <div className="text-sm text-white/80">
                 <strong>{totalRows.toLocaleString()}</strong> registros exportados de{" "}
-                <strong>{tables.length}</strong> tabelas.
+                <strong>{tables.length}</strong> tabelas + internal.
                 ZIP: <strong>{(zipBlob.size / 1024 / 1024).toFixed(1)} MB</strong>
               </div>
             </div>
@@ -209,12 +266,62 @@ export default function GlobalAdminExport() {
         </CardContent>
       </Card>
 
-      {/* Table List */}
+      {/* Internal Tables */}
+      {internal && (
+        <Card className="bg-[#111] border-white/10">
+          <CardHeader>
+            <CardTitle className="text-white text-lg flex items-center gap-2">
+              <Users className="h-5 w-5 text-yellow-400" />
+              Tabelas Internas
+            </CardTitle>
+            <CardDescription className="text-white/50">
+              Dados de autenticação e storage (não acessíveis via REST público).
+              Senhas (hashes) <strong>não</strong> são exportadas — apenas metadados.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {/* Auth Users */}
+            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03]">
+              <div className="flex items-center gap-3">
+                {statusIcon(authStatus)}
+                <Users className="h-4 w-4 text-blue-400" />
+                <span className="text-sm text-white/80 font-mono">auth.users</span>
+              </div>
+              <Badge variant="outline" className="text-white/50 border-white/10 font-mono text-xs">
+                {internal.authUsersCount >= 0 ? internal.authUsersCount.toLocaleString() : "erro"}
+              </Badge>
+            </div>
+
+            {/* Storage Buckets */}
+            <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03]">
+              <div className="flex items-center gap-3">
+                {statusIcon(storageStatus)}
+                <HardDrive className="h-4 w-4 text-purple-400" />
+                <span className="text-sm text-white/80 font-mono">storage.objects</span>
+              </div>
+              <div className="flex gap-2">
+                {internal.storageBuckets.map((b) => (
+                  <Badge key={b.id} variant="outline" className="text-white/50 border-white/10 font-mono text-xs">
+                    {b.name}
+                  </Badge>
+                ))}
+                {internal.storageBuckets.length === 0 && (
+                  <Badge variant="outline" className="text-white/50 border-white/10 font-mono text-xs">
+                    0 buckets
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Public Table List */}
       {tables.length > 0 && (
         <Card className="bg-[#111] border-white/10">
           <CardHeader>
             <CardTitle className="text-white text-lg">
-              Tabelas ({tables.length})
+              Tabelas Públicas ({tables.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
