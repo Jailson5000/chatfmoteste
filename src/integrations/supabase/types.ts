@@ -6317,6 +6317,17 @@ export type Database = {
               whatsapp_instance_id: string
             }[]
           }
+      get_dashboard_metrics_optimized: {
+        Args: {
+          _attendant_ids?: string[]
+          _connection_ids?: string[]
+          _department_ids?: string[]
+          _end_date: string
+          _law_firm_id: string
+          _start_date: string
+        }
+        Returns: Json
+      }
       get_database_metrics: { Args: never; Returns: Json }
       get_global_ai_usage: { Args: never; Returns: Json }
       get_law_firm_by_subdomain: {
