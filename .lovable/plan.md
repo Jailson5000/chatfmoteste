@@ -1,44 +1,52 @@
 
 
-# Plano: Script de Export do Banco via Edge Function
+# Plano: Incluir Tabelas Internas (auth, storage) no Export
 
-## Abordagem
+## Contexto
 
-Criar uma **Edge Function** (`export-database`) que usa a `service_role` key para bypasses RLS e exporta todas as 90 tabelas em JSON. Acessível apenas por Global Admins.
+Atualmente o export só acessa tabelas do schema `public` via REST API. As tabelas internas (`auth.users`, `storage.objects`, etc.) não são acessíveis pelo client REST do Supabase.
 
-Adicionalmente, criar uma **página no painel Global Admin** com botão de download que gera um `.zip` contendo um arquivo JSON por tabela.
+## O que é possível exportar
+
+| Schema | Método | Tabelas |
+|---|---|---|
+| `public` (91 tabelas) | REST API (`service_role`) | ✅ Já funciona |
+| `auth.users` | `supabase.auth.admin.listUsers()` | ✅ Possível via Admin API |
+| `storage.buckets` | `supabase.storage.listBuckets()` | ✅ Possível via Storage API |
+| `storage.objects` | `supabase.storage.from(bucket).list()` | ✅ Possível via Storage API |
+| `auth.sessions`, `auth.refresh_tokens`, etc. | Sem API disponível | ❌ Não acessível |
+| `realtime`, `cron`, `vault`, `net` | Sem API disponível | ❌ Não acessível |
 
 ## Implementação
 
-### 1. Edge Function `export-database`
+### Edge Function `export-database` — adicionar 2 novas actions:
 
-- Recebe lista de tabelas (ou "all") via POST
-- Valida que o chamador é Global Admin (`is_admin()`)
-- Para cada tabela, faz `SELECT *` paginado (1000 rows por batch) usando service role
-- Tabelas grandes (`messages`, `messages_archive`, `audit_logs`, `webhook_logs`) são exportadas em chunks
-- Retorna JSON com todas as tabelas ou streaming por tabela
-- Limite de segurança: timeout de 120s, exporta tabela por tabela via múltiplas chamadas
+1. **`export-auth-users`**: Usa `supabase.auth.admin.listUsers()` com paginação para exportar todos os usuários (incluindo metadados, email, phone, created_at, etc.). Exclui campos ultra-sensíveis como `encrypted_password` que a Admin API não retorna.
 
-### 2. Página Global Admin: "Export Database"
+2. **`export-storage`**: Usa `supabase.storage.listBuckets()` + `supabase.storage.from(bucket).list()` para exportar metadados de todos os arquivos. Opcionalmente pode baixar os arquivos em si (mas isso aumenta muito o tamanho do ZIP).
 
-- Nova rota `/global-admin/export` 
-- Lista todas as tabelas com contagem de registros
-- Botão "Exportar Tudo" que chama a edge function tabela por tabela
-- Progresso visual (barra de progresso)
-- Gera ZIP final com JSZip (já instalado) contendo `{tabela}.json` por tabela
-- Botão para download do ZIP
+3. **Atualizar `list`**: Incluir seção separada com contagem de auth users e storage objects.
+
+### Frontend `GlobalAdminExport.tsx`:
+
+- Adicionar seção "Tabelas Internas" separada das públicas
+- Mostrar `auth.users` com contagem e botão de export individual
+- Mostrar `storage.objects` com contagem por bucket
+- Incluir ambos no "Exportar Tudo"
+- Os JSONs ficam no ZIP como `_auth_users.json` e `_storage_objects.json`
 
 ### Arquivos
 
 | Arquivo | Ação |
 |---|---|
-| `supabase/functions/export-database/index.ts` | Nova edge function |
-| `src/pages/global-admin/GlobalAdminExport.tsx` | Nova página |
-| `src/App.tsx` | Adicionar rota |
-| `src/components/layout/GlobalAdminLayout.tsx` | Adicionar link no menu |
+| `supabase/functions/export-database/index.ts` | Adicionar actions `export-auth-users` e `export-storage` |
+| `src/pages/global-admin/GlobalAdminExport.tsx` | Adicionar seção de tabelas internas |
 
 ### Segurança
-- Apenas Global Admins podem acessar
-- Validação via `is_admin(auth.uid())` na edge function
-- Service role key usada apenas server-side
+- Mesma validação de `super_admin` já existente
+- Dados de auth users são sensíveis mas o destino é migração interna
+- A Admin API do Supabase **não** retorna password hashes (apenas metadados)
+
+### Limitação importante
+- **Password hashes** (`encrypted_password`) não são acessíveis via API — apenas via `pg_dump` direto. Isso significa que os usuários exportados terão que redefinir senhas no ambiente novo, a menos que se obtenha o dump via suporte.
 
