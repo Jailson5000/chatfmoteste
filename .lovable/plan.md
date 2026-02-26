@@ -1,56 +1,50 @@
 
 
-# Respostas e Plano de Migração Self-Hosted
+# Plano: Otimizações de Performance (3 itens)
 
-## 1. WhatsApp Cloud API reduz requisições?
+## Sua pergunta sobre o cache Deno KV e o prompt da IA
 
-**Não significativamente.** O número de invocações de Edge Functions é proporcional ao volume de **mensagens recebidas**, não ao provedor. Comparação:
+**Sim, haveria um delay de até 5 minutos para propagar alterações.** Mas o cache seria aplicado **apenas na base de conhecimento** (`knowledge_items`), não no prompt principal (`ai_prompt`). O prompt do agente é carregado da tabela `automations.ai_prompt` a cada chamada e **não seria cacheado**.
 
-| Provedor | Webhook | Invocações por msg recebida |
-|---|---|---|
-| Evolution API | `evolution-webhook` | 1 |
-| UazAPI | `uazapi-webhook` | 1 |
-| WhatsApp Cloud (Meta) | `meta-webhook` | 1 |
+A base de conhecimento muda raramente (documentos, FAQs), então 5 minutos de delay é aceitável. Mas para maior segurança, a implementação incluirá **invalidação manual**: quando o admin salvar alterações na base de conhecimento, o cache é limpo instantaneamente via um parâmetro `?bust_cache=true`.
 
-Todos os provedores disparam **1 chamada de Edge Function por evento de webhook**. A diferença é que a Evolution API e UazAPI enviam eventos extras (CONNECTION_UPDATE, QRCODE_UPDATED, status ticks) que são filtrados no fast-filter, mas esses são bloqueados antes de executar lógica pesada. O WhatsApp Cloud API da Meta também envia eventos de status (delivered, read) que passam pelo `meta-webhook`.
+**Resumo do comportamento:**
+- **Prompt da IA** (`ai_prompt`): sempre atualizado em tempo real (sem cache)
+- **Base de conhecimento** (`knowledge_items`): cache de 5min com invalidação manual ao editar
 
-**O que realmente reduz custos:** migrar para Supabase self-hosted, onde Edge Functions rodam no seu Deno Deploy/Docker sem cobrança por invocação.
+---
 
-## 2. É possível migrar saindo do Lovable Cloud?
+## Implementação
 
-**Sim.** O Lovable Cloud usa Supabase por baixo. Você pode:
-- Exportar o schema completo (DDL) + dados via `pg_dump`
-- Instalar Supabase self-hosted em uma VPS
-- Restaurar o banco, configurar secrets, e deployar as Edge Functions
-- O frontend continua sendo servido do VPS (já documentado em `VPS-DEPLOY-GUIDE.md`)
+### 1. Criar 3 índices faltantes (Migration SQL)
 
-O projeto Lovable continua existindo (não pode ser desconectado do Cloud), mas você simplesmente aponta o frontend para a nova instância Supabase.
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_conv_created 
+  ON messages(conversation_id, created_at DESC);
 
-## 3. Plano: Gerar arquivo de migração completo
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_messages_conv_fromme_created 
+  ON messages(conversation_id, is_from_me, created_at);
 
-### Arquivo a criar: `docs/MIGRATION-SELF-HOSTED.md`
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_conversations_lawfirm_archived 
+  ON conversations(law_firm_id, archived_at);
+```
 
-Conteúdo abrangendo:
+### 2. Criar RPC `get_dashboard_metrics_optimized`
 
-1. **Pré-requisitos** — VPS specs (8GB RAM, 4 vCPU), Docker, domínio
-2. **Exportação do banco** — Comandos pg_dump para schema + dados, lista das 90+ tabelas
-3. **Instalação Supabase Self-Hosted** — docker-compose, configuração JWT, dashboard
-4. **Restauração do banco** — pg_restore, criação de funções, triggers, views, RLS policies
-5. **Migração dos 27 secrets** — Lista completa com onde obter cada um
-6. **Deploy das 65+ Edge Functions** — supabase functions deploy, configuração do config.toml
-7. **Configuração de Cron Jobs** — pg_cron para as 8+ funções agendadas (birthday, follow-ups, reminders, etc.)
-8. **Atualização do Frontend** — Trocar VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY
-9. **Webhooks** — Atualizar URLs de callback na Evolution API, UazAPI, Meta, Stripe
-10. **Storage** — Migrar buckets (chat-media, etc.)
-11. **Auth** — Migrar configurações de email, redirect URLs, Google OAuth
-12. **Verificação pós-migração** — Checklist de testes
-13. **Rollback** — Como voltar ao Cloud se algo falhar
+Uma stored procedure que consolida em 1 query SQL:
+- Contagem de mensagens recebidas/enviadas no período
+- Contagem de conversas ativas e arquivadas
+- Usa `dashboard_daily_snapshots` para dias passados + cálculo real-time para hoje
+- Aceita filtros opcionais (attendant, department, connection)
 
-### Dados técnicos incluídos
+Atualizar `useDashboardMetrics.tsx` para chamar a RPC em vez das 8-12 queries individuais.
 
-- Lista completa das Edge Functions (65+) com dependências
-- Mapa de secrets → funções que os utilizam
-- Tabelas críticas com ordem de restauração (respeitar FKs)
-- Cron jobs com schedule exato
-- Configurações de webhook por provedor
+### 3. Cache Deno KV no `ai-chat` (apenas knowledge items)
+
+Na função `getAgentKnowledge()`:
+- Verificar cache por chave `knowledge:{automationId}`
+- Se existe e tem < 5min → retornar do cache
+- Se não → buscar do banco, salvar no cache
+- **O prompt (`ai_prompt`) NÃO será cacheado** — continua sendo lido do banco a cada chamada
+- Adicionar parâmetro de invalidação para quando o admin editar a base
 
