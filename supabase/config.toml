@@ -71,3 +71,6 @@ verify_jwt = false
 
 [functions.uazapi-webhook]
 verify_jwt = false
+
+[functions.export-database]
+verify_jwt = false

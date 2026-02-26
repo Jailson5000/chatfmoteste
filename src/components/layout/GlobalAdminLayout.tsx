@@ -22,7 +22,8 @@ import {
   Sparkles,
   Rocket,
   Ticket,
-  PlayCircle
+  PlayCircle,
+  Database
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +72,7 @@ const adminNavItems = [
   { icon: Rocket, label: "Onboarding", path: "/global-admin/onboarding", roles: ["super_admin", "admin_operacional"] },
   { icon: Bell, label: "Histórico de Alertas", path: "/global-admin/alert-history", roles: ["super_admin", "admin_operacional"] },
   { icon: FileText, label: "Logs de Auditoria", path: "/global-admin/audit-logs", roles: ["super_admin", "admin_operacional"] },
+  { icon: Database, label: "Export Database", path: "/global-admin/export", roles: ["super_admin"] },
 ];
 
 const roleLabels: Record<string, { label: string; color: string }> = {
@@ -98,6 +100,7 @@ const breadcrumbMap: Record<string, string> = {
   tickets: "Tickets",
   tutorials: "Tutoriais",
   onboarding: "Onboarding",
+  export: "Export Database",
 };
 
 export function GlobalAdminLayout() {

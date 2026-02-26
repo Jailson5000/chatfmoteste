@@ -83,6 +83,7 @@ const GlobalAdminAgentTemplates = lazyWithRetry(() => import("./pages/global-adm
 const GlobalAdminTickets = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminTickets"));
 const GlobalAdminTutorials = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminTutorials"));
 const GlobalAdminOnboarding = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminOnboarding"));
+const GlobalAdminExport = lazyWithRetry(() => import("./pages/global-admin/GlobalAdminExport"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -215,6 +216,7 @@ const App = () => (
                   <Route path="tickets" element={<GlobalAdminTickets />} />
                   <Route path="tutorials" element={<GlobalAdminTutorials />} />
                   <Route path="onboarding" element={<GlobalAdminOnboarding />} />
+                  <Route path="export" element={<GlobalAdminRoute allowedRoles={["super_admin"]}><GlobalAdminExport /></GlobalAdminRoute>} />
                 </Route>
 
                 <Route path="*" element={<NotFound />} />
