@@ -2483,10 +2483,37 @@ async function executeTemplateTool(
   }
 }
 
-// Fetch knowledge base content for an agent
-async function getAgentKnowledge(supabase: any, automationId: string): Promise<string> {
+// Deno KV cache for knowledge items (5min TTL)
+const KNOWLEDGE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+let kvStore: Deno.Kv | null = null;
+
+async function getKvStore(): Promise<Deno.Kv | null> {
+  if (kvStore) return kvStore;
   try {
-    // Get knowledge items linked to this specific agent
+    kvStore = await Deno.openKv();
+    return kvStore;
+  } catch (e) {
+    console.warn("[AI Chat] Deno KV not available, cache disabled:", e);
+    return null;
+  }
+}
+
+// Fetch knowledge base content for an agent (with Deno KV cache)
+async function getAgentKnowledge(supabase: any, automationId: string, bustCache = false): Promise<string> {
+  try {
+    const cacheKey = ["knowledge", automationId];
+    const kv = await getKvStore();
+
+    // Check cache (unless bust_cache requested)
+    if (kv && !bustCache) {
+      const cached = await kv.get<{ text: string; ts: number }>(cacheKey);
+      if (cached.value && (Date.now() - cached.value.ts) < KNOWLEDGE_CACHE_TTL_MS) {
+        console.log(`[AI Chat] Knowledge cache HIT for ${automationId}`);
+        return cached.value.text;
+      }
+    }
+
+    // Cache miss or bust — fetch from DB
     const { data: linkedKnowledge, error } = await supabase
       .from("agent_knowledge")
       .select(`
@@ -2504,6 +2531,8 @@ async function getAgentKnowledge(supabase: any, automationId: string): Promise<s
       .eq("automation_id", automationId);
     
     if (error || !linkedKnowledge || linkedKnowledge.length === 0) {
+      // Cache empty result too to avoid repeated DB queries
+      if (kv) await kv.set(cacheKey, { text: "", ts: Date.now() }, { expireIn: KNOWLEDGE_CACHE_TTL_MS });
       return "";
     }
     
@@ -2528,10 +2557,19 @@ async function getAgentKnowledge(supabase: any, automationId: string): Promise<s
       .filter(Boolean);
     
     if (knowledgeTexts.length === 0) {
+      if (kv) await kv.set(cacheKey, { text: "", ts: Date.now() }, { expireIn: KNOWLEDGE_CACHE_TTL_MS });
       return "";
     }
     
-    return `\n\n## BASE DE CONHECIMENTO\nUse as informações abaixo para responder perguntas do cliente:\n\n${knowledgeTexts.join("\n\n")}`;
+    const result = `\n\n## BASE DE CONHECIMENTO\nUse as informações abaixo para responder perguntas do cliente:\n\n${knowledgeTexts.join("\n\n")}`;
+    
+    // Store in cache
+    if (kv) {
+      await kv.set(cacheKey, { text: result, ts: Date.now() }, { expireIn: KNOWLEDGE_CACHE_TTL_MS });
+      console.log(`[AI Chat] Knowledge cached for ${automationId} (${linkedKnowledge.length} items)`);
+    }
+    
+    return result;
     
   } catch (error) {
     console.error("[AI Chat] Error fetching agent knowledge:", error);

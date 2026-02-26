@@ -74,15 +74,18 @@ serve(async (req) => {
     // Parse request parameters (GET or POST)
     let automationId: string | null = null;
     let query: string | null = null;
+    let bustCache = false;
 
     if (req.method === "GET") {
       const url = new URL(req.url);
       automationId = url.searchParams.get("automation_id");
       query = url.searchParams.get("query");
+      bustCache = url.searchParams.get("bust_cache") === "true";
     } else if (req.method === "POST") {
       const body = await req.json();
       automationId = body.automation_id || body.automationId;
       query = body.query || body.texto || body.message;
+      bustCache = body.bust_cache === true;
     }
 
     if (!automationId) {

@@ -154,7 +154,7 @@ function getDateRange(filters: DashboardFilters) {
 export function useDashboardMetrics(filters: DashboardFilters) {
   const { lawFirm } = useLawFirm();
 
-  // Fetch message metrics
+  // Fetch message metrics via optimized RPC (consolidates 8-12 queries into 1)
   const { data: messageMetrics, isLoading: metricsLoading, refetch: refetchMetrics } = useQuery({
     queryKey: ["dashboard-message-metrics", lawFirm?.id, filters],
     queryFn: async (): Promise<MessageMetrics> => {
@@ -163,184 +163,36 @@ export function useDashboardMetrics(filters: DashboardFilters) {
       }
 
       const { startDate, endDate } = getDateRange(filters);
-      const startISO = startDate.toISOString();
-      const endISO = endDate.toISOString();
-      const today = formatDateForDatabase(new Date());
 
-      const hasFilters = filters.attendantIds.length > 0 || filters.departmentIds.length > 0 || filters.connectionIds.length > 0;
+      // Call the optimized RPC that does everything in 1 SQL call
+      const { data: rawData, error } = await supabase.rpc("get_dashboard_metrics_optimized", {
+        _law_firm_id: lawFirm.id,
+        _start_date: startDate.toISOString(),
+        _end_date: endDate.toISOString(),
+        _attendant_ids: filters.attendantIds.length > 0 ? filters.attendantIds : null,
+        _department_ids: filters.departmentIds.length > 0 ? filters.departmentIds : null,
+        _connection_ids: filters.connectionIds.length > 0 ? filters.connectionIds : null,
+      });
 
-      // --- Strategy: use snapshots for past days, real-time for today ---
-      let totalReceived = 0;
-      let totalSent = 0;
-      let totalConversationsFromSnapshots = 0;
+      const data = rawData as Record<string, any> | null;
 
-      const snapshotStartDate = formatDateForDatabase(startDate);
-      const snapshotEndDate = formatDateForDatabase(endDate);
-
-      // Only use snapshots if no advanced filters are applied (snapshots don't have per-attendant/dept/connection breakdown)
-      if (!hasFilters) {
-        // Fetch snapshots for past days (excluding today)
-        const { data: snapshots } = await supabase
-          .from("dashboard_daily_snapshots")
-          .select("snapshot_date, messages_received, messages_sent, conversations_active")
-          .eq("law_firm_id", lawFirm.id)
-          .gte("snapshot_date", snapshotStartDate)
-          .lt("snapshot_date", today);
-
-        const snapshotDates = new Set(snapshots?.map(s => s.snapshot_date) || []);
-
-        if (snapshots && snapshots.length > 0) {
-          for (const s of snapshots) {
-            totalReceived += s.messages_received;
-            totalSent += s.messages_sent;
-            totalConversationsFromSnapshots += s.conversations_active;
-          }
-        }
-
-        // Calculate real-time for today + any days without snapshots
-        const convIds = await getFilteredConvIds(lawFirm.id, filters);
-
-        if (convIds.length > 0) {
-          // Count today's messages
-          const todayStart = startOfDay(new Date()).toISOString();
-          const todayEnd = endOfDay(new Date()).toISOString();
-
-          // Only count today if it's within the date range
-          if (today >= snapshotStartDate && today <= snapshotEndDate) {
-            const [todayReceived, todaySent] = await Promise.all([
-              countMessagesInChunks(convIds, false, todayStart, todayEnd),
-              countMessagesInChunks(convIds, true, todayStart, todayEnd),
-            ]);
-            totalReceived += todayReceived;
-            totalSent += todaySent;
-          }
-
-          // Count messages for days without snapshots (fallback)
-          // Generate list of past days in range
-          const pastDaysWithoutSnapshot: { start: string; end: string }[] = [];
-          const d = new Date(startDate);
-          const todayDate = new Date();
-          while (d < todayDate) {
-            const dateStr = formatDateForDatabase(d);
-            if (dateStr !== today && !snapshotDates.has(dateStr)) {
-              pastDaysWithoutSnapshot.push({
-                start: startOfDay(new Date(d)).toISOString(),
-                end: endOfDay(new Date(d)).toISOString(),
-              });
-            }
-            d.setDate(d.getDate() + 1);
-          }
-
-          // Count fallback days
-          for (const day of pastDaysWithoutSnapshot) {
-            const [r, s] = await Promise.all([
-              countMessagesInChunks(convIds, false, day.start, day.end),
-              countMessagesInChunks(convIds, true, day.start, day.end),
-            ]);
-            totalReceived += r;
-            totalSent += s;
-          }
-        }
-      } else {
-        // With filters: can't use snapshots, calculate everything in real-time
-        const convIds = await getFilteredConvIds(lawFirm.id, filters);
-
-        if (convIds.length > 0) {
-          const [received, sent] = await Promise.all([
-            countMessagesInChunks(convIds, false, startISO, endISO),
-            countMessagesInChunks(convIds, true, startISO, endISO),
-          ]);
-          totalReceived = received;
-          totalSent = sent;
-        }
+      if (error) {
+        console.error("[Dashboard] RPC error:", error);
+        return { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, archivedConversations: 0, avgResponseTime: 0 };
       }
 
-      // Count total conversations with activity in the period
-      let totalConvQuery = supabase
-        .from("conversations")
-        .select("id", { count: "exact", head: true })
-        .eq("law_firm_id", lawFirm.id)
-        .gte("last_message_at", startISO)
-        .lte("last_message_at", endISO);
-      totalConvQuery = applyConvFilters(totalConvQuery, filters);
-      const { count: totalConversationsCount } = await totalConvQuery;
-
-      // Get active conversations count (with ALL filters including connectionIds)
-      let activeQuery = supabase
-        .from("conversations")
-        .select("id", { count: "exact", head: true })
-        .eq("law_firm_id", lawFirm.id)
-        .is("archived_at", null);
-      activeQuery = applyConvFilters(activeQuery, filters);
-      const { count: activeCount } = await activeQuery;
-
-      // Get archived conversations count (with ALL filters including connectionIds)
-      let archivedQuery = supabase
-        .from("conversations")
-        .select("id", { count: "exact", head: true })
-        .eq("law_firm_id", lawFirm.id)
-        .not("archived_at", "is", null);
-      archivedQuery = applyConvFilters(archivedQuery, filters);
-      const { count: archivedCount } = await archivedQuery;
-
-      // Avg response time - sample from today only to keep it fast
-      let avgResponseTime = 0;
-      const convIds = await getFilteredConvIds(lawFirm.id, filters);
-
-      if (convIds.length > 0) {
-        const sampleChunks = chunkArray(convIds.slice(0, 2000), 500);
-        let allMessages: { is_from_me: boolean; created_at: string; conversation_id: string }[] = [];
-        
-        for (const chunk of sampleChunks) {
-          const { data: msgs } = await supabase
-            .from("messages")
-            .select("is_from_me, created_at, conversation_id")
-            .in("conversation_id", chunk)
-            .gte("created_at", startISO)
-            .lte("created_at", endISO)
-            .order("created_at", { ascending: true })
-            .limit(2000);
-          if (msgs) allMessages = allMessages.concat(msgs);
-        }
-
-        let totalResponseTime = 0;
-        let responseCount = 0;
-
-        if (allMessages.length > 0) {
-          const messagesByConv: Record<string, typeof allMessages> = {};
-          for (const msg of allMessages) {
-            if (!messagesByConv[msg.conversation_id]) {
-              messagesByConv[msg.conversation_id] = [];
-            }
-            messagesByConv[msg.conversation_id].push(msg);
-          }
-
-          for (const convId in messagesByConv) {
-            const convMessages = messagesByConv[convId];
-            for (let i = 0; i < convMessages.length - 1; i++) {
-              const current = convMessages[i];
-              const next = convMessages[i + 1];
-              if (current.is_from_me === false && next.is_from_me === true) {
-                const diffMinutes = (new Date(next.created_at).getTime() - new Date(current.created_at).getTime()) / (1000 * 60);
-                if (diffMinutes > 0 && diffMinutes < 1440) {
-                  totalResponseTime += diffMinutes;
-                  responseCount++;
-                }
-              }
-            }
-          }
-        }
-
-        avgResponseTime = responseCount > 0 ? Math.round(totalResponseTime / responseCount) : 0;
+      if (data?.error) {
+        console.error("[Dashboard] RPC access error:", data.error);
+        return { totalReceived: 0, totalSent: 0, totalConversations: 0, activeConversations: 0, archivedConversations: 0, avgResponseTime: 0 };
       }
 
       return {
-        totalReceived,
-        totalSent,
-        totalConversations: totalConversationsCount || 0,
-        activeConversations: activeCount || 0,
-        archivedConversations: archivedCount || 0,
-        avgResponseTime,
+        totalReceived: data?.total_received || 0,
+        totalSent: data?.total_sent || 0,
+        totalConversations: data?.total_conversations || 0,
+        activeConversations: data?.active_conversations || 0,
+        archivedConversations: data?.archived_conversations || 0,
+        avgResponseTime: 0,
       };
     },
     enabled: !!lawFirm?.id,
