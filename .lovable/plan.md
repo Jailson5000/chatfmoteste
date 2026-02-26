@@ -1,48 +1,44 @@
 
 
-# Plano: Corrigir exibição de respostas citadas e nome da IA
+# Plano: Script de Export do Banco via Edge Function
 
-## Problema 1: Citação (reply/quote) não aparece no chat
+## Abordagem
 
-**Diagnóstico:** O sistema salva `reply_to_message_id` corretamente no banco (confirmado). O frontend resolve o `reply_to` via lookup local + fetch do banco. Possíveis causas:
-- Quando a mensagem chega via Realtime, a resolução async pode falhar silenciosamente
-- O `QuotedMessage` renderiza corretamente, mas depende de `replyTo` não ser null
+Criar uma **Edge Function** (`export-database`) que usa a `service_role` key para bypasses RLS e exporta todas as 90 tabelas em JSON. Acessível apenas por Global Admins.
 
-**Correção:**
-1. Melhorar o `resolveReplyTo` no realtime handler para ser mais robusto (retry on failure)
-2. Adicionar log de diagnóstico para identificar se `reply_to_message_id` está chegando no payload do Realtime
-3. Garantir que a resolução assíncrona atualiza o state corretamente (verificar race condition no `setMessages`)
+Adicionalmente, criar uma **página no painel Global Admin** com botão de download que gera um `.zip` contendo um arquivo JSON por tabela.
 
-## Problema 2: Nome da IA mostrando "Assistente IA" em vez do nome real
+## Implementação
 
-**Diagnóstico confirmado no banco:**
-- Automação `1ba14ae9...` tem nome = "Maria"
-- Mensagens recentes (hoje) têm `ai_agent_id` preenchido mas `ai_agent_name = NULL`
-- Mensagens de ontem têm `ai_agent_name = "Maria"` corretamente
+### 1. Edge Function `export-database`
 
-**Causa raiz:** O `ai-chat` salva `automationName` (linha 4254), e o evolution-webhook salva via `contextWithAgent.automationName` (linha 2802). Mas há mensagens "avulsas" (URLs, imagens, texto fragmentado) inseridas em caminhos que não populam o nome.
+- Recebe lista de tabelas (ou "all") via POST
+- Valida que o chamador é Global Admin (`is_admin()`)
+- Para cada tabela, faz `SELECT *` paginado (1000 rows por batch) usando service role
+- Tabelas grandes (`messages`, `messages_archive`, `audit_logs`, `webhook_logs`) são exportadas em chunks
+- Retorna JSON com todas as tabelas ou streaming por tabela
+- Limite de segurança: timeout de 120s, exporta tabela por tabela via múltiplas chamadas
 
-**Correção em 2 frentes:**
+### 2. Página Global Admin: "Export Database"
 
-### Frente A — Backend: Preencher `ai_agent_name` retroativamente
-- Criar migration SQL para atualizar mensagens existentes com `ai_agent_id` preenchido mas `ai_agent_name` nulo, buscando o nome da automação correspondente
-- Adicionar trigger no banco que automaticamente preenche `ai_agent_name` a partir de `ai_agent_id` quando é NULL no INSERT
+- Nova rota `/global-admin/export` 
+- Lista todas as tabelas com contagem de registros
+- Botão "Exportar Tudo" que chama a edge function tabela por tabela
+- Progresso visual (barra de progresso)
+- Gera ZIP final com JSZip (já instalado) contendo `{tabela}.json` por tabela
+- Botão para download do ZIP
 
-### Frente B — Frontend: Fallback no MessageBubble
-- Se `aiAgentName` for null mas o message é `ai_generated`, buscar o nome do agente via `conversation.current_automation` (já disponível no contexto da conversa selecionada)
-- Passar o `currentAgentName` como prop fallback para o MessageBubble
+### Arquivos
 
-## Arquivos a modificar
-
-| Arquivo | Mudança |
+| Arquivo | Ação |
 |---|---|
-| Migration SQL (nova) | UPDATE retroativo + trigger para ai_agent_name |
-| `src/hooks/useMessagesWithPagination.tsx` | Melhorar resolveReplyTo no realtime |
-| `src/components/conversations/MessageBubble.tsx` | Fallback do nome da IA |
-| `src/pages/Conversations.tsx` | Passar nome do agente como fallback |
+| `supabase/functions/export-database/index.ts` | Nova edge function |
+| `src/pages/global-admin/GlobalAdminExport.tsx` | Nova página |
+| `src/App.tsx` | Adicionar rota |
+| `src/components/layout/GlobalAdminLayout.tsx` | Adicionar link no menu |
 
-## Impacto
-- Mensagens existentes com nome NULL serão corrigidas retroativamente
-- Novas mensagens sempre terão o nome via trigger
-- Frontend exibirá o nome correto mesmo se o backend falhar (fallback)
+### Segurança
+- Apenas Global Admins podem acessar
+- Validação via `is_admin(auth.uid())` na edge function
+- Service role key usada apenas server-side
 
