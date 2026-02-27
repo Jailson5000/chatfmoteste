@@ -453,10 +453,67 @@ async function processUazapiQueuedMessages(supabaseClient: any, conversationId: 
 
   try {
     const messages = queueItem.messages as Array<{ content: string; type: string }>;
-    const combinedContent = messages.length > 1 ? messages.map(m => m.content).join('\n\n') : messages[0]?.content || '';
+    let combinedContent = messages.length > 1 ? messages.map(m => m.content).join('\n\n') : messages[0]?.content || '';
     const metadata = queueItem.metadata as Record<string, any>;
     const lawFirmId = queueItem.law_firm_id;
     const automationId = metadata.automation_id;
+
+    // ---- FALLBACK: Re-transcribe audio if content is still literal "[audio]" ----
+    const hasOnlyLiteralAudio = combinedContent.trim() === '[audio]' || combinedContent.trim() === '[Áudio]';
+    if (hasOnlyLiteralAudio) {
+      console.warn(`[UAZAPI_DEBOUNCE] [${requestId}] ⚠️ Content is literal "[audio]" - attempting late transcription from DB`);
+      try {
+        // Find the audio message in DB — by now it should have media_url persisted
+        const { data: audioMsgs } = await supabaseClient
+          .from('messages')
+          .select('media_url, media_mime_type, whatsapp_message_id')
+          .eq('conversation_id', conversationId)
+          .eq('message_type', 'audio')
+          .eq('is_from_me', false)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        const audioMsg = audioMsgs?.[0];
+        if (audioMsg?.media_url && (audioMsg.media_url.includes('supabase') || audioMsg.media_url.includes('/storage/v1/'))) {
+          console.log(`[UAZAPI_DEBOUNCE] [${requestId}] Found persisted audio URL, transcribing...`);
+          const audioResponse = await fetch(audioMsg.media_url);
+          if (audioResponse.ok) {
+            const audioBytes = new Uint8Array(await audioResponse.arrayBuffer());
+            if (audioBytes.length > 100) {
+              let binary = '';
+              for (let i = 0; i < audioBytes.byteLength; i++) {
+                binary += String.fromCharCode(audioBytes[i]);
+              }
+              const audioBase64 = btoa(binary);
+              const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
+              const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+              const transcribeRes = await fetch(`${supabaseUrl}/functions/v1/transcribe-audio`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${serviceKey}` },
+                body: JSON.stringify({ audioBase64, mimeType: audioMsg.media_mime_type || 'audio/ogg' }),
+              });
+              if (transcribeRes.ok) {
+                const tResult = await transcribeRes.json();
+                if (tResult.transcription) {
+                  combinedContent = `[Áudio transcrito]: ${tResult.transcription}`;
+                  console.log(`[UAZAPI_DEBOUNCE] [${requestId}] ✅ Late transcription succeeded: ${tResult.transcription.length} chars`);
+                  // Update the message in DB too
+                  await supabaseClient
+                    .from('messages')
+                    .update({ content: combinedContent })
+                    .eq('whatsapp_message_id', audioMsg.whatsapp_message_id)
+                    .eq('conversation_id', conversationId);
+                }
+              }
+            }
+          }
+        } else {
+          console.warn(`[UAZAPI_DEBOUNCE] [${requestId}] No persisted audio URL found in DB for late transcription`);
+        }
+      } catch (lateTranscribeErr) {
+        console.warn(`[UAZAPI_DEBOUNCE] [${requestId}] Late transcription error:`, lateTranscribeErr);
+      }
+    }
     const automationName = metadata.automation_name;
     const agentResponseDelayMs = metadata.agent_response_delay_ms || 0;
     const audioRequested = !!metadata.audio_requested;
@@ -564,6 +621,11 @@ async function processUazapiQueuedMessages(supabaseClient: any, conversationId: 
       }
 
       await supabaseClient.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
+    }
+
+    // Warning when AI returns empty response (helps diagnose audio transcription failures)
+    if (!aiText) {
+      console.warn(`[UAZAPI_DEBOUNCE] [${requestId}] ⚠️ AI returned empty response for conversation ${conversationId}. Content sent: "${combinedContent.substring(0, 100)}"`);
     }
 
     await supabaseClient.from('ai_processing_queue').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', queueItem.id);
@@ -1502,92 +1564,115 @@ serve(async (req) => {
         // If the incoming message is audio, transcribe it before AI processing
         let contentForAI = finalContent || "";
         if (messageType === "audio" && !isFromMe) {
+          // Helper to transcribe from a persisted URL
+          async function transcribeFromUrl(url: string, mime: string): Promise<string | null> {
+            try {
+              const audioResponse = await fetch(url);
+              if (!audioResponse.ok) return null;
+              const audioBytes = new Uint8Array(await audioResponse.arrayBuffer());
+              if (audioBytes.length < 100) return null;
+              let binary = "";
+              for (let i = 0; i < audioBytes.byteLength; i++) {
+                binary += String.fromCharCode(audioBytes[i]);
+              }
+              const audioBase64 = btoa(binary);
+              const sUrl = Deno.env.get("SUPABASE_URL") || "";
+              const sKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+              const transcribeResponse = await fetch(`${sUrl}/functions/v1/transcribe-audio`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sKey}` },
+                body: JSON.stringify({ audioBase64, mimeType: mime || "audio/ogg" }),
+              });
+              if (transcribeResponse.ok) {
+                const result = await transcribeResponse.json();
+                return result.transcription || null;
+              }
+            } catch (e) { console.warn("[UAZAPI_WEBHOOK] transcribeFromUrl error:", e); }
+            return null;
+          }
+
+          // Helper to transcribe via uazapi /message/download
+          async function transcribeViaDownload(): Promise<string | null> {
+            try {
+              const aUrl = (instance.api_url || "").replace(/\/+$/, "");
+              const aKey = instance.api_key || "";
+              if (!aUrl || !aKey) return null;
+              const dlRes = await fetch(`${aUrl}/message/download`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", token: aKey },
+                body: JSON.stringify({ id: whatsappMessageId, return_base64: true }),
+              });
+              if (!dlRes.ok) return null;
+              const dlData = await dlRes.json();
+              const dlBase64 = dlData.base64Data || dlData.base64;
+              if (!dlBase64) return null;
+              const sUrl = Deno.env.get("SUPABASE_URL") || "";
+              const sKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+              const transcribeRes = await fetch(`${sUrl}/functions/v1/transcribe-audio`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sKey}` },
+                body: JSON.stringify({ audioBase64: dlBase64, mimeType: mimeType || "audio/ogg" }),
+              });
+              if (transcribeRes.ok) {
+                const tResult = await transcribeRes.json();
+                return tResult.transcription || null;
+              }
+            } catch (e) { console.warn("[UAZAPI_WEBHOOK] transcribeViaDownload error:", e); }
+            return null;
+          }
+
           try {
-            // Get the persisted media URL
+            let transcription: string | null = null;
+
+            // Attempt 1: Use persisted media URL (already in storage)
             const persistedMediaUrl = messagePayload.media_url as string | null;
             if (persistedMediaUrl && (persistedMediaUrl.includes("supabase") || persistedMediaUrl.includes("/storage/v1/"))) {
-              console.log("[UAZAPI_WEBHOOK] 🎤 Transcribing audio message...");
-              
-              // Download audio from our storage to get base64
-              const audioResponse = await fetch(persistedMediaUrl);
-              if (audioResponse.ok) {
-                const audioBytes = new Uint8Array(await audioResponse.arrayBuffer());
-                // Convert to base64
-                let binary = "";
-                for (let i = 0; i < audioBytes.byteLength; i++) {
-                  binary += String.fromCharCode(audioBytes[i]);
-                }
-                const audioBase64 = btoa(binary);
-                
-                const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-                const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-                
-                const transcribeResponse = await fetch(`${supabaseUrl}/functions/v1/transcribe-audio`, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${serviceKey}`,
-                  },
-                  body: JSON.stringify({
-                    audioBase64: audioBase64,
-                    mimeType: (messagePayload.media_mime_type as string) || "audio/ogg",
-                  }),
-                });
-                
-                if (transcribeResponse.ok) {
-                  const transcribeResult = await transcribeResponse.json();
-                  if (transcribeResult.transcription) {
-                    contentForAI = `[Áudio transcrito]: ${transcribeResult.transcription}`;
-                    console.log(`[UAZAPI_WEBHOOK] ✅ Audio transcribed: ${transcribeResult.transcription.length} chars`);
-                    
-                    // Update the message content in DB with the transcription
-                    await supabaseClient
-                      .from("messages")
-                      .update({ content: contentForAI })
-                      .eq("whatsapp_message_id", whatsappMessageId)
-                      .eq("conversation_id", conversationId);
-                  }
-                } else {
-                  console.warn("[UAZAPI_WEBHOOK] Transcription failed:", transcribeResponse.status);
-                }
+              console.log("[UAZAPI_WEBHOOK] 🎤 Transcribing audio (attempt 1: persisted URL)...");
+              transcription = await transcribeFromUrl(persistedMediaUrl, (messagePayload.media_mime_type as string) || "audio/ogg");
+            }
+
+            // Attempt 2: Try /message/download from uazapi
+            if (!transcription) {
+              console.log("[UAZAPI_WEBHOOK] 🎤 Transcribing audio (attempt 2: /message/download)...");
+              transcription = await transcribeViaDownload();
+            }
+
+            // Attempt 3: Wait 3s and retry — media may have been persisted by now (race condition fix)
+            if (!transcription) {
+              console.log("[UAZAPI_WEBHOOK] 🎤 Transcription failed, waiting 3s for retry (race condition fix)...");
+              await new Promise(r => setTimeout(r, 3000));
+
+              // Re-fetch message from DB to get updated media_url
+              const { data: refreshedMsg } = await supabaseClient
+                .from("messages")
+                .select("media_url, media_mime_type")
+                .eq("whatsapp_message_id", whatsappMessageId)
+                .eq("conversation_id", conversationId)
+                .maybeSingle();
+
+              const refreshedUrl = refreshedMsg?.media_url;
+              if (refreshedUrl && (refreshedUrl.includes("supabase") || refreshedUrl.includes("/storage/v1/"))) {
+                console.log("[UAZAPI_WEBHOOK] 🎤 Transcribing audio (attempt 3: refreshed URL after delay)...");
+                transcription = await transcribeFromUrl(refreshedUrl, refreshedMsg?.media_mime_type || "audio/ogg");
               }
-            } else if (!persistedMediaUrl) {
-              // Try downloading audio via uazapi /message/download to get base64
-              console.log("[UAZAPI_WEBHOOK] 🎤 No persisted URL, trying /message/download for transcription...");
-              const apiUrl = (instance.api_url || "").replace(/\/+$/, "");
-              const apiKey = instance.api_key || "";
-              if (apiUrl && apiKey) {
-                const dlRes = await fetch(`${apiUrl}/message/download`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json", token: apiKey },
-                  body: JSON.stringify({ id: whatsappMessageId, return_base64: true }),
-                });
-                if (dlRes.ok) {
-                  const dlData = await dlRes.json();
-                  const dlBase64 = dlData.base64Data || dlData.base64;
-                  if (dlBase64) {
-                    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-                    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
-                    const transcribeRes = await fetch(`${supabaseUrl}/functions/v1/transcribe-audio`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${serviceKey}` },
-                      body: JSON.stringify({ audioBase64: dlBase64, mimeType: mimeType || "audio/ogg" }),
-                    });
-                    if (transcribeRes.ok) {
-                      const tResult = await transcribeRes.json();
-                      if (tResult.transcription) {
-                        contentForAI = `[Áudio transcrito]: ${tResult.transcription}`;
-                        console.log(`[UAZAPI_WEBHOOK] ✅ Audio transcribed (fallback): ${tResult.transcription.length} chars`);
-                        await supabaseClient
-                          .from("messages")
-                          .update({ content: contentForAI })
-                          .eq("whatsapp_message_id", whatsappMessageId)
-                          .eq("conversation_id", conversationId);
-                      }
-                    }
-                  }
-                }
+
+              // Last resort: retry /message/download after delay
+              if (!transcription) {
+                console.log("[UAZAPI_WEBHOOK] 🎤 Transcribing audio (attempt 4: /message/download retry)...");
+                transcription = await transcribeViaDownload();
               }
+            }
+
+            if (transcription) {
+              contentForAI = `[Áudio transcrito]: ${transcription}`;
+              console.log(`[UAZAPI_WEBHOOK] ✅ Audio transcribed: ${transcription.length} chars`);
+              await supabaseClient
+                .from("messages")
+                .update({ content: contentForAI })
+                .eq("whatsapp_message_id", whatsappMessageId)
+                .eq("conversation_id", conversationId);
+            } else {
+              console.warn("[UAZAPI_WEBHOOK] ⚠️ All transcription attempts failed for audio message:", whatsappMessageId);
             }
           } catch (transcribeErr) {
             console.warn("[UAZAPI_WEBHOOK] Audio transcription error (non-blocking):", transcribeErr);
