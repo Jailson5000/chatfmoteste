@@ -1,24 +1,38 @@
 
 
-## Plano: Vincular e-mail como Admin Global
+## Plano: Permitir Super Admin acessar o domínio principal sem redirecionamento
 
-Aguardando confirmação do e-mail e nível de acesso desejado.
+### Problema
+O usuário `suporte@miauchat.com.br` é `super_admin` mas também tem `law_firm_id` vinculado a uma empresa com subdomain `suporte`. Quando acessa qualquer rota protegida em `miauchat.com.br`, o `ProtectedRoute` detecta que o `company_subdomain = 'suporte'` e bloqueia o acesso, mostrando a tela `TenantMismatch` que redireciona para `suporte.miauchat.com.br`.
 
-### O que será feito
+### Solução
+Modificar o `ProtectedRoute` para verificar se o usuário é **global admin** (via RPC `is_admin`) e, se for, **bypassar completamente a validação de subdomínio/tenant**.
 
-1. **Verificar se o e-mail já existe** no `auth.users` — se sim, apenas vincular como admin; se não, criar o usuário
-2. **Criar registro em `admin_profiles`** com os dados do usuário
-3. **Criar registro em `admin_user_roles`** com a role escolhida (super_admin, admin_operacional ou admin_financeiro)
+### Alterações
 
-### Implementação
+**Arquivo: `src/components/auth/ProtectedRoute.tsx`**
 
-- Executar INSERTs diretos nas tabelas `admin_profiles` e `admin_user_roles` usando o `user_id` existente
-- Se o usuário não existir, usar a Edge Function `create-global-admin` para criar conta + perfil + role de uma vez
+1. Adicionar query para verificar se o usuário é global admin (reutilizar a query já existente para maintenance mode, expandindo seu escopo)
+2. Na seção de **TENANT SUBDOMAIN VALIDATION**, adicionar condição: se `isGlobalAdmin === true`, pular toda a validação de subdomínio
 
-### Pré-requisito
+```
+// Lógica atual (linha ~148):
+if (company_subdomain) {
+  if (isMainDomain) { return <TenantMismatch ... /> }
+  ...
+}
 
-Preciso que o usuário informe:
-1. Qual e-mail usar
-2. Qual nível de acesso (super_admin recomendado para acesso total)
-3. Se for conta nova: uma senha para o login
+// Nova lógica:
+if (company_subdomain && !isGlobalAdmin) {
+  if (isMainDomain) { return <TenantMismatch ... /> }
+  ...
+}
+```
+
+3. Ajustar a query `isGlobalAdmin` para sempre executar (remover condição `enabled: isMaintenanceMode`), já que agora é usada também para bypass de tenant
+
+### Impacto
+- Super admins podem navegar livremente em `miauchat.com.br` sem serem forçados ao subdomínio
+- Usuários normais continuam restritos ao seu subdomínio
+- Sem impacto em segurança: a verificação usa `is_admin` RPC (server-side, SECURITY DEFINER)
 
