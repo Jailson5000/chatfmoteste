@@ -52,7 +52,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { subdomain: currentSubdomain, isMainDomain, isLoading: tenantLoading } = useTenant();
 
   // Check if user is a global admin (to bypass maintenance mode)
-  const { data: isGlobalAdmin } = useQuery({
+  const { data: isGlobalAdmin, isLoading: adminLoading } = useQuery({
     queryKey: ["is-global-admin", user?.id],
     queryFn: async () => {
       if (!user?.id) return false;
@@ -109,7 +109,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   }
 
   // Show loading while checking company approval status and tenant
-  if (approvalLoading || tenantLoading) {
+  if (approvalLoading || tenantLoading || adminLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
