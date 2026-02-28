@@ -1,57 +1,24 @@
 
 
-# Diagnóstico: IA não respondeu ao áudio do João De Sale
+## Plano: Vincular e-mail como Admin Global
 
-## Causa raiz identificada
+Aguardando confirmação do e-mail e nível de acesso desejado.
 
-A transcrição do áudio **não foi executada** para a conversa do João De Sale. Os logs confirmam:
+### O que será feito
 
-1. Áudio recebido e salvo no banco com `content: [audio]` e `media_url` presente ✅
-2. Fila `ai_processing_queue` criada com `content: [audio]` (texto literal, sem transcrição) ❌
-3. `ai-chat` chamado com `messageLength: 7` (o texto `[audio]`) — provavelmente retornou resposta vazia
-4. Fila marcada como `completed` mas nenhuma mensagem de IA foi salva
+1. **Verificar se o e-mail já existe** no `auth.users` — se sim, apenas vincular como admin; se não, criar o usuário
+2. **Criar registro em `admin_profiles`** com os dados do usuário
+3. **Criar registro em `admin_user_roles`** com a role escolhida (super_admin, admin_operacional ou admin_financeiro)
 
-**O problema**: quando a UAZAPI envia o evento `messages` com o áudio, o webhook tenta transcrever na hora. Mas existe uma condição de corrida:
-- O `media_url` pode não estar disponível ainda se o upload do áudio para o storage está acontecendo em paralelo
-- O webhook verificou o `persistedMediaUrl`, não encontrou (ou encontrou mas o download falhou), e seguiu em frente sem transcrição
-- O `contentForAI` ficou como `[audio]` em vez de `[Áudio transcrito]: ...`
+### Implementação
 
-Diferente do Jailson (inst_7tdqx6d8), que recebeu o evento `FileDownloaded` da UAZAPI com a URL do arquivo **antes** do processamento, o João (inst_cgo5wn6p) pode não ter recebido esse evento a tempo.
+- Executar INSERTs diretos nas tabelas `admin_profiles` e `admin_user_roles` usando o `user_id` existente
+- Se o usuário não existir, usar a Edge Function `create-global-admin` para criar conta + perfil + role de uma vez
 
-## Correção proposta
+### Pré-requisito
 
-### 1. Fallback robusto na transcrição (uazapi-webhook)
-
-Quando a transcrição falha e o `contentForAI` ainda é `[audio]`, adicionar um retry:
-- Esperar 2-3 segundos e tentar novamente buscar o `media_url` da mensagem no banco
-- Se ainda não disponível, tentar download direto via URL da UAZAPI (`content.URL` do payload)
-- Só enfileirar com `[audio]` literal se todas as tentativas falharem
-
-### 2. Validação no processamento da fila
-
-Na função `processUazapiQueuedMessages`, antes de chamar o `ai-chat`:
-- Se o `combinedContent` for apenas `[audio]`, tentar transcrever novamente buscando o `media_url` da mensagem no banco (que a essa altura já deve estar disponível)
-
-### 3. Proteção contra resposta vazia
-
-Se o `ai-chat` retornar `response` vazio/null, o webhook já pula o envio (`if (aiText && apiUrl && apiKey)`), mas marca como `completed`. Adicionar log de warning para facilitar diagnóstico futuro.
-
-## Arquivos a modificar
-
-| Arquivo | Mudança |
-|---|---|
-| `supabase/functions/uazapi-webhook/index.ts` | Retry na transcrição + fallback na fila + log de warning |
-
-## Detalhes técnicos
-
-```text
-Fluxo atual (falha):
-  Áudio recebido → media_url ausente → contentForAI = "[audio]"
-  → fila com "[audio]" → ai-chat recebe "[audio]" → resposta vazia → completed sem envio
-
-Fluxo corrigido:
-  Áudio recebido → media_url ausente → retry 2s → tenta content.URL direto
-  → fallback na fila: re-fetch media_url do banco → transcreve
-  → ai-chat recebe "[Áudio transcrito]: texto real" → resposta válida → envio
-```
+Preciso que o usuário informe:
+1. Qual e-mail usar
+2. Qual nível de acesso (super_admin recomendado para acesso total)
+3. Se for conta nova: uma senha para o login
 
