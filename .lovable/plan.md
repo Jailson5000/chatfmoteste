@@ -1,38 +1,29 @@
 
 
-## Plano: Permitir Super Admin acessar o domínio principal sem redirecionamento
+## Plano: Corrigir race condition no bypass de super admin
 
 ### Problema
-O usuário `suporte@miauchat.com.br` é `super_admin` mas também tem `law_firm_id` vinculado a uma empresa com subdomain `suporte`. Quando acessa qualquer rota protegida em `miauchat.com.br`, o `ProtectedRoute` detecta que o `company_subdomain = 'suporte'` e bloqueia o acesso, mostrando a tela `TenantMismatch` que redireciona para `suporte.miauchat.com.br`.
+A query `isGlobalAdmin` retorna `undefined` enquanto carrega. Como `!undefined === true`, a condição `company_subdomain && !isGlobalAdmin` passa como `true` antes do resultado da query chegar, bloqueando o acesso.
 
 ### Solução
-Modificar o `ProtectedRoute` para verificar se o usuário é **global admin** (via RPC `is_admin`) e, se for, **bypassar completamente a validação de subdomínio/tenant**.
-
-### Alterações
 
 **Arquivo: `src/components/auth/ProtectedRoute.tsx`**
 
-1. Adicionar query para verificar se o usuário é global admin (reutilizar a query já existente para maintenance mode, expandindo seu escopo)
-2. Na seção de **TENANT SUBDOMAIN VALIDATION**, adicionar condição: se `isGlobalAdmin === true`, pular toda a validação de subdomínio
-
+1. Capturar o estado `isLoading` da query `isGlobalAdmin`:
+```typescript
+const { data: isGlobalAdmin, isLoading: adminLoading } = useQuery({...});
 ```
-// Lógica atual (linha ~148):
-if (company_subdomain) {
-  if (isMainDomain) { return <TenantMismatch ... /> }
-  ...
-}
 
-// Nova lógica:
-if (company_subdomain && !isGlobalAdmin) {
-  if (isMainDomain) { return <TenantMismatch ... /> }
-  ...
+2. Incluir `adminLoading` na tela de "Verificando acesso..." (junto com `approvalLoading` e `tenantLoading`):
+```typescript
+if (approvalLoading || tenantLoading || adminLoading) {
+  return <div>Verificando acesso...</div>;
 }
 ```
 
-3. Ajustar a query `isGlobalAdmin` para sempre executar (remover condição `enabled: isMaintenanceMode`), já que agora é usada também para bypass de tenant
+Isso garante que o ProtectedRoute só avalia a validação de tenant **depois** que a query de admin resolveu.
 
 ### Impacto
-- Super admins podem navegar livremente em `miauchat.com.br` sem serem forçados ao subdomínio
-- Usuários normais continuam restritos ao seu subdomínio
-- Sem impacto em segurança: a verificação usa `is_admin` RPC (server-side, SECURITY DEFINER)
+- Corrige o bloqueio indevido de super admins no domínio principal
+- Adiciona ~1s extra de loading (tempo da query `is_admin`) para todos os usuários — aceitável pois já há loading de approval e tenant
 
