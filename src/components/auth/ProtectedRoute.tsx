@@ -59,7 +59,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
       const { data } = await supabase.rpc("is_admin", { _user_id: user.id });
       return data === true;
     },
-    enabled: !!user?.id && isMaintenanceMode,
+    enabled: !!user?.id,
     staleTime: 60000,
   });
 
@@ -162,7 +162,7 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
   // - Accessing main domain or wrong subdomain = blocked
   // - Exception: Users without company_subdomain (e.g., legacy users) can access main domain
   //
-  if (company_subdomain) {
+  if (company_subdomain && !isGlobalAdmin) {
     // User has a specific subdomain - validate access
     
     // Block if accessing from main domain (must use subdomain)
