@@ -42,6 +42,8 @@ import {
   Loader2,
   Check,
   X,
+  Instagram,
+  Facebook,
 } from "lucide-react";
 import MessageBubble, { MessageStatus } from "@/components/conversations/MessageBubble";
 import { ChatDropZone } from "@/components/conversations/ChatDropZone";
@@ -3927,14 +3929,14 @@ export default function Conversations() {
                           // Site/Widget conversations - show static "Site" label with globe icon
                           return (
                             <>
-                              <svg 
-                                xmlns="http://www.w3.org/2000/svg" 
-                                viewBox="0 0 24 24" 
-                                fill="none" 
-                                stroke="currentColor" 
-                                strokeWidth="2" 
-                                strokeLinecap="round" 
-                                strokeLinejoin="round" 
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
                                 className="h-3 w-3 text-muted-foreground flex-shrink-0"
                               >
                                 <circle cx="12" cy="12" r="10"/>
@@ -3945,7 +3947,37 @@ export default function Conversations() {
                             </>
                           );
                         }
-                        
+
+                        // Instagram DM conversations
+                        if (origin === 'INSTAGRAM') {
+                          return (
+                            <>
+                              <Instagram className="h-3 w-3 text-pink-500 flex-shrink-0" />
+                              <span className="text-xs text-pink-500">Instagram</span>
+                            </>
+                          );
+                        }
+
+                        // Facebook Messenger conversations
+                        if (origin === 'FACEBOOK') {
+                          return (
+                            <>
+                              <Facebook className="h-3 w-3 text-[#1877F2] flex-shrink-0" />
+                              <span className="text-xs text-[#1877F2]">Facebook</span>
+                            </>
+                          );
+                        }
+
+                        // WhatsApp Cloud API conversations
+                        if (origin === 'WHATSAPP_CLOUD') {
+                          return (
+                            <>
+                              <MessageCircle className="h-3 w-3 text-[#25D366] flex-shrink-0" />
+                              <span className="text-xs text-[#25D366]">WhatsApp Cloud</span>
+                            </>
+                          );
+                        }
+
                         // WhatsApp conversations - show instance selector or static label
                         return (
                           <>
