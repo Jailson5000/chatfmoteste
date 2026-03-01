@@ -176,14 +176,32 @@ function ConversationSidebarCardComponent({ conversation, selected, onClick }: C
 
       {/* Header */}
       <div className="flex items-start gap-2">
-        <Avatar className="h-9 w-9 border-2 border-success/30 flex-shrink-0">
-          {conversation.avatarUrl ? (
-            <AvatarImage src={conversation.avatarUrl} alt={`Avatar de ${conversation.name}`} />
-          ) : null}
-          <AvatarFallback className="bg-muted text-muted-foreground text-sm font-medium">
-            {getInitials(conversation.name)}
-          </AvatarFallback>
-        </Avatar>
+        <div className="relative flex-shrink-0">
+          <Avatar className="h-9 w-9 border-2 border-success/30">
+            {conversation.avatarUrl ? (
+              <AvatarImage src={conversation.avatarUrl} alt={`Avatar de ${conversation.name}`} />
+            ) : null}
+            <AvatarFallback className="bg-muted text-muted-foreground text-sm font-medium">
+              {getInitials(conversation.name)}
+            </AvatarFallback>
+          </Avatar>
+          {/* Channel badge overlay on avatar */}
+          {conversation.origin?.toUpperCase() === 'INSTAGRAM' && (
+            <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 flex items-center justify-center ring-1 ring-card">
+              <Instagram className="h-2.5 w-2.5 text-white" />
+            </div>
+          )}
+          {conversation.origin?.toUpperCase() === 'FACEBOOK' && (
+            <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-[#1877F2] flex items-center justify-center ring-1 ring-card">
+              <Facebook className="h-2.5 w-2.5 text-white" />
+            </div>
+          )}
+          {conversation.origin?.toUpperCase() === 'WHATSAPP_CLOUD' && (
+            <div className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full bg-[#25D366] flex items-center justify-center ring-1 ring-card">
+              <MessageCircle className="h-2.5 w-2.5 text-white" />
+            </div>
+          )}
+        </div>
 
         <div className="flex-1 min-w-0 overflow-hidden">
           <div className="flex items-center justify-between gap-1.5 min-w-0">
