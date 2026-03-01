@@ -130,10 +130,10 @@ export default function Dashboard() {
         startDate = startOfDay(now);
         break;
       case "7days":
-        startDate = subDays(now, 7);
+        startDate = startOfDay(subDays(now, 7));
         break;
       case "30days":
-        startDate = subDays(now, 30);
+        startDate = startOfDay(subDays(now, 30));
         break;
       case "month":
         startDate = startOfMonth(now);
@@ -342,11 +342,17 @@ export default function Dashboard() {
       }
 
       const clientIds = filteredClients.map(c => c.id);
-      // Fetch client_tags for filtered clients
-      const { data: clientTags } = await supabase
-        .from("client_tags")
-        .select("tag_id")
-        .in("client_id", clientIds);
+      // Fetch client_tags for filtered clients (chunked to avoid URL length limits)
+      const tagChunks: string[][] = [];
+      for (let i = 0; i < clientIds.length; i += 50) {
+        tagChunks.push(clientIds.slice(i, i + 50));
+      }
+      const tagResults = await Promise.all(
+        tagChunks.map(chunk =>
+          supabase.from("client_tags").select("tag_id").in("client_id", chunk)
+        )
+      );
+      const clientTags = tagResults.flatMap(r => r.data || []);
 
       if (!clientTags || clientTags.length === 0) {
         setClientTagCounts([]);

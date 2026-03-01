@@ -74,8 +74,7 @@ function isEncryptedMedia(url: string): boolean {
 // Check if URL is a public storage URL (doesn't need decryption)
 function isPublicStorageUrl(url: string): boolean {
   if (!url) return false;
-  return url.includes('supabase.co/storage/v1/object/public/') || 
-         url.includes('.supabase.co/storage/v1/object/public/');
+  return url.includes('/storage/v1/object/public/');
 }
 
 // Playback speed options

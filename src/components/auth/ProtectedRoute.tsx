@@ -74,17 +74,6 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     }
   }, [approvalLoading, tenantLoading]);
 
-  // Timer to show retry button after 10s of loading
-  useEffect(() => {
-    if (approvalLoading || tenantLoading) {
-      setShowRetry(false);
-      const timer = setTimeout(() => setShowRetry(true), 10000);
-      return () => clearTimeout(timer);
-    } else {
-      setShowRetry(false);
-    }
-  }, [approvalLoading, tenantLoading]);
-
   // Show loading while checking auth
   if (loading) {
     return (

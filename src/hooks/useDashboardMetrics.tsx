@@ -61,17 +61,21 @@ async function countMessagesInChunks(
 ): Promise<number> {
   if (convIds.length === 0) return 0;
   
-  const chunks = chunkArray(convIds, 500);
+  const chunks = chunkArray(convIds, 50);
   let total = 0;
-  
-  for (const chunk of chunks) {
-    const { count } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true })
-      .in("conversation_id", chunk)
-      .eq("is_from_me", isFromMe)
-      .gte("created_at", startDate)
-      .lte("created_at", endDate);
+
+  const results = await Promise.all(
+    chunks.map(chunk =>
+      supabase
+        .from("messages")
+        .select("*", { count: "exact", head: true })
+        .in("conversation_id", chunk)
+        .eq("is_from_me", isFromMe)
+        .gte("created_at", startDate)
+        .lte("created_at", endDate)
+    )
+  );
+  for (const { count } of results) {
     total += count || 0;
   }
   
@@ -236,17 +240,21 @@ export function useDashboardMetrics(filters: DashboardFilters) {
       }
 
       // Fetch messages in chunks
-      const chunks = chunkArray(lawFirmConvIds, 500);
+      const chunks = chunkArray(lawFirmConvIds, 50);
       let allMessages: { conversation_id: string; is_from_me: boolean }[] = [];
-      
-      for (const chunk of chunks) {
-        const { data: msgs } = await supabase
-          .from("messages")
-          .select("conversation_id, is_from_me")
-          .in("conversation_id", chunk)
-          .gte("created_at", startDate.toISOString())
-          .lte("created_at", endDate.toISOString())
-          .limit(5000);
+
+      const chunkResults = await Promise.all(
+        chunks.map(chunk =>
+          supabase
+            .from("messages")
+            .select("conversation_id, is_from_me")
+            .in("conversation_id", chunk)
+            .gte("created_at", startDate.toISOString())
+            .lte("created_at", endDate.toISOString())
+            .limit(5000)
+        )
+      );
+      for (const { data: msgs } of chunkResults) {
         if (msgs) allMessages = allMessages.concat(msgs);
       }
 

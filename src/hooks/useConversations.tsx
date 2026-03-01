@@ -639,6 +639,10 @@ export function useConversations() {
     },
     onSettled: (_data, _error, variables) => {
       clearOptimisticUpdateAfterDelay(variables.conversationId);
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ["conversations", lawFirm?.id] });
+        queryClient.invalidateQueries({ queryKey: ["conversation-counts"] });
+      }, OPTIMISTIC_LOCK_DURATION_MS + 500);
     },
     onError: (error, _variables, context) => {
       // Rollback optimistic update on error
@@ -772,6 +776,7 @@ export function useConversations() {
       clearOptimisticUpdateAfterDelay(variables.conversationId);
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ["conversations", lawFirm?.id] });
+        queryClient.invalidateQueries({ queryKey: ["conversation-counts"] });
       }, OPTIMISTIC_LOCK_DURATION_MS + 500);
     },
   });

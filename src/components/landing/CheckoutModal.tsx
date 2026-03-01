@@ -14,6 +14,7 @@ interface CheckoutModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   plan: {
+    id?: string;
     name: string;
     price: string;
     yearlyPrice?: string;
@@ -113,6 +114,7 @@ export function CheckoutModal({ open, onOpenChange, plan }: CheckoutModalProps) 
             admin_email: formData.adminEmail,
             phone: formData.adminPhone,
             document: formData.document,
+            plan_id: plan.id || undefined,
             plan_name: plan.name.toLowerCase().replace('miauchat ', ''),
             registration_mode: 'trial',
           },

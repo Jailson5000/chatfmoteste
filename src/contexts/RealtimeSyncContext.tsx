@@ -146,8 +146,8 @@ export function RealtimeSyncProvider({ children }: RealtimeSyncProviderProps) {
     // Use shorter debounce for critical tables
     // Messages: 100ms for near-instant feedback
     // Conversations: 300ms to avoid spam during typing indicators
-    const debounceMs = table === 'messages' ? 100 : 
-                       table === 'conversations' ? 300 : 500;
+    const debounceMs = table === 'messages' ? 100 :
+                       table === 'conversations' ? 150 : 500;
     
     debouncedInvalidate(queryKeys, debounceMs);
     

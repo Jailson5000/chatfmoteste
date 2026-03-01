@@ -53,16 +53,16 @@ export function ConversationOriginCard({ filters }: ConversationOriginCardProps)
           startDate = startOfDay(now);
           break;
         case "7days":
-          startDate = subDays(now, 7);
+          startDate = startOfDay(subDays(now, 7));
           break;
         case "30days":
-          startDate = subDays(now, 30);
+          startDate = startOfDay(subDays(now, 30));
           break;
         case "month":
           startDate = startOfMonth(now);
           break;
         default:
-          startDate = subDays(now, 365);
+          startDate = startOfDay(subDays(now, 365));
       }
     }
 

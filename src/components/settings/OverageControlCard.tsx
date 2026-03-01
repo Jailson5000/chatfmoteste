@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { MessageSquare, Mic, Loader2 } from "lucide-react";
@@ -27,6 +27,13 @@ export function OverageControlCard({ companyData, onUpdate }: OverageControlCard
   const [isUpdating, setIsUpdating] = useState<'ai' | 'tts' | null>(null);
   const [allowAiOverage, setAllowAiOverage] = useState(companyData?.allow_ai_overage ?? false);
   const [allowTtsOverage, setAllowTtsOverage] = useState(companyData?.allow_tts_overage ?? false);
+
+  useEffect(() => {
+    if (companyData) {
+      setAllowAiOverage(companyData.allow_ai_overage ?? false);
+      setAllowTtsOverage(companyData.allow_tts_overage ?? false);
+    }
+  }, [companyData]);
 
   const handleToggleOverage = async (type: 'ai' | 'tts', enabled: boolean) => {
     if (!companyData?.id) {
