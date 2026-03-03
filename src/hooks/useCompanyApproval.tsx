@@ -23,14 +23,14 @@ interface CompanyApprovalStatus {
 
 /**
  * Hook to check company approval status and subdomain for the current user
- * 
+ *
  * Returns the approval status and subdomain of the company associated with the user's law_firm.
  * Used to:
  * - Block access for pending_approval or rejected companies
  * - Validate that user is accessing via their correct subdomain
  * - Block access when trial has expired
  * - Block access when company is suspended for non-payment
- * 
+ *
  * Auto-polls every 30s when company is suspended to detect when access is restored.
  */
 export function useCompanyApproval(): CompanyApprovalStatus {
@@ -51,7 +51,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
     loading: true,
     refetch: () => {},
   });
-  
+
   // Ref to track last user ID we fetched for (prevents flash of error page on F5)
   const lastFetchedUserIdRef = useRef<string | null>(null);
 
@@ -83,6 +83,9 @@ export function useCompanyApproval(): CompanyApprovalStatus {
     // Set loading immediately to prevent flash of error page during F5 refresh
     setStatus(prev => ({ ...prev, loading: true }));
 
+    let retryTimeout: NodeJS.Timeout | null = null;
+    let cancelled = false;
+
     const fetchWithTimeout = <T,>(promiseLike: PromiseLike<T>, timeoutMs = 15000): Promise<T> => {
       return Promise.race([
         Promise.resolve(promiseLike),
@@ -92,7 +95,20 @@ export function useCompanyApproval(): CompanyApprovalStatus {
       ]);
     };
 
-    const fetchApprovalStatus = async () => {
+    // Show transient error UI (after retry exhausted)
+    const showTransientError = () => {
+      setStatus(prev => ({
+        ...prev,
+        approval_status: null,
+        rejection_reason: null,
+        loading: false,
+      }));
+      lastFetchedUserIdRef.current = user.id;
+    };
+
+    const fetchApprovalStatus = async (isRetry = false) => {
+      if (cancelled) return;
+
       try {
         // First get user's law_firm_id from profile
         const { data: profile, error: profileError } = await fetchWithTimeout(
@@ -103,15 +119,16 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             .maybeSingle()
         );
 
+        if (cancelled) return;
+
         if (profileError) {
           console.error('[useCompanyApproval] Profile query error:', profileError.message);
-          // If it's an auth/permission error, don't block as "rejected" — allow retry
-          setStatus(prev => ({
-            ...prev,
-            approval_status: null,
-            rejection_reason: null,
-            loading: false,
-          }));
+          if (!isRetry) {
+            console.warn('[useCompanyApproval] Will retry in 3s...');
+            retryTimeout = setTimeout(() => { if (!cancelled) fetchApprovalStatus(true); }, 3000);
+            return;
+          }
+          showTransientError();
           return;
         }
         if (!profile?.law_firm_id) {
@@ -133,6 +150,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             suspended_reason: null,
             loading: false,
           }));
+          lastFetchedUserIdRef.current = user.id;
           return;
         }
 
@@ -141,8 +159,8 @@ export function useCompanyApproval(): CompanyApprovalStatus {
           supabase
             .from('companies')
             .select(`
-              approval_status, 
-              rejection_reason, 
+              approval_status,
+              rejection_reason,
               name,
               status,
               suspended_reason,
@@ -155,15 +173,16 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             .maybeSingle()
         );
 
+        if (cancelled) return;
+
         if (companyError) {
           console.error('[useCompanyApproval] Company query error:', companyError.message);
-          // If it's an auth/permission error, don't block as "rejected" — allow retry
-          setStatus(prev => ({
-            ...prev,
-            approval_status: null,
-            rejection_reason: null,
-            loading: false,
-          }));
+          if (!isRetry) {
+            console.warn('[useCompanyApproval] Will retry in 3s...');
+            retryTimeout = setTimeout(() => { if (!cancelled) fetchApprovalStatus(true); }, 3000);
+            return;
+          }
+          showTransientError();
           return;
         }
         if (!company) {
@@ -185,6 +204,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             suspended_reason: null,
             loading: false,
           }));
+          lastFetchedUserIdRef.current = user.id;
           return;
         }
 
@@ -192,12 +212,12 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         const subdomain = (company.law_firm as any)?.subdomain || null;
         const planName = (company.plan as any)?.name || null;
         const planPrice = (company.plan as any)?.price || null;
-        
+
         // Check if trial has expired
         const trialType = company.trial_type as 'none' | 'auto_plan' | 'manual' | null;
         const trialEndsAt = company.trial_ends_at;
         let trialExpired = false;
-        
+
         if (trialType && trialType !== 'none' && trialEndsAt) {
           trialExpired = new Date() > new Date(trialEndsAt);
         }
@@ -207,7 +227,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         const suspendedReason = company.suspended_reason || null;
 
         console.log('[useCompanyApproval] Company status:', company.approval_status, 'Status:', companyStatus, 'Subdomain:', subdomain, 'Trial:', trialType, 'Expired:', trialExpired);
-        
+
         setStatus(prev => ({
           ...prev,
           approval_status: company.approval_status as 'pending_approval' | 'approved' | 'rejected',
@@ -225,20 +245,24 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         }));
         lastFetchedUserIdRef.current = user.id;
       } catch (err: any) {
+        if (cancelled) return;
         console.error('[useCompanyApproval] Error:', err);
-        // Transient errors (timeout, network, auth) should NOT block as "rejected"
-        // Instead, set approval_status to null so ProtectedRoute shows retry UI
-        console.warn('[useCompanyApproval] Transient error - will allow retry instead of blocking');
-        setStatus(prev => ({
-          ...prev,
-          approval_status: null,
-          rejection_reason: null,
-          loading: false,
-        }));
+        if (!isRetry) {
+          console.warn('[useCompanyApproval] Transient error - retrying in 3s...');
+          retryTimeout = setTimeout(() => { if (!cancelled) fetchApprovalStatus(true); }, 3000);
+          return;
+        }
+        console.warn('[useCompanyApproval] Retry also failed - showing error UI');
+        showTransientError();
       }
     };
 
     fetchApprovalStatus();
+
+    return () => {
+      cancelled = true;
+      if (retryTimeout) clearTimeout(retryTimeout);
+    };
   }, [user, refreshTrigger]);
 
   // Auto-poll when company is suspended to detect when access is restored
@@ -248,7 +272,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         console.log('[useCompanyApproval] Polling for status change (suspended company)');
         refetch();
       }, 30000); // Every 30 seconds
-      
+
       return () => clearInterval(interval);
     }
   }, [status.company_status, refetch]);
