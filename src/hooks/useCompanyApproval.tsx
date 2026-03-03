@@ -35,6 +35,9 @@ interface CompanyApprovalStatus {
  */
 export function useCompanyApproval(): CompanyApprovalStatus {
   const { user } = useAuth();
+  // Use stable user.id as dependency instead of user object to prevent
+  // re-triggering on tab focus (Supabase fires SIGNED_IN with new object reference)
+  const userId = user?.id ?? null;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [status, setStatus] = useState<CompanyApprovalStatus>({
     approval_status: null,
@@ -60,7 +63,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
   }, []);
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       lastFetchedUserIdRef.current = null;
       setStatus(prev => ({
         ...prev,
@@ -103,7 +106,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
         rejection_reason: null,
         loading: false,
       }));
-      lastFetchedUserIdRef.current = user.id;
+      lastFetchedUserIdRef.current = userId;
     };
 
     const fetchApprovalStatus = async (isRetry = false) => {
@@ -115,7 +118,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
           supabase
             .from('profiles')
             .select('law_firm_id')
-            .eq('id', user.id)
+            .eq('id', userId)
             .maybeSingle()
         );
 
@@ -150,7 +153,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             suspended_reason: null,
             loading: false,
           }));
-          lastFetchedUserIdRef.current = user.id;
+          lastFetchedUserIdRef.current = userId;
           return;
         }
 
@@ -204,7 +207,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             suspended_reason: null,
             loading: false,
           }));
-          lastFetchedUserIdRef.current = user.id;
+          lastFetchedUserIdRef.current = userId;
           return;
         }
 
@@ -243,7 +246,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
           suspended_reason: suspendedReason,
           loading: false,
         }));
-        lastFetchedUserIdRef.current = user.id;
+        lastFetchedUserIdRef.current = userId;
       } catch (err: any) {
         if (cancelled) return;
         console.error('[useCompanyApproval] Error:', err);
@@ -263,7 +266,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
       cancelled = true;
       if (retryTimeout) clearTimeout(retryTimeout);
     };
-  }, [user, refreshTrigger]);
+  }, [userId, refreshTrigger]);
 
   // Auto-poll when company is suspended to detect when access is restored
   useEffect(() => {
@@ -278,7 +281,7 @@ export function useCompanyApproval(): CompanyApprovalStatus {
   }, [status.company_status, refetch]);
 
   // Derive effective loading: also true if user changed but effect hasn't run yet (prevents flash)
-  const effectiveLoading = status.loading || (user != null && user.id !== lastFetchedUserIdRef.current);
+  const effectiveLoading = status.loading || (userId != null && userId !== lastFetchedUserIdRef.current);
 
   return { ...status, loading: effectiveLoading, refetch };
 }
