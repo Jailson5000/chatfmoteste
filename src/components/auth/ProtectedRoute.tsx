@@ -7,6 +7,7 @@ import { useMaintenanceMode } from "@/hooks/useMaintenanceMode";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
+import { RefreshCw, LogOut } from "lucide-react";
 import PendingApproval from "@/pages/PendingApproval";
 import CompanyBlocked from "@/pages/CompanyBlocked";
 import TenantMismatch from "@/pages/TenantMismatch";
@@ -47,7 +48,8 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
     plan_price,
     company_status,
     suspended_reason,
-    loading: approvalLoading 
+    loading: approvalLoading,
+    refetch: refetchApproval
   } = useCompanyApproval();
   const { subdomain: currentSubdomain, isMainDomain, isLoading: tenantLoading } = useTenant();
 
@@ -114,6 +116,43 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
               </Button>
             </div>
           )}
+        </div>
+      </div>
+    );
+  }
+
+  // TRANSIENT ERROR: approval_status is null after loading finished — show retry UI
+  if (!approvalLoading && approval_status === null && user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-zinc-950">
+        <div className="flex flex-col items-center gap-4 max-w-md text-center px-6">
+          <div className="h-12 w-12 rounded-full bg-amber-500/10 flex items-center justify-center">
+            <RefreshCw className="h-6 w-6 text-amber-400" />
+          </div>
+          <h2 className="text-xl font-semibold text-white">Erro ao verificar acesso</h2>
+          <p className="text-zinc-400 text-sm">
+            Não foi possível verificar sua empresa. Isso pode ser um problema temporário de conexão.
+          </p>
+          <div className="flex flex-col gap-3 w-full mt-2">
+            <Button 
+              onClick={() => refetchApproval()} 
+              className="w-full bg-red-600 hover:bg-red-700 text-white gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Tentar novamente
+            </Button>
+            <Button 
+              variant="outline" 
+              className="w-full border-zinc-700 text-white bg-transparent hover:bg-zinc-800 gap-2"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                window.location.href = '/auth';
+              }}
+            >
+              <LogOut className="h-4 w-4" />
+              Sair
+            </Button>
+          </div>
         </div>
       </div>
     );

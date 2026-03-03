@@ -1,5 +1,7 @@
-import { XCircle, Mail } from "lucide-react";
+import { XCircle, Mail, RefreshCw, LogOut } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
 import miauchatLogo from "@/assets/miauchat-logo.png";
 
 /**
@@ -68,6 +70,28 @@ export default function CompanyBlocked({ reason }: CompanyBlockedProps) {
                 Cadastro não aprovado
               </span>
             </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-col gap-3 mb-6">
+            <Button 
+              onClick={() => window.location.reload()} 
+              className="w-full bg-red-600 hover:bg-red-700 text-white gap-2"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Tentar novamente
+            </Button>
+            <Button 
+              variant="outline" 
+              className="w-full border-zinc-700 text-white bg-transparent hover:bg-zinc-800 gap-2"
+              onClick={async () => {
+                await supabase.auth.signOut();
+                window.location.href = '/auth';
+              }}
+            >
+              <LogOut className="w-4 h-4" />
+              Sair e fazer login novamente
+            </Button>
           </div>
 
           {/* Divider */}

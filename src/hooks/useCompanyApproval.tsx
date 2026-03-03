@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 
@@ -52,12 +52,16 @@ export function useCompanyApproval(): CompanyApprovalStatus {
     refetch: () => {},
   });
   
+  // Ref to track last user ID we fetched for (prevents flash of error page on F5)
+  const lastFetchedUserIdRef = useRef<string | null>(null);
+
   const refetch = useCallback(() => {
     setRefreshTrigger(prev => prev + 1);
   }, []);
 
   useEffect(() => {
     if (!user) {
+      lastFetchedUserIdRef.current = null;
       setStatus(prev => ({
         ...prev,
         approval_status: null,
@@ -75,6 +79,9 @@ export function useCompanyApproval(): CompanyApprovalStatus {
       }));
       return;
     }
+
+    // Set loading immediately to prevent flash of error page during F5 refresh
+    setStatus(prev => ({ ...prev, loading: true }));
 
     const fetchWithTimeout = <T,>(promiseLike: PromiseLike<T>, timeoutMs = 15000): Promise<T> => {
       return Promise.race([
@@ -96,7 +103,18 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             .maybeSingle()
         );
 
-        if (profileError || !profile?.law_firm_id) {
+        if (profileError) {
+          console.error('[useCompanyApproval] Profile query error:', profileError.message);
+          // If it's an auth/permission error, don't block as "rejected" — allow retry
+          setStatus(prev => ({
+            ...prev,
+            approval_status: null,
+            rejection_reason: null,
+            loading: false,
+          }));
+          return;
+        }
+        if (!profile?.law_firm_id) {
           console.log('[useCompanyApproval] No law_firm_id found for user');
           // SECURITY: Block users without a valid law_firm_id
           // Only global admins (checked separately) should be allowed without law_firm
@@ -137,7 +155,18 @@ export function useCompanyApproval(): CompanyApprovalStatus {
             .maybeSingle()
         );
 
-        if (companyError || !company) {
+        if (companyError) {
+          console.error('[useCompanyApproval] Company query error:', companyError.message);
+          // If it's an auth/permission error, don't block as "rejected" — allow retry
+          setStatus(prev => ({
+            ...prev,
+            approval_status: null,
+            rejection_reason: null,
+            loading: false,
+          }));
+          return;
+        }
+        if (!company) {
           console.log('[useCompanyApproval] No company found for law_firm_id:', profile.law_firm_id);
           // SECURITY: Block users without a valid company record
           // All users MUST have a company record to access the system
@@ -194,34 +223,18 @@ export function useCompanyApproval(): CompanyApprovalStatus {
           suspended_reason: suspendedReason,
           loading: false,
         }));
+        lastFetchedUserIdRef.current = user.id;
       } catch (err: any) {
         console.error('[useCompanyApproval] Error:', err);
-        if (err?.message === 'TIMEOUT') {
-          console.warn('[useCompanyApproval] Query timed out after 15s');
-          // Don't block - let ProtectedRoute show retry button
-          setStatus(prev => ({
-            ...prev,
-            approval_status: null,
-            loading: false,
-          }));
-        } else {
-          // SECURITY: Block access on any other error - fail secure
-          setStatus(prev => ({
-            ...prev,
-            approval_status: 'rejected',
-            rejection_reason: 'Erro ao verificar acesso. Tente novamente ou contate o suporte.',
-            company_name: null,
-            company_subdomain: null,
-            trial_type: null,
-            trial_ends_at: null,
-            trial_expired: false,
-            plan_name: null,
-            plan_price: null,
-            company_status: null,
-            suspended_reason: null,
-            loading: false,
-          }));
-        }
+        // Transient errors (timeout, network, auth) should NOT block as "rejected"
+        // Instead, set approval_status to null so ProtectedRoute shows retry UI
+        console.warn('[useCompanyApproval] Transient error - will allow retry instead of blocking');
+        setStatus(prev => ({
+          ...prev,
+          approval_status: null,
+          rejection_reason: null,
+          loading: false,
+        }));
       }
     };
 
@@ -240,5 +253,8 @@ export function useCompanyApproval(): CompanyApprovalStatus {
     }
   }, [status.company_status, refetch]);
 
-  return { ...status, refetch };
+  // Derive effective loading: also true if user changed but effect hasn't run yet (prevents flash)
+  const effectiveLoading = status.loading || (user != null && user.id !== lastFetchedUserIdRef.current);
+
+  return { ...status, loading: effectiveLoading, refetch };
 }
